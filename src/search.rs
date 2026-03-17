@@ -1,5 +1,6 @@
 use chrono::NaiveDate;
 use std::collections::{HashMap, HashSet};
+use zeroize::Zeroize;
 
 const SNIPPET_CONTEXT_CHARS: usize = 24;
 
@@ -148,6 +149,20 @@ impl SearchIndex {
             candidate_ids.retain(|doc_id| ids.binary_search(doc_id).is_ok());
         }
         Some(candidate_ids)
+    }
+
+    pub fn wipe(&mut self) {
+        for document in &mut self.documents {
+            document.entry_number.zeroize();
+            document.body.zeroize();
+            document.body_lower.zeroize();
+        }
+        self.documents.clear();
+
+        for (mut token, mut doc_ids) in std::mem::take(&mut self.postings) {
+            token.zeroize();
+            doc_ids.clear();
+        }
     }
 }
 

@@ -599,13 +599,21 @@ impl App {
         self.last_viewport_height = viewport_height.max(1);
         match event {
             Event::Key(key) => self.handle_key(key, viewport_height),
-            Event::Resize(_, _) => self.ensure_cursor_visible(viewport_height),
+            Event::Resize(width, height) => {
+                log::debug!("terminal resized to {}x{}", width, height);
+                self.ensure_cursor_visible(viewport_height);
+            }
             _ => {}
         }
     }
 
     fn handle_key(&mut self, key: KeyEvent, viewport_height: usize) {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return;
+        }
+
+        if key.code == KeyCode::F(12) {
+            self.lock_vault();
             return;
         }
 
@@ -1056,6 +1064,7 @@ impl App {
         let metadata = match vault::create_vault(&vault_path, &secret, epoch, "This Mac") {
             Ok(metadata) => metadata,
             Err(error) => {
+                log::warn!("vault setup failed");
                 wizard.error = Some(format!("Setup failed: {error}"));
                 return false;
             }
@@ -1070,6 +1079,7 @@ impl App {
 
         match vault::unlock_vault_with_device(&vault_path, &secret, metadata.device_id.clone()) {
             Ok(unlocked) => {
+                log::info!("vault created and unlocked");
                 self.vault = Some(unlocked);
                 self.search_index = None;
                 self.vault_path = vault_path.clone();
@@ -1085,6 +1095,7 @@ impl App {
                 true
             }
             Err(error) => {
+                log::warn!("vault unlock after setup failed");
                 wizard.error = Some(format!("Unlock failed: {error}"));
                 false
             }
@@ -1115,9 +1126,11 @@ impl App {
 
         match vault::unlock_vault_with_device(&self.vault_path, &secret, device_id.clone()) {
             Ok(unlocked) => {
+                log::info!("vault unlocked");
                 if let Err(register_error) =
                     vault::register_device(&self.vault_path, &device_id, &config.device_nickname)
                 {
+                    log::warn!("device registration failed");
                     *error = Some(format!("Device registration failed: {register_error}"));
                     return false;
                 }
@@ -1135,6 +1148,7 @@ impl App {
                 true
             }
             Err(_) => {
+                log::warn!("vault unlock failed");
                 *error = Some("Unlock failed. Check passphrase.".to_string());
                 false
             }
@@ -1217,6 +1231,23 @@ impl App {
         });
     }
 
+    fn lock_vault(&mut self) {
+        if self.vault.is_none() {
+            return;
+        }
+        if self.dirty {
+            self.autosave_current_date();
+        }
+        log::info!("locking vault and clearing in-memory state");
+        self.clear_sensitive_state();
+        self.vault = None;
+        self.overlay = Some(Overlay::UnlockPrompt {
+            input: String::new(),
+            error: Some("Vault locked. Enter passphrase.".to_string()),
+        });
+        self.flash_status("LOCKED.");
+    }
+
     fn set_closing_thought_from_input(&mut self, input: &str) {
         let normalized = normalize_overlay_text(input);
         let changed = self.closing_thought != normalized;
@@ -1239,6 +1270,32 @@ impl App {
         } else {
             "REVEAL CODES OFF."
         });
+    }
+
+    fn clear_sensitive_state(&mut self) {
+        self.buffer.wipe();
+        if let Some(mut closing_thought) = self.closing_thought.take() {
+            closing_thought.zeroize();
+        }
+        if let Some(mut find_query) = self.find_query.take() {
+            find_query.zeroize();
+        }
+        self.find_matches.clear();
+        self.current_match_idx = 0;
+        if let Some(index) = &mut self.search_index {
+            index.wipe();
+        }
+        self.search_index = None;
+        self.pending_search_jump = None;
+        self.pending_conflict = None;
+        self.pending_recovery_closing = None;
+        self.merge_context = None;
+        self.reveal_codes = false;
+        self.dirty = false;
+        self.draft_recovered = false;
+        self.last_save_kind = None;
+        self.last_save_time = None;
+        self.scroll_row = 0;
     }
 
     fn load_entry_dates(&mut self) -> BTreeSet<NaiveDate> {
@@ -1287,6 +1344,7 @@ impl App {
 
         match save_result {
             Ok(()) => {
+                log::info!("manual save completed");
                 self.dirty = false;
                 self.search_index = None;
                 self.merge_context = None;
@@ -1297,7 +1355,10 @@ impl App {
                 self.last_save_time = Some(Local::now());
                 self.flash_status("SAVED.");
             }
-            Err(_) => self.flash_status("SAVE FAILED."),
+            Err(_) => {
+                log::warn!("manual save failed");
+                self.flash_status("SAVE FAILED.")
+            }
         }
     }
 
@@ -1310,6 +1371,7 @@ impl App {
             .save_entry_draft(self.selected_date, &body, self.closing_thought.as_deref())
             .is_ok()
         {
+            log::debug!("autosave completed");
             self.last_save_kind = Some(SaveKind::Autosaved);
             self.last_save_time = Some(Local::now());
         }
@@ -1493,6 +1555,7 @@ impl App {
             .map_err(|error| format!("search load failed: {error}"))?;
         let document_count = documents.len();
         self.search_index = Some(SearchIndex::build(documents));
+        log::debug!("search index built with {} documents", document_count);
         self.flash_status(&format!("SEARCH INDEX READY ({document_count})."));
         Ok(())
     }

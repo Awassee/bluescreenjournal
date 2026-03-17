@@ -24,9 +24,10 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
-use std::{io, time::Duration};
+use std::{env, io, sync::OnceLock, time::Duration};
 
-const ROYAL_BLUE: Color = Color::Rgb(65, 105, 225);
+const MIN_WIDTH: u16 = 80;
+const MIN_HEIGHT: u16 = 25;
 
 pub fn run(initial_date: Option<NaiveDate>) -> io::Result<()> {
     enable_raw_mode()?;
@@ -77,6 +78,11 @@ fn run_loop(
 fn draw(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
     if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
+        draw_small_terminal_warning(frame, area);
         return;
     }
 
@@ -212,7 +218,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     }
     let status = app.status_text().unwrap_or("");
-    let strip = "F1Help F2Save F3Date F4Find F5Srch F6Repl F7Idx F9Close F10Quit F11Reveal";
+    let strip = "F1Help F2Save F3Date F4Find F5Srch F6Repl F7Idx F9Close F10Quit F11Rev F12Lock";
     let content = join_left_right(area.width as usize, status, strip);
     frame.render_widget(
         Paragraph::new(Line::from(content)).style(
@@ -222,6 +228,27 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         ),
         area,
     );
+}
+
+fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
+    frame.render_widget(Block::new().style(screen_style()), area);
+    let lines = vec![
+        centered_line(area.width as usize, "BLUESCREEN JOURNAL"),
+        Line::from(""),
+        centered_line(
+            area.width as usize,
+            &format!(
+                "TERMINAL TOO SMALL: NEED AT LEAST {}x{}",
+                MIN_WIDTH, MIN_HEIGHT
+            ),
+        ),
+        centered_line(
+            area.width as usize,
+            "Resize the window, then continue typing.",
+        ),
+        centered_line(area.width as usize, "F10 quits when the screen is cramped."),
+    ];
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
 fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u16, u16)> {
@@ -387,8 +414,9 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("+----------------------------------------------------+"),
         Line::from("| F1 Help         F2 Save        F3 Dates            |"),
         Line::from("| F4 Find         F5 Search      F6 Replace          |"),
-        Line::from("| F7 Index        F9 Closing     F10 Quit           |"),
-        Line::from("| F11 Reveal      Ctrl+S Save    Ctrl+F Find        |"),
+        Line::from("| F7 Index        F9 Closing     F10 Quit            |"),
+        Line::from("| F11 Reveal      F12 Lock       Ctrl+S Save         |"),
+        Line::from("| Ctrl+F Find                                          |"),
         Line::from("|                                                    |"),
         Line::from("| Arrows move cursor | PgUp/PgDn scroll              |"),
         Line::from("| Find updates as you type | Search runs on Enter    |"),
@@ -396,8 +424,8 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("| Index: Up/Down/PgUp/PgDn | Enter opens date        |"),
         Line::from("| Search: Tab fields | Enter search/open result      |"),
         Line::from("| Closing Thought lives above footer | F9 edits it   |"),
-        Line::from("| Reveal Codes shows DATE / ENTRY / TAG / MOOD / CLOSE |"),
-        Line::from("| Conflict: 1/2 view heads | 3 merge | F2 save merge |"),
+        Line::from("| Reveal shows DATE / ENTRY / TAG / MOOD / CLOSE     |"),
+        Line::from("| F12 locks and clears in-memory editor/search state |"),
         Line::from("+----------------------------------------------------+"),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
@@ -796,7 +824,9 @@ fn line_with_matches(
             spans.push(Span::raw(slice_by_chars(text, col, matched.start_col)));
         }
         let highlight = slice_by_chars(text, matched.start_col, matched.end_col);
-        let mut style = screen_style().fg(Color::Black).bg(Color::Yellow);
+        let mut style = screen_style()
+            .fg(color_palette().highlight_fg)
+            .bg(color_palette().highlight_bg);
         if current == Some(matched) {
             style = style.add_modifier(Modifier::BOLD);
         }
@@ -870,13 +900,13 @@ fn highlighted_snippet_spans(
     if highlight_end > highlight_start {
         let highlight_style = if selected {
             base_style
-                .fg(Color::Black)
-                .bg(Color::Yellow)
+                .fg(color_palette().highlight_fg)
+                .bg(color_palette().highlight_bg)
                 .add_modifier(Modifier::BOLD)
         } else {
             screen_style()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
+                .fg(color_palette().highlight_fg)
+                .bg(color_palette().highlight_bg)
                 .add_modifier(Modifier::BOLD)
         };
         spans.push(Span::styled(
@@ -895,7 +925,53 @@ fn highlighted_snippet_spans(
 }
 
 fn screen_style() -> Style {
-    Style::default().fg(Color::White).bg(ROYAL_BLUE)
+    let palette = color_palette();
+    Style::default().fg(palette.fg).bg(palette.bg)
+}
+
+#[derive(Clone, Copy)]
+struct ColorPalette {
+    fg: Color,
+    bg: Color,
+    highlight_fg: Color,
+    highlight_bg: Color,
+}
+
+fn color_palette() -> &'static ColorPalette {
+    static PALETTE: OnceLock<ColorPalette> = OnceLock::new();
+    PALETTE.get_or_init(|| {
+        let truecolor = env::var("COLORTERM")
+            .map(|value| {
+                let lowered = value.to_ascii_lowercase();
+                lowered.contains("truecolor") || lowered.contains("24bit")
+            })
+            .unwrap_or(false);
+        if truecolor {
+            return ColorPalette {
+                fg: Color::White,
+                bg: Color::Rgb(65, 105, 225),
+                highlight_fg: Color::Black,
+                highlight_bg: Color::Yellow,
+            };
+        }
+
+        let term = env::var("TERM").unwrap_or_default().to_ascii_lowercase();
+        if term.contains("256color") {
+            return ColorPalette {
+                fg: Color::Indexed(15),
+                bg: Color::Indexed(20),
+                highlight_fg: Color::Indexed(16),
+                highlight_bg: Color::Indexed(226),
+            };
+        }
+
+        ColorPalette {
+            fg: Color::White,
+            bg: Color::Blue,
+            highlight_fg: Color::Black,
+            highlight_bg: Color::Yellow,
+        }
+    })
 }
 
 #[cfg(test)]

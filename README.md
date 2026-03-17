@@ -20,6 +20,8 @@ just run
 Useful CLI commands:
 
 ```bash
+cargo run -- --help
+cargo run -- --debug
 cargo run -- export 2026-03-16
 cargo run -- backup
 ```
@@ -28,9 +30,23 @@ cargo run -- backup
 
 - `F9` edits the dedicated `Closing Thought` field
 - `F11` toggles `Reveal Codes`
+- `F12` locks the vault, drops the in-memory key, wipes the in-memory search index, and returns to the passphrase prompt
 - Reveal mode shows a retro metadata strip such as:
   - `⟦DATE:2026-03-16⟧ ⟦ENTRY:0000016⟧ ⟦TAG:work⟧ ⟦MOOD:7⟧ ⟦CLOSE:See you tomorrow.⟧`
 - Closing thoughts are encrypted inside revisions and drafts, and `bsj export YYYY-MM-DD` prints them as the final line
+
+## Logging And Debug
+
+- `--debug` enables verbose file logging
+- Log file: `~/Library/Logs/bsj/bsj.log`
+- Logs intentionally avoid journal plaintext and secrets
+
+Examples:
+
+```bash
+cargo run -- --debug
+cargo run -- --debug backup
+```
 
 ## Backups
 
@@ -100,6 +116,36 @@ Supported internal commands:
 - `insert_date_header`
 - `insert_closing_line`
 - `jump_today`
+
+## Packaging
+
+Install locally:
+
+```bash
+cargo install --path .
+```
+
+Optional Homebrew formula template:
+
+```ruby
+class Bsj < Formula
+  desc "BlueScreen Journal terminal journal"
+  homepage "https://example.com/bsj"
+  url "https://example.com/bsj/archive/v0.1.0.tar.gz"
+  sha256 "REPLACE_WITH_TARBALL_SHA256"
+  license "MIT"
+
+  depends_on "rust" => :build
+
+  def install
+    system "cargo", "install", *std_cargo_args(path: ".")
+  end
+
+  test do
+    assert_match "BlueScreen Journal", shell_output("#{bin}/bsj --help")
+  end
+end
+```
 
 ## Sync Backends
 
@@ -176,6 +222,7 @@ cargo run -- sync --backend webdav --remote https://dav.example.com/BlueScreenJo
 - Sync transports move encrypted revision blobs only.
 - Backup snapshots are encrypted before they hit disk.
 - `vault.json` contains vault metadata and KDF parameters, not journal plaintext.
+- `F12` locking drops the vault key and wipes in-memory editor/search state.
 - Credentials are expected from environment variables. Local secret storage is not written into the vault format.
 
 ## Tests
@@ -190,3 +237,15 @@ S3 and WebDAV smoke tests are skipped unless the corresponding environment varia
 
 - S3: `BSJ_S3_BUCKET`
 - WebDAV: `BSJ_WEBDAV_URL`
+
+## Manual Smoke Test Checklist
+
+Run these in both Terminal.app and iTerm2:
+
+1. Launch at `80x25` or larger and confirm the blue full-screen editor appears with header, body, and footer strip.
+2. Type a short entry, set a closing thought with `F9`, save with `F2`, quit, reopen, and confirm both persist.
+3. Press `F11` and confirm Reveal Codes appears; press it again and confirm normal view returns.
+4. Press `F12` and confirm the app returns to the passphrase prompt; unlock again and confirm the saved entry reloads.
+5. Resize below `80x25` and confirm the warning screen appears; resize back and confirm editing resumes cleanly.
+6. Run `cargo run -- backup`, confirm an encrypted file appears under `vault/backups/`, and confirm `rg` does not find plaintext journal text in that backup file.
+7. Run with `--debug` and confirm `~/Library/Logs/bsj/bsj.log` is written without journal plaintext.

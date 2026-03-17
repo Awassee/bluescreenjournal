@@ -1,4 +1,5 @@
 mod config;
+mod logging;
 mod search;
 mod sync;
 mod tui;
@@ -10,8 +11,19 @@ use secrecy::SecretString;
 use std::env;
 
 #[derive(Debug, Parser)]
-#[command(name = "bsj", about = "BlueScreen Journal")]
+#[command(
+    name = "bsj",
+    about = "BlueScreen Journal",
+    long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, append-only revisions, encrypted drafts, and encrypted sync targets.",
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj export 2026-03-16\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+)]
 struct Cli {
+    #[arg(
+        long,
+        global = true,
+        help = "Enable verbose debug logging to ~/Library/Logs/bsj/bsj.log"
+    )]
+    debug: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -52,6 +64,11 @@ enum SyncBackendArg {
 
 fn main() {
     let cli = Cli::parse();
+    if let Err(error) = logging::init(cli.debug) {
+        eprintln!("failed to initialize logging: {error}");
+        std::process::exit(1);
+    }
+    log::info!("bsj starting");
     match cli.command {
         Some(Command::Open { date }) => {
             let initial_date = match parse_date_arg("date", &date) {
@@ -62,7 +79,9 @@ fn main() {
                 }
             };
 
+            log::info!("launching TUI for requested date");
             if let Err(error) = tui::run(initial_date) {
+                log::error!("failed to launch TUI: {error}");
                 eprintln!("failed to launch TUI: {error}");
                 std::process::exit(1);
             }
@@ -77,6 +96,7 @@ fn main() {
             };
 
             if let Err(error) = run_cli_export(date) {
+                log::error!("export failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
             }
@@ -98,30 +118,36 @@ fn main() {
             };
 
             if let Err(error) = run_cli_search(&query, from, to) {
+                log::error!("search failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
             }
         }
         Some(Command::Sync { backend, remote }) => {
             if let Err(error) = run_cli_sync(backend, remote.as_deref()) {
+                log::error!("sync failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
             }
         }
         Some(Command::Backup) => {
             if let Err(error) = run_cli_backup() {
+                log::error!("backup failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
             }
         }
         Some(Command::Verify) => {
             if let Err(error) = run_cli_verify() {
+                log::error!("verify failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
             }
         }
         None => {
+            log::info!("launching TUI");
             if let Err(error) = tui::run(None) {
+                log::error!("failed to launch TUI: {error}");
                 eprintln!("failed to launch TUI: {error}");
                 std::process::exit(1);
             }
@@ -143,6 +169,7 @@ fn run_cli_search(
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
 ) -> Result<(), String> {
+    log::info!("running CLI search");
     if let (Some(from), Some(to)) = (from, to)
         && from > to
     {
@@ -180,6 +207,7 @@ fn run_cli_search(
 }
 
 fn run_cli_export(date: NaiveDate) -> Result<(), String> {
+    log::info!("running CLI export");
     let config = config::AppConfig::load_or_default();
     let vault = unlock_cli_vault(&config)?;
     let Some(text) = vault
@@ -196,6 +224,7 @@ fn run_cli_sync(
     backend_arg: Option<SyncBackendArg>,
     remote_arg: Option<&str>,
 ) -> Result<(), String> {
+    log::info!("running CLI sync");
     let mut config = config::AppConfig::load_or_default();
     let vault = unlock_cli_vault(&config)?;
     let backend_kind = resolve_sync_backend_kind(backend_arg, remote_arg)?;
@@ -236,6 +265,7 @@ fn run_cli_sync(
 }
 
 fn run_cli_verify() -> Result<(), String> {
+    log::info!("running CLI verify");
     let config = config::AppConfig::load_or_default();
     let vault = unlock_cli_vault(&config)?;
     let report = vault
@@ -257,6 +287,7 @@ fn run_cli_verify() -> Result<(), String> {
 }
 
 fn run_cli_backup() -> Result<(), String> {
+    log::info!("running CLI backup");
     let config = config::AppConfig::load_or_default();
     let vault = unlock_cli_vault(&config)?;
     let summary = vault

@@ -1,3 +1,5 @@
+use zeroize::Zeroize;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatchPos {
     pub row: usize,
@@ -243,6 +245,16 @@ impl TextBuffer {
             total += row_count;
         }
         total
+    }
+
+    pub fn wipe(&mut self) {
+        for line in &mut self.lines {
+            line.zeroize();
+        }
+        self.lines.clear();
+        self.lines.push(String::new());
+        self.cursor_row = 0;
+        self.cursor_col = 0;
     }
 }
 

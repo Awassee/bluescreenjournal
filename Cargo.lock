@@ -614,6 +614,7 @@ dependencies = [
  "crossterm 0.29.0",
  "dirs",
  "hex",
+ "log",
  "rand 0.8.5",
  "ratatui",
  "reqwest",
