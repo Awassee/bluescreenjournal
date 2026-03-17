@@ -16,5 +16,11 @@ install:
 package:
     ./scripts/package-release.sh
 
+package-universal:
+    ./scripts/package-release.sh --universal
+
 smoke-dist:
     ./scripts/smoke-release-install.sh
+
+audit-release:
+    ./scripts/audit-release.sh

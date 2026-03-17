@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: macos-14
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets
+
+      - name: Package host release bundle
+        run: ./scripts/package-release.sh
+
+      - name: Smoke test release bundle
+        run: ./scripts/smoke-release-install.sh
+
+      - name: Audit release artifacts
+        run: ./scripts/audit-release.sh --bundle "$(find dist -maxdepth 1 -type d -name 'bsj-*' | head -n 1)"

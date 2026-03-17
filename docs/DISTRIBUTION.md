@@ -17,7 +17,9 @@ The prebuilt release bundle is the intended end-user distribution format.
 dist/
   bsj-<version>-<target>/
     README.md
+    LICENSE
     VERSION
+    TARGETS
     install.sh
     bin/
       bsj
@@ -56,6 +58,17 @@ Optional target override:
 ./scripts/package-release.sh --target aarch64-apple-darwin
 ```
 
+Universal macOS bundle:
+
+```bash
+./scripts/package-release.sh --universal
+```
+
+Local requirement:
+
+- both `aarch64-apple-darwin` and `x86_64-apple-darwin` targets must be installed
+- if `rustup` is available, the script installs missing targets automatically
+
 Optional output directory override:
 
 ```bash
@@ -70,12 +83,18 @@ Smoke-test the bundle install:
 ./scripts/smoke-release-install.sh
 ```
 
+Run the release privacy audit directly:
+
+```bash
+./scripts/audit-release.sh
+```
+
 That script:
 
 1. builds or reuses a release bundle
 2. extracts it into a temp directory
 3. runs the bundled installer in `--prebuilt` mode
-4. verifies the installed binary, docs, man page, example config, and shell completions
+4. verifies the installed binary, docs, man page, example config, shell completions, and binary privacy audit
 
 ## Install From A Release Bundle
 
@@ -140,19 +159,52 @@ You still need to replace:
 
 The SHA256 is filled in automatically from the generated tarball.
 
+## GitHub Actions
+
+CI workflow:
+
+```text
+.github/workflows/ci.yml
+```
+
+- runs `cargo fmt --all --check`
+- runs `cargo clippy --all-targets -- -D warnings`
+- runs `cargo test --all-targets`
+- builds a host-architecture release bundle
+- runs smoke install and release audit checks
+
+Release workflow:
+
+```text
+.github/workflows/release.yml
+```
+
+- triggers on pushed `v*` tags
+- builds a universal macOS bundle
+- smoke-tests the bundled installer
+- uploads `.tar.gz` and `.sha256` assets to the GitHub Release
+
+Release automation flow:
+
+```bash
+git tag v0.1.1
+git push origin main --tags
+```
+
 ## Release Checklist
 
 1. Run `cargo fmt --all`
 2. Run `cargo clippy --all-targets -- -D warnings`
 3. Run `cargo test --all-targets`
-4. Run `./scripts/package-release.sh`
+4. Run `./scripts/package-release.sh --universal`
 5. Run `./scripts/smoke-release-install.sh`
-6. Run `bsj guide distribution` from the built binary
-7. Upload the tarball and `.sha256` file
-8. Update the Homebrew formula URL if you publish a formula
+6. Run `./scripts/audit-release.sh`
+7. Run `bsj guide distribution` from the built binary
+8. Push a `v*` tag to trigger `.github/workflows/release.yml`
+9. Update the Homebrew formula URL if you publish a formula
 
 ## Notes
 
 - No plaintext journal content is included in release artifacts.
-- Release bundles include docs, completions, and examples, not user vault data.
+- Release bundles include docs, completions, examples, and license text, not user vault data.
 - If you plan public redistribution, add explicit project licensing before publishing.

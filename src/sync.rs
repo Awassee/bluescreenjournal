@@ -990,7 +990,7 @@ mod tests {
     fn webdav_url_detection_matches_http_schemes() {
         assert!(looks_like_webdav_remote("https://dav.example.com/bsj/"));
         assert!(looks_like_webdav_remote("http://dav.example.com/bsj/"));
-        assert!(!looks_like_webdav_remote("/Users/sean/Documents/bsj-sync"));
+        assert!(!looks_like_webdav_remote("/tmp/bsj-sync"));
     }
 
     #[test]

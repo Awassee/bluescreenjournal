@@ -233,16 +233,33 @@ bsj --debug sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync
 
 ## Distribution
 
-Build a release bundle:
+Build a host-architecture release bundle:
 
 ```bash
 ./scripts/package-release.sh
 ```
 
+Build a universal macOS release bundle:
+
+```bash
+./scripts/package-release.sh --universal
+```
+
+Note:
+
+- local universal builds require both `aarch64-apple-darwin` and `x86_64-apple-darwin` targets
+- the GitHub release workflow installs both targets automatically
+
 Smoke-test the release bundle install:
 
 ```bash
 ./scripts/smoke-release-install.sh
+```
+
+Run the release privacy audit directly:
+
+```bash
+./scripts/audit-release.sh
 ```
 
 Artifacts:
@@ -251,6 +268,11 @@ Artifacts:
 - `dist/bsj-<version>-<target>.tar.gz`
 - `dist/bsj-<version>-<target>.tar.gz.sha256`
 - `dist/bsj-<version>-<target>/packaging/homebrew/bsj.rb`
+
+Automation:
+
+- `.github/workflows/ci.yml` runs lint, tests, packaging, smoke install, and the release audit
+- `.github/workflows/release.yml` builds a universal macOS bundle and publishes it on pushed `v*` tags
 
 ## Reference Docs
 
@@ -283,6 +305,8 @@ iTerm2:
 just fmt
 just clippy
 just test
+just audit-release
 just package
+just package-universal
 just smoke-dist
 ```

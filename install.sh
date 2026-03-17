@@ -211,6 +211,9 @@ install_prebuilt() {
   if [[ -f "$ROOT_DIR/README.md" ]]; then
     install -m 644 "$ROOT_DIR/README.md" "$final_doc_dir/README.md"
   fi
+  if [[ -f "$ROOT_DIR/LICENSE" ]]; then
+    install -m 644 "$ROOT_DIR/LICENSE" "$final_doc_dir/LICENSE"
+  fi
   if [[ -d "$ROOT_DIR/docs" ]]; then
     find "$ROOT_DIR/docs" -maxdepth 1 -type f -name '*.md' ! -name 'bsj.1' -exec install -m 644 {} "$final_doc_dir" \;
     if [[ -f "$ROOT_DIR/docs/config.example.json" ]]; then
