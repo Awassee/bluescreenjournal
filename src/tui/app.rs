@@ -1,5 +1,6 @@
 use crate::{
     config::{AppConfig, default_vault_path},
+    search::{SearchIndex, SearchQuery, SearchResult},
     tui::{
         buffer::{MatchPos, TextBuffer},
         calendar,
@@ -33,6 +34,7 @@ pub enum Overlay {
         input: String,
         error: Option<String>,
     },
+    Search(SearchOverlay),
     ReplacePrompt(ReplacePrompt),
     ReplaceConfirm(ReplaceConfirm),
     Index(IndexState),
@@ -188,6 +190,100 @@ pub struct ReplaceConfirm {
     pub current_idx: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchField {
+    Query,
+    From,
+    To,
+    Results,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchOverlay {
+    pub query_input: String,
+    pub from_input: String,
+    pub to_input: String,
+    pub active_field: SearchField,
+    pub results: Vec<SearchResult>,
+    pub selected: usize,
+    pub error: Option<String>,
+}
+
+impl SearchOverlay {
+    fn new(initial_query: Option<String>) -> Self {
+        Self {
+            query_input: initial_query.unwrap_or_default(),
+            from_input: String::new(),
+            to_input: String::new(),
+            active_field: SearchField::Query,
+            results: Vec::new(),
+            selected: 0,
+            error: None,
+        }
+    }
+
+    pub fn window(&self, max_rows: usize) -> (usize, usize) {
+        if self.results.is_empty() || max_rows == 0 {
+            return (0, 0);
+        }
+        let max_rows = max_rows.max(1);
+        let mut start = self.selected.saturating_sub(max_rows / 2);
+        let max_start = self.results.len().saturating_sub(max_rows);
+        if start > max_start {
+            start = max_start;
+        }
+        let end = (start + max_rows).min(self.results.len());
+        (start, end)
+    }
+
+    fn active_input_mut(&mut self) -> Option<&mut String> {
+        match self.active_field {
+            SearchField::Query => Some(&mut self.query_input),
+            SearchField::From => Some(&mut self.from_input),
+            SearchField::To => Some(&mut self.to_input),
+            SearchField::Results => None,
+        }
+    }
+
+    fn clear_results(&mut self) {
+        self.results.clear();
+        self.selected = 0;
+        if self.active_field == SearchField::Results {
+            self.active_field = SearchField::Query;
+        }
+    }
+
+    fn cycle_field(&mut self) {
+        self.active_field = match self.active_field {
+            SearchField::Query => SearchField::From,
+            SearchField::From => SearchField::To,
+            SearchField::To if self.results.is_empty() => SearchField::Query,
+            SearchField::To => SearchField::Results,
+            SearchField::Results => SearchField::Query,
+        };
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        if self.results.is_empty() {
+            return;
+        }
+        let next = self.selected as isize + delta;
+        self.selected = next.clamp(0, self.results.len() as isize - 1) as usize;
+    }
+
+    fn page_up(&mut self, amount: usize) {
+        self.move_selection(-(amount.max(1) as isize));
+    }
+
+    fn page_down(&mut self, amount: usize) {
+        self.move_selection(amount.max(1) as isize);
+    }
+
+    fn selected_result(&self) -> Option<&SearchResult> {
+        self.results.get(self.selected)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexState {
     pub items: Vec<IndexEntry>,
@@ -244,6 +340,13 @@ struct StatusMessage {
     expires_at: Instant,
 }
 
+#[derive(Clone, Debug)]
+struct SearchJump {
+    match_text: String,
+    row: usize,
+    start_col: usize,
+}
+
 #[derive(Clone, Copy, Debug)]
 enum SaveKind {
     Saved,
@@ -266,6 +369,9 @@ pub struct App {
     last_save_kind: Option<SaveKind>,
     last_save_time: Option<DateTime<Local>>,
     draft_recovered: bool,
+    search_index: Option<SearchIndex>,
+    pending_search_jump: Option<SearchJump>,
+    last_viewport_height: usize,
     last_autosave_check: Instant,
 }
 
@@ -312,6 +418,9 @@ impl App {
             last_save_kind: None,
             last_save_time: None,
             draft_recovered: false,
+            search_index: None,
+            pending_search_jump: None,
+            last_viewport_height: 23,
             last_autosave_check: Instant::now(),
         }
     }
@@ -411,6 +520,7 @@ impl App {
     }
 
     pub fn handle_event(&mut self, event: Event, viewport_height: usize) {
+        self.last_viewport_height = viewport_height.max(1);
         match event {
             Event::Key(key) => self.handle_key(key, viewport_height),
             Event::Resize(_, _) => self.ensure_cursor_visible(viewport_height),
@@ -444,6 +554,7 @@ impl App {
         match key.code {
             KeyCode::F(1) => self.overlay = Some(Overlay::Help),
             KeyCode::F(3) => self.open_date_picker(),
+            KeyCode::F(5) => self.open_search_overlay(),
             KeyCode::F(6) => self.overlay = Some(Overlay::ReplacePrompt(ReplacePrompt::new())),
             KeyCode::F(7) => self.open_index_overlay(),
             KeyCode::F(10) => self.overlay = Some(Overlay::QuitConfirm),
@@ -557,22 +668,90 @@ impl App {
                 KeyCode::Esc | KeyCode::F(4) => keep_overlay = false,
                 KeyCode::Backspace => {
                     input.pop();
-                    *error = None;
+                    self.update_incremental_find(input, viewport_height, error);
                 }
                 KeyCode::Enter => {
-                    let query = input.trim().to_string();
-                    if query.is_empty() {
-                        self.find_query = None;
-                        self.find_matches.clear();
-                        self.flash_status("FIND CLEARED.");
+                    if input.trim().is_empty() {
+                        self.clear_find_state();
                     } else {
-                        self.apply_find(query, viewport_height, error);
+                        self.select_next_find_match(viewport_height);
                     }
                     keep_overlay = false;
                 }
+                KeyCode::Down => self.select_next_find_match(viewport_height),
+                KeyCode::Up => self.select_previous_find_match(viewport_height),
                 KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
                     input.push(ch);
-                    *error = None;
+                    self.update_incremental_find(input, viewport_height, error);
+                }
+                _ => {}
+            },
+            Overlay::Search(search) => match key.code {
+                KeyCode::Esc | KeyCode::F(5) => keep_overlay = false,
+                KeyCode::Tab => {
+                    search.cycle_field();
+                    search.error = None;
+                }
+                KeyCode::Backspace => {
+                    if let Some(input) = search.active_input_mut() {
+                        input.pop();
+                        search.clear_results();
+                        search.error = None;
+                    }
+                }
+                KeyCode::Up => {
+                    if search.active_field == SearchField::Results {
+                        search.move_selection(-1);
+                    }
+                }
+                KeyCode::Down => {
+                    if search.active_field == SearchField::Results {
+                        search.move_selection(1);
+                    } else if !search.results.is_empty() {
+                        search.active_field = SearchField::Results;
+                    }
+                }
+                KeyCode::PageUp => {
+                    if search.active_field == SearchField::Results {
+                        search.page_up(viewport_height.saturating_sub(7));
+                    }
+                }
+                KeyCode::PageDown => {
+                    if search.active_field == SearchField::Results {
+                        search.page_down(viewport_height.saturating_sub(7));
+                    }
+                }
+                KeyCode::Home => {
+                    if search.active_field == SearchField::Results {
+                        search.selected = 0;
+                    }
+                }
+                KeyCode::End => {
+                    if search.active_field == SearchField::Results && !search.results.is_empty() {
+                        search.selected = search.results.len() - 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    if search.active_field == SearchField::Results {
+                        if let Some(result) = search.selected_result().cloned() {
+                            self.open_search_result(&result, viewport_height);
+                        }
+                        keep_overlay = false;
+                    } else {
+                        self.run_global_search(search);
+                    }
+                }
+                KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
+                    let accepts_char = match search.active_field {
+                        SearchField::Query => true,
+                        SearchField::From | SearchField::To => ch.is_ascii_digit() || ch == '-',
+                        SearchField::Results => false,
+                    };
+                    if accepts_char && let Some(input) = search.active_input_mut() {
+                        input.push(ch);
+                        search.clear_results();
+                        search.error = None;
+                    }
                 }
                 _ => {}
             },
@@ -762,6 +941,7 @@ impl App {
         match vault::unlock_vault(&vault_path, &secret) {
             Ok(unlocked) => {
                 self.vault = Some(unlocked);
+                self.search_index = None;
                 self.vault_path = vault_path.clone();
                 let mut config = AppConfig::load_or_default();
                 config.vault_path = vault_path;
@@ -791,6 +971,7 @@ impl App {
         match vault::unlock_vault(&self.vault_path, &secret) {
             Ok(unlocked) => {
                 self.vault = Some(unlocked);
+                self.search_index = None;
                 self.flash_status("UNLOCKED.");
                 self.load_selected_date();
                 true
@@ -852,6 +1033,10 @@ impl App {
         )));
     }
 
+    fn open_search_overlay(&mut self) {
+        self.overlay = Some(Overlay::Search(SearchOverlay::new(self.find_query.clone())));
+    }
+
     fn open_index_overlay(&mut self) {
         let items = self.load_index_entries();
         self.overlay = Some(Overlay::Index(IndexState::new(items, self.selected_date)));
@@ -892,6 +1077,7 @@ impl App {
         match vault.save_revision(self.selected_date, &body) {
             Ok(()) => {
                 self.dirty = false;
+                self.search_index = None;
                 self.last_save_kind = Some(SaveKind::Saved);
                 self.last_save_time = Some(Local::now());
                 self.flash_status("SAVED.");
@@ -919,6 +1105,7 @@ impl App {
         self.refresh_find_matches();
         self.draft_recovered = recovered;
         self.dirty = recovered;
+        self.apply_pending_search_jump(None);
         if recovered {
             self.flash_status("DRAFT RECOVERED.");
         } else {
@@ -926,13 +1113,36 @@ impl App {
         }
     }
 
-    fn apply_find(&mut self, query: String, viewport_height: usize, error: &mut Option<String>) {
+    fn update_incremental_find(
+        &mut self,
+        query: &str,
+        viewport_height: usize,
+        error: &mut Option<String>,
+    ) {
+        let query = query.trim();
+        if query.is_empty() {
+            self.clear_find_state();
+            *error = None;
+            return;
+        }
+        self.apply_find(query.to_string(), viewport_height, error, false);
+    }
+
+    fn apply_find(
+        &mut self,
+        query: String,
+        viewport_height: usize,
+        error: &mut Option<String>,
+        flash_status: bool,
+    ) {
         self.find_query = Some(query.clone());
         self.find_matches = self.buffer.find(&query);
         if self.find_matches.is_empty() {
             self.current_match_idx = 0;
             *error = Some("No matches.".to_string());
-            self.flash_status("NOT FOUND.");
+            if flash_status {
+                self.flash_status("NOT FOUND.");
+            }
             return;
         }
         *error = None;
@@ -947,7 +1157,159 @@ impl App {
         if let Some(matched) = self.current_match() {
             self.buffer.set_cursor(matched.row, matched.start_col);
             self.ensure_cursor_visible(viewport_height);
-            self.flash_status("FOUND.");
+            if flash_status {
+                self.flash_status("FOUND.");
+            }
+        }
+    }
+
+    fn clear_find_state(&mut self) {
+        self.find_query = None;
+        self.find_matches.clear();
+        self.current_match_idx = 0;
+        self.flash_status("FIND CLEARED.");
+    }
+
+    fn select_next_find_match(&mut self, viewport_height: usize) {
+        if self.find_matches.is_empty() {
+            return;
+        }
+        self.current_match_idx = (self.current_match_idx + 1) % self.find_matches.len();
+        if let Some(matched) = self.current_match() {
+            self.buffer.set_cursor(matched.row, matched.start_col);
+            self.ensure_cursor_visible(viewport_height);
+        }
+    }
+
+    fn select_previous_find_match(&mut self, viewport_height: usize) {
+        if self.find_matches.is_empty() {
+            return;
+        }
+        if self.current_match_idx == 0 {
+            self.current_match_idx = self.find_matches.len() - 1;
+        } else {
+            self.current_match_idx -= 1;
+        }
+        if let Some(matched) = self.current_match() {
+            self.buffer.set_cursor(matched.row, matched.start_col);
+            self.ensure_cursor_visible(viewport_height);
+        }
+    }
+
+    fn run_global_search(&mut self, search: &mut SearchOverlay) {
+        let query = search.query_input.trim().to_string();
+        if query.is_empty() {
+            search.error = Some("Query cannot be empty.".to_string());
+            return;
+        }
+
+        let from = match parse_optional_overlay_date("from", &search.from_input) {
+            Ok(date) => date,
+            Err(error) => {
+                search.error = Some(error);
+                return;
+            }
+        };
+        let to = match parse_optional_overlay_date("to", &search.to_input) {
+            Ok(date) => date,
+            Err(error) => {
+                search.error = Some(error);
+                return;
+            }
+        };
+        if let (Some(from), Some(to)) = (from, to)
+            && from > to
+        {
+            search.error = Some("FROM cannot be after TO.".to_string());
+            return;
+        }
+
+        if let Err(error) = self.ensure_search_index() {
+            search.error = Some(error);
+            return;
+        }
+
+        let results = self
+            .search_index
+            .as_ref()
+            .expect("search index exists")
+            .search(&SearchQuery {
+                text: query,
+                from,
+                to,
+            });
+
+        search.results = results;
+        search.selected = 0;
+        search.error = if search.results.is_empty() {
+            Some("No matches.".to_string())
+        } else {
+            None
+        };
+        search.active_field = if search.results.is_empty() {
+            SearchField::Query
+        } else {
+            SearchField::Results
+        };
+    }
+
+    fn ensure_search_index(&mut self) -> Result<(), String> {
+        if self.search_index.is_some() {
+            return Ok(());
+        }
+        let Some(vault) = &self.vault else {
+            return Err("Vault locked.".to_string());
+        };
+        let documents = vault
+            .load_search_documents()
+            .map_err(|error| format!("search load failed: {error}"))?;
+        let document_count = documents.len();
+        self.search_index = Some(SearchIndex::build(documents));
+        self.flash_status(&format!("SEARCH INDEX READY ({document_count})."));
+        Ok(())
+    }
+
+    fn open_search_result(&mut self, result: &SearchResult, viewport_height: usize) {
+        self.pending_search_jump = Some(SearchJump {
+            match_text: result.matched_text.clone(),
+            row: result.row,
+            start_col: result.start_col,
+        });
+        self.open_date(result.date);
+        if !matches!(self.overlay, Some(Overlay::RecoverDraft { .. })) {
+            self.apply_pending_search_jump(Some(viewport_height));
+        }
+        self.flash_status("MATCH OPENED.");
+    }
+
+    fn apply_pending_search_jump(&mut self, viewport_height: Option<usize>) {
+        let Some(jump) = self.pending_search_jump.take() else {
+            return;
+        };
+
+        self.find_query = Some(jump.match_text.clone());
+        self.refresh_find_matches();
+        if self.find_matches.is_empty() {
+            return;
+        }
+
+        self.current_match_idx = self
+            .find_matches
+            .iter()
+            .position(|matched| matched.row == jump.row && matched.start_col == jump.start_col)
+            .unwrap_or_else(|| {
+                self.find_matches
+                    .iter()
+                    .position(|matched| {
+                        matched.row > jump.row
+                            || (matched.row == jump.row && matched.start_col >= jump.start_col)
+                    })
+                    .unwrap_or(0)
+            });
+
+        if let Some(matched) = self.current_match() {
+            self.buffer.set_cursor(matched.row, matched.start_col);
+            self.ensure_cursor_visible(viewport_height.unwrap_or(self.last_viewport_height));
         }
     }
 
@@ -1062,9 +1424,22 @@ fn expand_tilde(input: &str) -> PathBuf {
     PathBuf::from(input)
 }
 
+fn parse_optional_overlay_date(label: &str, input: &str) -> Result<Option<NaiveDate>, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        .map(Some)
+        .map_err(|_| format!("Invalid {label} date. Use YYYY-MM-DD."))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{App, IndexState, resolve_recovery_text};
+    use super::{
+        App, IndexState, SearchField, SearchOverlay, parse_optional_overlay_date,
+        resolve_recovery_text,
+    };
     use crate::vault::IndexEntry;
     use chrono::{Duration, NaiveDate};
     use crossterm::event::Event;
@@ -1110,5 +1485,39 @@ mod tests {
         let initial = NaiveDate::from_ymd_opt(2026, 4, 2).expect("date");
         let app = App::with_initial_date(Some(initial));
         assert!(app.header_date_time_label().starts_with("2026-04-02"));
+    }
+
+    #[test]
+    fn search_overlay_cycles_into_results_when_present() {
+        let mut overlay = SearchOverlay::new(None);
+        overlay.results.push(crate::search::SearchResult {
+            date: NaiveDate::from_ymd_opt(2026, 3, 16).expect("date"),
+            entry_number: "0000016".to_string(),
+            snippet: crate::search::Snippet {
+                text: "note".to_string(),
+                highlight_start: 0,
+                highlight_end: 4,
+            },
+            row: 0,
+            start_col: 0,
+            end_col: 4,
+            matched_text: "note".to_string(),
+        });
+        overlay.cycle_field();
+        overlay.cycle_field();
+        overlay.cycle_field();
+        assert_eq!(overlay.active_field, SearchField::Results);
+    }
+
+    #[test]
+    fn overlay_date_parser_accepts_blank_and_valid_dates() {
+        assert_eq!(
+            parse_optional_overlay_date("from", "").expect("blank"),
+            None
+        );
+        assert_eq!(
+            parse_optional_overlay_date("to", "2026-03-16").expect("date"),
+            Some(NaiveDate::from_ymd_opt(2026, 3, 16).expect("date"))
+        );
     }
 }

@@ -4,7 +4,8 @@ pub mod calendar;
 
 use crate::tui::{
     app::{
-        App, DatePicker, IndexState, Overlay, ReplacePrompt, ReplaceStage, SetupStep, SetupWizard,
+        App, DatePicker, IndexState, Overlay, ReplacePrompt, ReplaceStage, SearchField,
+        SearchOverlay, SetupStep, SetupWizard,
     },
     buffer::MatchPos,
 };
@@ -169,8 +170,9 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
     let status = app.status_text().unwrap_or("");
     let sep = if status.is_empty() { "" } else { " | " };
-    let strip =
-        format!("{status}{sep}F1 Help  F2 Save  F3 Dates  F4 Find  F6 Replace  F7 Index  F10 Quit");
+    let strip = format!(
+        "{status}{sep}F1 Help  F2 Save  F3 Dates  F4 Find  F5 Search  F6 Replace  F7 Index  F10 Quit"
+    );
     frame.render_widget(
         Paragraph::new(Line::from(strip)).style(
             screen_style()
@@ -189,6 +191,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::Help => popup_rect(body_area, 72, 15),
         Overlay::DatePicker(_) => popup_rect(body_area, 38, 12),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
+        Overlay::Search(_) => popup_rect(body_area, 84, 16),
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
         Overlay::Index(_) => popup_rect(body_area, 78, 14),
@@ -234,8 +237,9 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         }
         Overlay::FindPrompt { input, error } => {
             let lines = vec![
-                Line::from("Find in entry, then press Enter:"),
+                Line::from("Find in entry (live):"),
                 Line::from(format!("> {input}")),
+                Line::from("Up/Down move matches  Enter closes"),
                 Line::from(error.clone().unwrap_or_default()),
             ];
             frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
@@ -244,6 +248,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
                 (inner.y + 1).min(inner.bottom().saturating_sub(1)),
             ))
         }
+        Overlay::Search(search) => draw_search_overlay(frame, inner, search),
         Overlay::ReplacePrompt(prompt) => draw_replace_prompt_overlay(frame, inner, prompt),
         Overlay::ReplaceConfirm(confirm) => {
             let current = confirm
@@ -317,12 +322,15 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
         Line::from("+----------------------------------------------------+"),
         Line::from("| F1 Help         F2 Save        F3 Dates            |"),
-        Line::from("| F4 Find         F6 Replace     F7 Index            |"),
-        Line::from("| F10 Quit        Ctrl+S Save    Ctrl+F Find         |"),
+        Line::from("| F4 Find         F5 Search      F6 Replace          |"),
+        Line::from("| F7 Index        F10 Quit       Ctrl+S Save         |"),
+        Line::from("| Ctrl+F Find                                      |"),
         Line::from("|                                                    |"),
         Line::from("| Arrows move cursor | PgUp/PgDn scroll              |"),
+        Line::from("| Find updates as you type | Search runs on Enter    |"),
         Line::from("| Calendar: Arrows move | PgUp/PgDn month            |"),
         Line::from("| Index: Up/Down/PgUp/PgDn | Enter opens date        |"),
+        Line::from("| Search: Tab fields | Enter search/open result      |"),
         Line::from("| Save appends revision | Autosave keeps draft       |"),
         Line::from("| Recovery prompt appears when draft is newer        |"),
         Line::from("+----------------------------------------------------+"),
@@ -367,6 +375,99 @@ fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePick
     lines.push(Line::from("Arrows move  PgUp/PgDn month"));
     lines.push(Line::from("Enter open   Esc close"));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+}
+
+fn draw_search_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    search: &SearchOverlay,
+) -> Option<(u16, u16)> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+
+    let mut lines = vec![
+        input_line(
+            "Query",
+            &search.query_input,
+            search.active_field == SearchField::Query,
+        ),
+        input_line(
+            "From ",
+            &search.from_input,
+            search.active_field == SearchField::From,
+        ),
+        input_line(
+            "To   ",
+            &search.to_input,
+            search.active_field == SearchField::To,
+        ),
+        Line::from(""),
+        Line::from("DATE         ENTRY NO  LOCATION  SNIPPET"),
+        Line::from("----------------------------------------"),
+    ];
+
+    if search.results.is_empty() {
+        lines.push(Line::from("No results yet. Enter runs the search."));
+    } else {
+        let visible_rows = area.height.saturating_sub(8) as usize;
+        let (start, end) = search.window(visible_rows);
+        let preview_width = area.width.saturating_sub(34) as usize;
+        for (offset, result) in search.results[start..end].iter().enumerate() {
+            let absolute_idx = start + offset;
+            let mut spans = Vec::new();
+            let row_style =
+                if absolute_idx == search.selected && search.active_field == SearchField::Results {
+                    screen_style().add_modifier(Modifier::REVERSED)
+                } else {
+                    screen_style()
+                };
+            spans.push(Span::styled(
+                format!(
+                    "{:<10}  {:<8}  {:>2}:{:<2}  ",
+                    result.date.format("%Y-%m-%d"),
+                    result.entry_number,
+                    result.row + 1,
+                    result.start_col + 1
+                ),
+                row_style,
+            ));
+            spans.extend(highlighted_snippet_spans(
+                &truncate_snippet(&result.snippet.text, preview_width),
+                result.snippet.highlight_start.min(preview_width),
+                result.snippet.highlight_end.min(preview_width),
+                absolute_idx == search.selected && search.active_field == SearchField::Results,
+            ));
+            lines.push(Line::from(spans));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "Tab fields  Enter search/open  Up/Down move  Esc close",
+    ));
+    if let Some(error) = &search.error {
+        lines.push(Line::from(error.clone()));
+    }
+
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+
+    let cursor_y = match search.active_field {
+        SearchField::Query => area.y,
+        SearchField::From => area.y + 1,
+        SearchField::To => area.y + 2,
+        SearchField::Results => return None,
+    };
+    let cursor_x = match search.active_field {
+        SearchField::Query => area.x + 9 + search.query_input.chars().count() as u16,
+        SearchField::From => area.x + 9 + search.from_input.chars().count() as u16,
+        SearchField::To => area.x + 9 + search.to_input.chars().count() as u16,
+        SearchField::Results => area.x,
+    };
+    Some((
+        cursor_x.min(area.right().saturating_sub(1)),
+        cursor_y.min(area.bottom().saturating_sub(1)),
+    ))
 }
 
 fn draw_replace_prompt_overlay(
@@ -475,6 +576,7 @@ fn overlay_title(overlay: &Overlay) -> &'static str {
         Overlay::Help => " Help ",
         Overlay::DatePicker(_) => " Dates ",
         Overlay::FindPrompt { .. } => " Find ",
+        Overlay::Search(_) => " Search ",
         Overlay::ReplacePrompt(_) => " Replace ",
         Overlay::ReplaceConfirm(_) => " Replace ",
         Overlay::Index(_) => " Index ",
@@ -551,6 +653,55 @@ fn join_left_right(total_width: usize, left: &str, right: &str) -> String {
 
 fn truncate_to_width(input: &str, width: usize) -> String {
     input.chars().take(width).collect()
+}
+
+fn truncate_snippet(input: &str, width: usize) -> String {
+    truncate_to_width(input, width)
+}
+
+fn highlighted_snippet_spans(
+    text: &str,
+    highlight_start: usize,
+    highlight_end: usize,
+    selected: bool,
+) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let base_style = if selected {
+        screen_style().add_modifier(Modifier::REVERSED)
+    } else {
+        screen_style()
+    };
+    if highlight_start > 0 {
+        spans.push(Span::styled(
+            slice_by_chars(text, 0, highlight_start),
+            base_style,
+        ));
+    }
+    if highlight_end > highlight_start {
+        let highlight_style = if selected {
+            base_style
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            screen_style()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        };
+        spans.push(Span::styled(
+            slice_by_chars(text, highlight_start, highlight_end),
+            highlight_style,
+        ));
+    }
+    let total_chars = text.chars().count();
+    if highlight_end < total_chars {
+        spans.push(Span::styled(
+            slice_by_chars(text, highlight_end, total_chars),
+            base_style,
+        ));
+    }
+    spans
 }
 
 fn screen_style() -> Style {

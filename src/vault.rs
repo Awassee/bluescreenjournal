@@ -1,3 +1,4 @@
+use crate::search::SearchDocument;
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
@@ -312,6 +313,26 @@ impl UnlockedVault {
         }
 
         Ok(entries)
+    }
+
+    pub fn load_search_documents(&self) -> VaultResult<Vec<SearchDocument>> {
+        let epoch = self.metadata.epoch_date()?;
+        let mut dates = self.list_entry_dates()?;
+        dates.sort_unstable_by(|left, right| right.cmp(left));
+
+        let mut documents = Vec::with_capacity(dates.len());
+        for date in dates {
+            let Some(revision) = self.latest_revision_info(date)? else {
+                continue;
+            };
+            documents.push(SearchDocument {
+                date,
+                entry_number: compute_entry_number(epoch, date),
+                body: self.read_revision_body(date, &revision)?,
+            });
+        }
+
+        Ok(documents)
     }
 
     fn latest_revision_info(&self, date: NaiveDate) -> VaultResult<Option<RevisionInfo>> {
