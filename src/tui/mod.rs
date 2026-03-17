@@ -1,8 +1,14 @@
 pub mod app;
 pub mod buffer;
+pub mod calendar;
 
-use crate::tui::app::{App, Overlay, ReplacePrompt, ReplaceStage, SetupStep, SetupWizard};
-use crate::tui::buffer::MatchPos;
+use crate::tui::{
+    app::{
+        App, DatePicker, IndexState, Overlay, ReplacePrompt, ReplaceStage, SetupStep, SetupWizard,
+    },
+    buffer::MatchPos,
+};
+use chrono::{Datelike, NaiveDate};
 use crossterm::{
     cursor,
     event::{self},
@@ -21,7 +27,7 @@ use std::{io, time::Duration};
 
 const ROYAL_BLUE: Color = Color::Rgb(65, 105, 225);
 
-pub fn run() -> io::Result<()> {
+pub fn run(initial_date: Option<NaiveDate>) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
@@ -31,7 +37,7 @@ pub fn run() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    let result = run_loop(&mut terminal);
+    let result = run_loop(&mut terminal, initial_date);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), cursor::Show, LeaveAlternateScreen)?;
@@ -44,8 +50,11 @@ pub fn run() -> io::Result<()> {
     result
 }
 
-fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
-    let mut app = App::new();
+fn run_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    initial_date: Option<NaiveDate>,
+) -> io::Result<()> {
+    let mut app = App::with_initial_date(initial_date);
     let poll_timeout = Duration::from_millis(80);
 
     while !app.should_quit() {
@@ -100,7 +109,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
     let left = format!(
         "PERSONAL JOURNAL  {}  ENTRY NO. {}",
-        app.now_time_label(),
+        app.header_date_time_label(),
         app.entry_number_label()
     );
     let mut right_parts = vec![
@@ -178,11 +187,11 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::SetupWizard(_) => popup_rect(body_area, 76, 9),
         Overlay::UnlockPrompt { .. } => popup_rect(body_area, 64, 6),
         Overlay::Help => popup_rect(body_area, 72, 15),
-        Overlay::DatePrompt { .. } => popup_rect(body_area, 50, 6),
+        Overlay::DatePicker(_) => popup_rect(body_area, 38, 12),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
-        Overlay::Index => popup_rect(body_area, 70, 10),
+        Overlay::Index(_) => popup_rect(body_area, 78, 14),
         Overlay::RecoverDraft { .. } => popup_rect(body_area, 44, 5),
         Overlay::QuitConfirm => popup_rect(body_area, 44, 5),
     };
@@ -219,17 +228,9 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
             draw_help_overlay(frame, inner);
             None
         }
-        Overlay::DatePrompt { input, error } => {
-            let lines = vec![
-                Line::from("Jump to date (YYYY-MM-DD):"),
-                Line::from(format!("> {input}")),
-                Line::from(error.clone().unwrap_or_default()),
-            ];
-            frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
-            Some((
-                (inner.x + 2 + input.chars().count() as u16).min(inner.right().saturating_sub(1)),
-                (inner.y + 1).min(inner.bottom().saturating_sub(1)),
-            ))
+        Overlay::DatePicker(picker) => {
+            draw_date_picker_overlay(frame, inner, picker);
+            None
         }
         Overlay::FindPrompt { input, error } => {
             let lines = vec![
@@ -262,16 +263,8 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
             frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
             None
         }
-        Overlay::Index => {
-            let lines = vec![
-                Line::from("INDEX (MILESTONE 4 PLACEHOLDER)"),
-                Line::from("--------------------------------"),
-                Line::from("2026-03-14  Entry 0000000  \"No encrypted entries yet.\""),
-                Line::from("2026-03-15  Entry 0000000  \"Save to create revisions.\""),
-                Line::from("2026-03-16  Entry 0000001  \"Autosave drafts stay encrypted.\""),
-                Line::from("Esc / Enter / F7 to close"),
-            ];
-            frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
+        Overlay::Index(index) => {
+            draw_index_overlay(frame, inner, index);
             None
         }
         Overlay::RecoverDraft { .. } => {
@@ -328,11 +321,51 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("| F10 Quit        Ctrl+S Save    Ctrl+F Find         |"),
         Line::from("|                                                    |"),
         Line::from("| Arrows move cursor | PgUp/PgDn scroll              |"),
-        Line::from("| Enter newline      | Autosave every ~2.5 seconds   |"),
-        Line::from("| Save appends a revision | Autosave writes draft    |"),
+        Line::from("| Calendar: Arrows move | PgUp/PgDn month            |"),
+        Line::from("| Index: Up/Down/PgUp/PgDn | Enter opens date        |"),
+        Line::from("| Save appends revision | Autosave keeps draft       |"),
         Line::from("| Recovery prompt appears when draft is newer        |"),
         Line::from("+----------------------------------------------------+"),
     ];
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+}
+
+fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePicker) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let mut lines = Vec::new();
+    lines.push(centered_line(area.width as usize, &picker.month_label()));
+
+    let weekday_line = calendar::weekday_headers()
+        .into_iter()
+        .map(|day| format!("{:>2} ", weekday_label(day)))
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    lines.push(Line::from(weekday_line));
+
+    for week in picker.grid() {
+        let mut spans = Vec::new();
+        for date in week {
+            let mut style = screen_style();
+            if date.month() != picker.month.month() {
+                style = style.add_modifier(Modifier::DIM);
+            }
+            if picker.has_entry(date) {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            if date == picker.selected_date {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
+            spans.push(Span::styled(format!("{:>2} ", date.day()), style));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    lines.push(Line::from("Arrows move  PgUp/PgDn month"));
+    lines.push(Line::from("Enter open   Esc close"));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
@@ -367,6 +400,46 @@ fn draw_replace_prompt_overlay(
     ))
 }
 
+fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let mut lines = vec![
+        Line::from("DATE         ENTRY NO  CF        PREVIEW"),
+        Line::from("----------------------------------------"),
+    ];
+
+    if index.items.is_empty() {
+        lines.push(Line::from("No saved entries."));
+    } else {
+        let visible_rows = area.height.saturating_sub(4) as usize;
+        let (start, end) = index.window(visible_rows);
+        let preview_width = area.width.saturating_sub(31) as usize;
+        for (offset, entry) in index.items[start..end].iter().enumerate() {
+            let absolute_idx = start + offset;
+            let conflict = if entry.has_conflict { "CONFLICT" } else { "-" };
+            let row = format!(
+                "{:<10}  {:<8}  {:<8}  {}",
+                entry.date.format("%Y-%m-%d"),
+                entry.entry_number,
+                conflict,
+                truncate_to_width(&entry.preview, preview_width)
+            );
+            let style = if absolute_idx == index.selected {
+                screen_style().add_modifier(Modifier::REVERSED)
+            } else {
+                screen_style()
+            };
+            lines.push(Line::from(Span::styled(row, style)));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from("Up/Down/PgUp/PgDn move  Enter open  Esc close"));
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+}
+
 fn input_line(label: &str, value: &str, active: bool) -> Line<'static> {
     let marker = if active { '>' } else { ' ' };
     let style = if active {
@@ -377,16 +450,34 @@ fn input_line(label: &str, value: &str, active: bool) -> Line<'static> {
     Line::from(Span::styled(format!("{marker} {label}: {value}"), style))
 }
 
+fn weekday_label(day: chrono::Weekday) -> &'static str {
+    match day {
+        chrono::Weekday::Sun => "Su",
+        chrono::Weekday::Mon => "Mo",
+        chrono::Weekday::Tue => "Tu",
+        chrono::Weekday::Wed => "We",
+        chrono::Weekday::Thu => "Th",
+        chrono::Weekday::Fri => "Fr",
+        chrono::Weekday::Sat => "Sa",
+    }
+}
+
+fn centered_line(width: usize, text: &str) -> Line<'static> {
+    let text_width = text.chars().count();
+    let left_padding = width.saturating_sub(text_width) / 2;
+    Line::from(format!("{}{}", " ".repeat(left_padding), text))
+}
+
 fn overlay_title(overlay: &Overlay) -> &'static str {
     match overlay {
         Overlay::SetupWizard(_) => " Setup ",
         Overlay::UnlockPrompt { .. } => " Unlock ",
         Overlay::Help => " Help ",
-        Overlay::DatePrompt { .. } => " Dates ",
+        Overlay::DatePicker(_) => " Dates ",
         Overlay::FindPrompt { .. } => " Find ",
         Overlay::ReplacePrompt(_) => " Replace ",
         Overlay::ReplaceConfirm(_) => " Replace ",
-        Overlay::Index => " Index ",
+        Overlay::Index(_) => " Index ",
         Overlay::RecoverDraft { .. } => " Recovery ",
         Overlay::QuitConfirm => " Quit ",
     }
@@ -468,7 +559,7 @@ fn screen_style() -> Style {
 
 #[cfg(test)]
 mod tests {
-    use super::popup_rect;
+    use super::{centered_line, popup_rect};
     use ratatui::layout::Rect;
 
     #[test]
@@ -477,5 +568,11 @@ mod tests {
         let popup = popup_rect(area, 20, 10);
         assert!(popup.width <= area.width);
         assert!(popup.height <= area.height);
+    }
+
+    #[test]
+    fn centered_line_adds_left_padding() {
+        let line = centered_line(10, "TEST");
+        assert_eq!(line.width(), 7);
     }
 }

@@ -9,6 +9,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
+    collections::BTreeSet,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -90,6 +91,14 @@ pub struct DeviceMetadata {
 pub struct LoadedDateState {
     pub revision_text: Option<String>,
     pub recovery_draft_text: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexEntry {
+    pub date: NaiveDate,
+    pub entry_number: String,
+    pub preview: String,
+    pub has_conflict: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -229,7 +238,7 @@ impl UnlockedVault {
     pub fn load_date_state(&self, date: NaiveDate) -> VaultResult<LoadedDateState> {
         let latest_revision = self.latest_revision_info(date)?;
         let revision_text = if let Some(revision) = &latest_revision {
-            Some(self.read_revision_text(date, revision)?)
+            Some(self.read_revision_body(date, revision)?)
         } else {
             None
         };
@@ -253,40 +262,104 @@ impl UnlockedVault {
         })
     }
 
-    fn latest_revision_info(&self, date: NaiveDate) -> VaultResult<Option<RevisionInfo>> {
-        let candidates = list_revision_candidates(&date_dir(&self.root, date))?;
-        let mut best: Option<RevisionInfo> = None;
-        for candidate in candidates {
-            let bytes = fs::read(&candidate.path)?;
-            let encrypted = RevisionFile::parse(&bytes)?;
-            let aad = aad_string("revision", date, &candidate.device_id, candidate.seq);
-            let plaintext = decrypt_payload(&self.key, &encrypted, aad.as_bytes())?;
-            let payload: RevisionPayload = serde_json::from_slice(&plaintext)?;
-            let saved_at = parse_saved_at(&payload.saved_at)?;
-            let info = RevisionInfo {
-                path: candidate.path,
-                device_id: candidate.device_id,
-                seq: candidate.seq,
-                saved_at,
-            };
-            let replace = best
-                .as_ref()
-                .map(|current| compare_revision_info(&info, current) == Ordering::Greater)
-                .unwrap_or(true);
-            if replace {
-                best = Some(info);
+    pub fn list_entry_dates(&self) -> VaultResult<Vec<NaiveDate>> {
+        let entries_root = self.root.join("entries");
+        if !entries_root.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut dates = BTreeSet::new();
+        for year_entry in fs::read_dir(entries_root)? {
+            let year_entry = year_entry?;
+            if !year_entry.file_type()?.is_dir() {
+                continue;
+            }
+            for date_entry in fs::read_dir(year_entry.path())? {
+                let date_entry = date_entry?;
+                if !date_entry.file_type()?.is_dir() {
+                    continue;
+                }
+                let file_name = date_entry.file_name().to_string_lossy().to_string();
+                let Ok(date) = NaiveDate::parse_from_str(&file_name, "%Y-%m-%d") else {
+                    continue;
+                };
+                if !list_revision_candidates(&date_entry.path())?.is_empty() {
+                    dates.insert(date);
+                }
             }
         }
-        Ok(best)
+
+        Ok(dates.into_iter().collect())
     }
 
-    fn read_revision_text(&self, date: NaiveDate, revision: &RevisionInfo) -> VaultResult<String> {
+    pub fn list_index_entries(&self, preview_chars: usize) -> VaultResult<Vec<IndexEntry>> {
+        let epoch = self.metadata.epoch_date()?;
+        let mut dates = self.list_entry_dates()?;
+        dates.sort_unstable_by(|left, right| right.cmp(left));
+
+        let mut entries = Vec::with_capacity(dates.len());
+        for date in dates {
+            let Some(revision) = self.latest_revision_info(date)? else {
+                continue;
+            };
+            let preview = self.read_revision_preview(date, &revision, preview_chars)?;
+            entries.push(IndexEntry {
+                date,
+                entry_number: compute_entry_number(epoch, date),
+                preview,
+                has_conflict: false,
+            });
+        }
+
+        Ok(entries)
+    }
+
+    fn latest_revision_info(&self, date: NaiveDate) -> VaultResult<Option<RevisionInfo>> {
+        let candidates = list_revision_candidates(&date_dir(&self.root, date))?;
+        let Some(candidate) = candidates.into_iter().max_by(compare_revision_candidate) else {
+            return Ok(None);
+        };
+        let payload = self.read_revision_payload(date, &candidate)?;
+        Ok(Some(RevisionInfo {
+            path: candidate.path,
+            device_id: candidate.device_id,
+            seq: candidate.seq,
+            saved_at: parse_saved_at(&payload.saved_at)?,
+        }))
+    }
+
+    fn read_revision_body(&self, date: NaiveDate, revision: &RevisionInfo) -> VaultResult<String> {
+        let payload = self.read_revision_payload(
+            date,
+            &CandidateRevision {
+                path: revision.path.clone(),
+                device_id: revision.device_id.clone(),
+                seq: revision.seq,
+            },
+        )?;
+        Ok(payload.body)
+    }
+
+    fn read_revision_preview(
+        &self,
+        date: NaiveDate,
+        revision: &RevisionInfo,
+        preview_chars: usize,
+    ) -> VaultResult<String> {
+        let body = self.read_revision_body(date, revision)?;
+        Ok(first_line_preview(&body, preview_chars))
+    }
+
+    fn read_revision_payload(
+        &self,
+        date: NaiveDate,
+        revision: &CandidateRevision,
+    ) -> VaultResult<RevisionPayload> {
         let bytes = fs::read(&revision.path)?;
         let encrypted = RevisionFile::parse(&bytes)?;
         let aad = aad_string("revision", date, &revision.device_id, revision.seq);
         let plaintext = decrypt_payload(&self.key, &encrypted, aad.as_bytes())?;
-        let payload: RevisionPayload = serde_json::from_slice(&plaintext)?;
-        Ok(payload.body)
+        serde_json::from_slice(&plaintext).map_err(Into::into)
     }
 
     fn read_draft(&self, date: NaiveDate) -> VaultResult<Option<DraftInfo>> {
@@ -497,12 +570,27 @@ fn list_revision_candidates(path: &Path) -> VaultResult<Vec<CandidateRevision>> 
     Ok(out)
 }
 
-fn compare_revision_info(left: &RevisionInfo, right: &RevisionInfo) -> Ordering {
-    left.saved_at
-        .cmp(&right.saved_at)
+fn compare_revision_candidate(left: &CandidateRevision, right: &CandidateRevision) -> Ordering {
+    left.seq
+        .cmp(&right.seq)
         .then_with(|| left.device_id.cmp(&right.device_id))
-        .then_with(|| left.seq.cmp(&right.seq))
         .then_with(|| left.path.cmp(&right.path))
+}
+
+fn first_line_preview(body: &str, max_chars: usize) -> String {
+    let first_line = body.lines().next().unwrap_or_default().replace('\t', " ");
+    truncate_chars(first_line.trim_end(), max_chars)
+}
+
+fn truncate_chars(input: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut truncated = input.chars().take(max_chars).collect::<String>();
+    if input.chars().count() > max_chars {
+        truncated.push_str("...");
+    }
+    truncated
 }
 
 fn random_device_id() -> String {
@@ -637,5 +725,61 @@ mod tests {
             ),
             "0004773"
         );
+    }
+
+    #[test]
+    fn list_entry_dates_scans_and_sorts_saved_dates() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock vault");
+
+        let early = NaiveDate::from_ymd_opt(2026, 3, 14).expect("date");
+        let late = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        vault.save_revision(late, "late").expect("save late");
+        vault.save_revision(early, "early").expect("save early");
+        vault
+            .save_draft(
+                NaiveDate::from_ymd_opt(2026, 3, 17).expect("date"),
+                "draft only",
+            )
+            .expect("save draft");
+
+        assert_eq!(
+            vault.list_entry_dates().expect("list dates"),
+            vec![early, late]
+        );
+    }
+
+    #[test]
+    fn index_entries_use_latest_revision_preview_only() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(
+            &root,
+            &passphrase,
+            Some(NaiveDate::from_ymd_opt(2026, 3, 1).expect("date")),
+            "Test",
+        )
+        .expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock vault");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+
+        vault
+            .save_revision(date, "first line\nsecond line")
+            .expect("save first");
+        sleep(Duration::from_millis(10));
+        vault
+            .save_revision(date, "updated preview\nbody")
+            .expect("save second");
+
+        let entries = vault.list_index_entries(12).expect("index entries");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].date, date);
+        assert_eq!(entries[0].entry_number, "0000016");
+        assert_eq!(entries[0].preview, "updated prev...");
+        assert!(!entries[0].has_conflict);
     }
 }

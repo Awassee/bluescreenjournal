@@ -7,6 +7,7 @@ edition = "2024"
 argon2 = "0.5.3"
 chrono = "0.4.40"
 chacha20poly1305 = "0.10.1"
+clap = { version = "4.5.32", features = ["derive"] }
 crossterm = "0.29.0"
 dirs = "6.0.0"
 hex = "0.4.3"

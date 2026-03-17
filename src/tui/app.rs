@@ -1,12 +1,16 @@
 use crate::{
     config::{AppConfig, default_vault_path},
-    tui::buffer::{MatchPos, TextBuffer},
-    vault::{self, UnlockedVault},
+    tui::{
+        buffer::{MatchPos, TextBuffer},
+        calendar,
+    },
+    vault::{self, IndexEntry, UnlockedVault},
 };
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use secrecy::SecretString;
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -14,6 +18,7 @@ use zeroize::Zeroize;
 
 const STATUS_DURATION: Duration = Duration::from_millis(1600);
 const AUTOSAVE_INTERVAL: Duration = Duration::from_millis(2500);
+const INDEX_PREVIEW_CHARS: usize = 54;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Overlay {
@@ -23,17 +28,14 @@ pub enum Overlay {
         error: Option<String>,
     },
     Help,
-    DatePrompt {
-        input: String,
-        error: Option<String>,
-    },
+    DatePicker(DatePicker),
     FindPrompt {
         input: String,
         error: Option<String>,
     },
     ReplacePrompt(ReplacePrompt),
     ReplaceConfirm(ReplaceConfirm),
-    Index,
+    Index(IndexState),
     RecoverDraft {
         draft_text: String,
     },
@@ -107,6 +109,45 @@ impl SetupWizard {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DatePicker {
+    pub month: NaiveDate,
+    pub selected_date: NaiveDate,
+    pub entry_dates: BTreeSet<NaiveDate>,
+}
+
+impl DatePicker {
+    pub fn new(selected_date: NaiveDate, entry_dates: BTreeSet<NaiveDate>) -> Self {
+        Self {
+            month: calendar::month_start(selected_date),
+            selected_date,
+            entry_dates,
+        }
+    }
+
+    pub fn month_label(&self) -> String {
+        self.month.format("%B %Y").to_string()
+    }
+
+    pub fn grid(&self) -> Vec<Vec<NaiveDate>> {
+        calendar::month_grid(self.month)
+    }
+
+    pub fn has_entry(&self, date: NaiveDate) -> bool {
+        self.entry_dates.contains(&date)
+    }
+
+    fn move_selection_by_days(&mut self, days: i64) {
+        self.selected_date += ChronoDuration::days(days);
+        self.month = calendar::month_start(self.selected_date);
+    }
+
+    fn shift_month(&mut self, months: i32) {
+        self.selected_date = calendar::shift_date_by_months(self.selected_date, months);
+        self.month = calendar::month_start(self.selected_date);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReplaceStage {
     Find,
@@ -145,6 +186,56 @@ pub struct ReplaceConfirm {
     pub replace_text: String,
     pub matches: Vec<MatchPos>,
     pub current_idx: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexState {
+    pub items: Vec<IndexEntry>,
+    pub selected: usize,
+}
+
+impl IndexState {
+    fn new(items: Vec<IndexEntry>, selected_date: NaiveDate) -> Self {
+        let selected = items
+            .iter()
+            .position(|entry| entry.date == selected_date)
+            .unwrap_or(0);
+        Self { items, selected }
+    }
+
+    pub fn window(&self, max_rows: usize) -> (usize, usize) {
+        if self.items.is_empty() || max_rows == 0 {
+            return (0, 0);
+        }
+        let max_rows = max_rows.max(1);
+        let mut start = self.selected.saturating_sub(max_rows / 2);
+        let max_start = self.items.len().saturating_sub(max_rows);
+        if start > max_start {
+            start = max_start;
+        }
+        let end = (start + max_rows).min(self.items.len());
+        (start, end)
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        if self.items.is_empty() {
+            return;
+        }
+        let next = self.selected as isize + delta;
+        self.selected = next.clamp(0, self.items.len() as isize - 1) as usize;
+    }
+
+    fn page_up(&mut self, amount: usize) {
+        self.move_selection(-(amount.max(1) as isize));
+    }
+
+    fn page_down(&mut self, amount: usize) {
+        self.move_selection(amount.max(1) as isize);
+    }
+
+    fn selected_date(&self) -> Option<NaiveDate> {
+        self.items.get(self.selected).map(|entry| entry.date)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -186,6 +277,10 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
+        Self::with_initial_date(None)
+    }
+
+    pub fn with_initial_date(initial_date: Option<NaiveDate>) -> Self {
         let config = AppConfig::load_or_default();
         let vault_path = if config.vault_path.as_os_str().is_empty() {
             default_vault_path()
@@ -203,7 +298,7 @@ impl App {
 
         Self {
             buffer: TextBuffer::new(),
-            selected_date: Local::now().date_naive(),
+            selected_date: initial_date.unwrap_or_else(|| Local::now().date_naive()),
             scroll_row: 0,
             overlay,
             status_flash: None,
@@ -251,8 +346,12 @@ impl App {
         self.find_matches.get(self.current_match_idx)
     }
 
-    pub fn now_time_label(&self) -> String {
-        Local::now().format("%Y-%m-%d %H:%M").to_string()
+    pub fn header_date_time_label(&self) -> String {
+        format!(
+            "{} {}",
+            self.selected_date.format("%Y-%m-%d"),
+            Local::now().format("%H:%M")
+        )
     }
 
     pub fn entry_number_label(&self) -> String {
@@ -344,14 +443,9 @@ impl App {
         let mut mutated = false;
         match key.code {
             KeyCode::F(1) => self.overlay = Some(Overlay::Help),
-            KeyCode::F(3) => {
-                self.overlay = Some(Overlay::DatePrompt {
-                    input: self.selected_date.format("%Y-%m-%d").to_string(),
-                    error: None,
-                });
-            }
+            KeyCode::F(3) => self.open_date_picker(),
             KeyCode::F(6) => self.overlay = Some(Overlay::ReplacePrompt(ReplacePrompt::new())),
-            KeyCode::F(7) => self.overlay = Some(Overlay::Index),
+            KeyCode::F(7) => self.open_index_overlay(),
             KeyCode::F(10) => self.overlay = Some(Overlay::QuitConfirm),
             KeyCode::Left => self.buffer.move_left(),
             KeyCode::Right => self.buffer.move_right(),
@@ -443,29 +537,19 @@ impl App {
                     keep_overlay = false;
                 }
             }
-            Overlay::DatePrompt { input, error } => match key.code {
+            Overlay::DatePicker(picker) => match key.code {
                 KeyCode::Esc | KeyCode::F(3) => keep_overlay = false,
-                KeyCode::Backspace => {
-                    input.pop();
-                    *error = None;
-                }
-                KeyCode::Enter => match NaiveDate::parse_from_str(input.trim(), "%Y-%m-%d") {
-                    Ok(date) => {
-                        if self.dirty {
-                            self.autosave_current_date();
-                        }
-                        self.selected_date = date;
-                        self.load_selected_date();
-                        self.flash_status("DATE SET.");
-                        keep_overlay = false;
-                    }
-                    Err(_) => *error = Some("Use YYYY-MM-DD.".to_string()),
-                },
-                KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
-                    if ch.is_ascii_digit() || ch == '-' {
-                        input.push(ch);
-                        *error = None;
-                    }
+                KeyCode::Left => picker.move_selection_by_days(-1),
+                KeyCode::Right => picker.move_selection_by_days(1),
+                KeyCode::Up => picker.move_selection_by_days(-7),
+                KeyCode::Down => picker.move_selection_by_days(7),
+                KeyCode::PageUp => picker.shift_month(-1),
+                KeyCode::PageDown => picker.shift_month(1),
+                KeyCode::Enter => {
+                    let date = picker.selected_date;
+                    self.open_date(date);
+                    self.flash_status("DATE SET.");
+                    keep_overlay = false;
                 }
                 _ => {}
             },
@@ -572,11 +656,27 @@ impl App {
                 }
                 _ => {}
             },
-            Overlay::Index => {
-                if matches!(key.code, KeyCode::Esc | KeyCode::F(7) | KeyCode::Enter) {
+            Overlay::Index(index) => match key.code {
+                KeyCode::Esc | KeyCode::F(7) => keep_overlay = false,
+                KeyCode::Up => index.move_selection(-1),
+                KeyCode::Down => index.move_selection(1),
+                KeyCode::PageUp => index.page_up(viewport_height.saturating_sub(4)),
+                KeyCode::PageDown => index.page_down(viewport_height.saturating_sub(4)),
+                KeyCode::Home => index.selected = 0,
+                KeyCode::End => {
+                    if !index.items.is_empty() {
+                        index.selected = index.items.len() - 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(date) = index.selected_date() {
+                        self.open_date(date);
+                        self.flash_status("DATE OPENED.");
+                    }
                     keep_overlay = false;
                 }
-            }
+                _ => {}
+            },
             Overlay::RecoverDraft { draft_text } => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     self.apply_recovery_choice(true, draft_text);
@@ -732,6 +832,53 @@ impl App {
                 self.dirty = false;
                 self.refresh_find_matches();
                 self.flash_status("LOAD FAILED.");
+            }
+        }
+    }
+
+    fn open_date(&mut self, date: NaiveDate) {
+        if self.dirty {
+            self.autosave_current_date();
+        }
+        self.selected_date = date;
+        self.load_selected_date();
+    }
+
+    fn open_date_picker(&mut self) {
+        let entry_dates = self.load_entry_dates();
+        self.overlay = Some(Overlay::DatePicker(DatePicker::new(
+            self.selected_date,
+            entry_dates,
+        )));
+    }
+
+    fn open_index_overlay(&mut self) {
+        let items = self.load_index_entries();
+        self.overlay = Some(Overlay::Index(IndexState::new(items, self.selected_date)));
+    }
+
+    fn load_entry_dates(&mut self) -> BTreeSet<NaiveDate> {
+        let Some(vault) = &self.vault else {
+            return BTreeSet::new();
+        };
+        match vault.list_entry_dates() {
+            Ok(dates) => dates.into_iter().collect(),
+            Err(_) => {
+                self.flash_status("INDEX LOAD FAILED.");
+                BTreeSet::new()
+            }
+        }
+    }
+
+    fn load_index_entries(&mut self) -> Vec<IndexEntry> {
+        let Some(vault) = &self.vault else {
+            return Vec::new();
+        };
+        match vault.list_index_entries(INDEX_PREVIEW_CHARS) {
+            Ok(entries) => entries,
+            Err(_) => {
+                self.flash_status("INDEX LOAD FAILED.");
+                Vec::new()
             }
         }
     }
@@ -917,7 +1064,9 @@ fn expand_tilde(input: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, resolve_recovery_text};
+    use super::{App, IndexState, resolve_recovery_text};
+    use crate::vault::IndexEntry;
+    use chrono::{Duration, NaiveDate};
     use crossterm::event::Event;
 
     #[test]
@@ -939,5 +1088,27 @@ mod tests {
         let (text, recovered) = resolve_recovery_text(false, "revision", "draft");
         assert_eq!(text, "revision");
         assert!(!recovered);
+    }
+
+    #[test]
+    fn index_window_centers_current_selection_when_possible() {
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let items = (0..10)
+            .map(|offset| IndexEntry {
+                date: date + Duration::days(offset),
+                entry_number: format!("{offset:07}"),
+                preview: format!("Entry {offset}"),
+                has_conflict: false,
+            })
+            .collect();
+        let index = IndexState::new(items, date + Duration::days(5));
+        assert_eq!(index.window(5), (3, 8));
+    }
+
+    #[test]
+    fn app_respects_initial_open_date() {
+        let initial = NaiveDate::from_ymd_opt(2026, 4, 2).expect("date");
+        let app = App::with_initial_date(Some(initial));
+        assert!(app.header_date_time_label().starts_with("2026-04-02"));
     }
 }
