@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 argon2 = "0.5.3"
+aws-config = "1"
+aws-sdk-s3 = "1"
 chrono = "0.4.40"
 chacha20poly1305 = "0.10.1"
 clap = { version = "4.5.32", features = ["derive"] }
@@ -13,12 +15,15 @@ dirs = "6.0.0"
 hex = "0.4.3"
 rand = "0.8.5"
 ratatui = "0.29.0"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+roxmltree = "0.20"
 rpassword = "7.3.1"
 secrecy = "0.10.3"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sha2 = "0.10.8"
 thiserror = "2.0.12"
+tokio = { version = "1", features = ["rt-multi-thread"] }
 zeroize = { version = "1.8.1", features = ["std"] }
 
 [dev-dependencies]

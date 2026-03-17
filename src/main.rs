@@ -1,10 +1,11 @@
 mod config;
 mod search;
+mod sync;
 mod tui;
 mod vault;
 
 use chrono::NaiveDate;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use secrecy::SecretString;
 use std::env;
 
@@ -27,13 +28,22 @@ enum Command {
         #[arg(long)]
         to: Option<String>,
     },
-    /// Sync encrypted revisions with a folder target
+    /// Sync encrypted revisions with a folder, S3, or WebDAV target
     Sync {
+        #[arg(long, value_enum)]
+        backend: Option<SyncBackendArg>,
         #[arg(long)]
         remote: Option<String>,
     },
     /// Verify revision hashchains
     Verify,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SyncBackendArg {
+    Folder,
+    S3,
+    Webdav,
 }
 
 fn main() {
@@ -74,8 +84,8 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Command::Sync { remote }) => {
-            if let Err(error) = run_cli_sync(remote.as_deref()) {
+        Some(Command::Sync { backend, remote }) => {
+            if let Err(error) = run_cli_sync(backend, remote.as_deref()) {
                 eprintln!("{error}");
                 std::process::exit(1);
             }
@@ -145,13 +155,34 @@ fn run_cli_search(
     Ok(())
 }
 
-fn run_cli_sync(remote_arg: Option<&str>) -> Result<(), String> {
+fn run_cli_sync(
+    backend_arg: Option<SyncBackendArg>,
+    remote_arg: Option<&str>,
+) -> Result<(), String> {
     let mut config = config::AppConfig::load_or_default();
-    let remote_root = resolve_sync_target_path(&mut config, remote_arg)?;
     let vault = unlock_cli_vault(&config)?;
-    let report = vault
-        .sync_folder(&remote_root)
-        .map_err(|error| format!("sync failed: {error}"))?;
+    let backend_kind = resolve_sync_backend_kind(backend_arg, remote_arg)?;
+
+    let report = match backend_kind {
+        SyncBackendArg::Folder => {
+            let remote_root = resolve_folder_sync_target_path(&mut config, remote_arg)?;
+            vault
+                .sync_folder(&remote_root)
+                .map_err(|error| format!("sync failed: {error}"))?
+        }
+        SyncBackendArg::S3 => {
+            let mut backend = sync::S3Backend::from_remote(remote_arg)?;
+            vault
+                .sync_with_backend(&mut backend)
+                .map_err(|error| format!("sync failed: {error}"))?
+        }
+        SyncBackendArg::Webdav => {
+            let mut backend = sync::WebDavBackend::from_remote(remote_arg)?;
+            vault
+                .sync_with_backend(&mut backend)
+                .map_err(|error| format!("sync failed: {error}"))?
+        }
+    };
 
     println!("Pulled: {}", report.pulled);
     println!("Pushed: {}", report.pushed);
@@ -210,7 +241,38 @@ fn read_cli_secret() -> Result<SecretString, String> {
     Ok(SecretString::new(passphrase.into_boxed_str()))
 }
 
-fn resolve_sync_target_path(
+fn resolve_sync_backend_kind(
+    backend_arg: Option<SyncBackendArg>,
+    remote_arg: Option<&str>,
+) -> Result<SyncBackendArg, String> {
+    if let Some(backend_arg) = backend_arg {
+        return Ok(backend_arg);
+    }
+
+    if let Ok(value) = env::var("BSJ_SYNC_BACKEND") {
+        return match value.to_ascii_lowercase().as_str() {
+            "folder" => Ok(SyncBackendArg::Folder),
+            "s3" => Ok(SyncBackendArg::S3),
+            "webdav" => Ok(SyncBackendArg::Webdav),
+            other => Err(format!(
+                "invalid BSJ_SYNC_BACKEND '{other}'; expected folder, s3, or webdav"
+            )),
+        };
+    }
+
+    if let Some(remote_arg) = remote_arg {
+        if sync::looks_like_s3_remote(remote_arg) {
+            return Ok(SyncBackendArg::S3);
+        }
+        if sync::looks_like_webdav_remote(remote_arg) {
+            return Ok(SyncBackendArg::Webdav);
+        }
+    }
+
+    Ok(SyncBackendArg::Folder)
+}
+
+fn resolve_folder_sync_target_path(
     config: &mut config::AppConfig,
     remote_arg: Option<&str>,
 ) -> Result<std::path::PathBuf, String> {

@@ -1,4 +1,7 @@
-use crate::search::SearchDocument;
+use crate::{
+    search::SearchDocument,
+    sync::{self, FolderBackend, SyncBackend},
+};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
@@ -45,6 +48,8 @@ pub enum VaultError {
     DecryptionFailed,
     #[error("invalid date: {0}")]
     InvalidDate(String),
+    #[error("sync error: {0}")]
+    Sync(String),
 }
 
 pub type VaultResult<T> = Result<T, VaultError>;
@@ -429,46 +434,19 @@ impl UnlockedVault {
         })
     }
 
-    pub fn sync_folder(&self, remote_root: &Path) -> VaultResult<SyncReport> {
-        fs::create_dir_all(remote_root)?;
-        ensure_sync_compatibility(&self.root, remote_root)?;
-
-        let local_files = list_sync_files(&self.root)?;
-        let remote_files = list_sync_files(remote_root)?;
-
-        let mut pulled = 0usize;
-        for relative in sync_relative_paths(&remote_files) {
-            if !sync_contains_path(&local_files, relative) {
-                copy_sync_file(remote_root, &self.root, relative)?;
-                if remote_files.revision_files.contains(relative) {
-                    pulled += 1;
-                }
-            }
-        }
-
-        let local_files = list_sync_files(&self.root)?;
-        let remote_files = list_sync_files(remote_root)?;
-
-        let mut pushed = 0usize;
-        for relative in sync_relative_paths(&local_files) {
-            if !sync_contains_path(&remote_files, relative) {
-                copy_sync_file(&self.root, remote_root, relative)?;
-                if local_files.revision_files.contains(relative) {
-                    pushed += 1;
-                }
-            }
-        }
-
-        let refreshed_local = list_sync_files(&self.root)?;
-        let refreshed_remote = list_sync_files(remote_root)?;
-        ensure_sync_file_collisions(&self.root, remote_root, &refreshed_local, &refreshed_remote)?;
+    pub fn sync_with_backend<B: SyncBackend>(&self, backend: &mut B) -> VaultResult<SyncReport> {
+        let report = sync::sync_root(&self.root, backend)?;
         let conflicts = self.list_conflicted_dates()?;
-
         Ok(SyncReport {
-            pulled,
-            pushed,
+            pulled: report.pulled,
+            pushed: report.pushed,
             conflicts,
         })
+    }
+
+    pub fn sync_folder(&self, remote_root: &Path) -> VaultResult<SyncReport> {
+        let mut backend = FolderBackend::new(remote_root.to_path_buf());
+        self.sync_with_backend(&mut backend)
     }
 
     fn save_revision_internal(
@@ -856,109 +834,6 @@ fn verify_records_for_date(date: NaiveDate, records: &[RevisionRecord]) -> Vec<I
     }
 
     issues
-}
-
-fn ensure_sync_compatibility(local_root: &Path, remote_root: &Path) -> VaultResult<()> {
-    let local_vault_json = fs::read(local_root.join("vault.json"))?;
-    let remote_vault_path = remote_root.join("vault.json");
-    if !remote_vault_path.exists() {
-        atomic_write(&remote_vault_path, &local_vault_json)?;
-        return Ok(());
-    }
-
-    let local_metadata: VaultMetadata = serde_json::from_slice(&local_vault_json)?;
-    let remote_metadata: VaultMetadata = serde_json::from_slice(&fs::read(&remote_vault_path)?)?;
-    if local_metadata.version != remote_metadata.version
-        || local_metadata.created_at != remote_metadata.created_at
-        || local_metadata.kdf.salt_hex != remote_metadata.kdf.salt_hex
-        || local_metadata.kdf.memory_kib != remote_metadata.kdf.memory_kib
-        || local_metadata.kdf.iterations != remote_metadata.kdf.iterations
-        || local_metadata.kdf.parallelism != remote_metadata.kdf.parallelism
-        || local_metadata.options.epoch_date != remote_metadata.options.epoch_date
-    {
-        return Err(VaultError::InvalidFormat(
-            "remote vault metadata is incompatible".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-#[derive(Default)]
-struct SyncFiles {
-    revision_files: HashSet<PathBuf>,
-    device_files: HashSet<PathBuf>,
-}
-
-fn list_sync_files(root: &Path) -> VaultResult<SyncFiles> {
-    let mut files = SyncFiles::default();
-    collect_sync_files(root, root, &mut files)?;
-    Ok(files)
-}
-
-fn collect_sync_files(root: &Path, current: &Path, files: &mut SyncFiles) -> VaultResult<()> {
-    if !current.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(current)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            collect_sync_files(root, &path, files)?;
-            continue;
-        }
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|_| VaultError::InvalidFormat("invalid sync path".to_string()))?
-            .to_path_buf();
-        let relative_text = relative.to_string_lossy();
-        if relative_text == "vault.json" || relative_text.starts_with("devices/") {
-            files.device_files.insert(relative);
-        } else if relative_text.contains("/rev-") && relative_text.ends_with(".bsj.enc") {
-            files.revision_files.insert(relative);
-        }
-    }
-    Ok(())
-}
-
-fn sync_relative_paths(files: &SyncFiles) -> Vec<&PathBuf> {
-    files
-        .revision_files
-        .iter()
-        .chain(files.device_files.iter())
-        .collect()
-}
-
-fn sync_contains_path(files: &SyncFiles, relative: &Path) -> bool {
-    files.revision_files.contains(relative) || files.device_files.contains(relative)
-}
-
-fn copy_sync_file(from_root: &Path, to_root: &Path, relative: &Path) -> VaultResult<()> {
-    let source = from_root.join(relative);
-    let target = to_root.join(relative);
-    let bytes = fs::read(source)?;
-    atomic_write(&target, &bytes)
-}
-
-fn ensure_sync_file_collisions(
-    local_root: &Path,
-    remote_root: &Path,
-    local_files: &SyncFiles,
-    remote_files: &SyncFiles,
-) -> VaultResult<()> {
-    for relative in local_files
-        .revision_files
-        .intersection(&remote_files.revision_files)
-    {
-        let local_bytes = fs::read(local_root.join(relative))?;
-        let remote_bytes = fs::read(remote_root.join(relative))?;
-        if local_bytes != remote_bytes {
-            return Err(VaultError::InvalidFormat(format!(
-                "sync collision for {}",
-                relative.display()
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn write_device_metadata(root: &Path, device_id: &str, nickname: &str) -> VaultResult<()> {
