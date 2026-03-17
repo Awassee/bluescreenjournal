@@ -34,6 +34,8 @@ pub enum Overlay {
         input: String,
         error: Option<String>,
     },
+    ConflictChoice(ConflictOverlay),
+    MergeDiff(vault::ConflictState),
     Search(SearchOverlay),
     ReplacePrompt(ReplacePrompt),
     ReplaceConfirm(ReplaceConfirm),
@@ -188,6 +190,36 @@ pub struct ReplaceConfirm {
     pub replace_text: String,
     pub matches: Vec<MatchPos>,
     pub current_idx: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConflictMode {
+    ViewA,
+    ViewB,
+    Merge,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConflictOverlay {
+    pub conflict: vault::ConflictState,
+    pub selected: ConflictMode,
+}
+
+impl ConflictOverlay {
+    fn new(conflict: vault::ConflictState) -> Self {
+        Self {
+            conflict,
+            selected: ConflictMode::ViewA,
+        }
+    }
+
+    fn cycle(&mut self) {
+        self.selected = match self.selected {
+            ConflictMode::ViewA => ConflictMode::ViewB,
+            ConflictMode::ViewB => ConflictMode::Merge,
+            ConflictMode::Merge => ConflictMode::ViewA,
+        };
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -347,6 +379,12 @@ struct SearchJump {
     start_col: usize,
 }
 
+#[derive(Clone, Debug)]
+struct MergeContext {
+    primary_hash: String,
+    merged_hashes: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug)]
 enum SaveKind {
     Saved,
@@ -371,6 +409,8 @@ pub struct App {
     draft_recovered: bool,
     search_index: Option<SearchIndex>,
     pending_search_jump: Option<SearchJump>,
+    pending_conflict: Option<vault::ConflictState>,
+    merge_context: Option<MergeContext>,
     last_viewport_height: usize,
     last_autosave_check: Instant,
 }
@@ -420,6 +460,8 @@ impl App {
             draft_recovered: false,
             search_index: None,
             pending_search_jump: None,
+            pending_conflict: None,
+            merge_context: None,
             last_viewport_height: 23,
             last_autosave_check: Instant::now(),
         }
@@ -664,6 +706,25 @@ impl App {
                 }
                 _ => {}
             },
+            Overlay::ConflictChoice(conflict) => match key.code {
+                KeyCode::Esc => keep_overlay = false,
+                KeyCode::Left | KeyCode::Char('1') => conflict.selected = ConflictMode::ViewA,
+                KeyCode::Right | KeyCode::Char('2') => conflict.selected = ConflictMode::ViewB,
+                KeyCode::Char('3') | KeyCode::Char('m') | KeyCode::Char('M') => {
+                    conflict.selected = ConflictMode::Merge
+                }
+                KeyCode::Tab => conflict.cycle(),
+                KeyCode::Enter => {
+                    self.execute_conflict_choice(conflict, viewport_height);
+                    keep_overlay = false;
+                }
+                _ => {}
+            },
+            Overlay::MergeDiff(_) => {
+                if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+                    keep_overlay = false;
+                }
+            }
             Overlay::FindPrompt { input, error } => match key.code {
                 KeyCode::Esc | KeyCode::F(4) => keep_overlay = false,
                 KeyCode::Backspace => {
@@ -933,18 +994,26 @@ impl App {
         passphrase.zeroize();
         wizard.confirm_input.zeroize();
 
-        if let Err(error) = vault::create_vault(&vault_path, &secret, epoch, "This Mac") {
-            wizard.error = Some(format!("Setup failed: {error}"));
-            return false;
+        let metadata = match vault::create_vault(&vault_path, &secret, epoch, "This Mac") {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                wizard.error = Some(format!("Setup failed: {error}"));
+                return false;
+            }
+        };
+
+        let mut config = AppConfig::load_or_default();
+        config.vault_path = vault_path.clone();
+        config.local_device_id = Some(metadata.device_id.clone());
+        if config.device_nickname.trim().is_empty() {
+            config.device_nickname = "This Mac".to_string();
         }
 
-        match vault::unlock_vault(&vault_path, &secret) {
+        match vault::unlock_vault_with_device(&vault_path, &secret, metadata.device_id.clone()) {
             Ok(unlocked) => {
                 self.vault = Some(unlocked);
                 self.search_index = None;
                 self.vault_path = vault_path.clone();
-                let mut config = AppConfig::load_or_default();
-                config.vault_path = vault_path;
                 if let Err(error) = config.save() {
                     self.flash_status(&format!("VAULT CREATED (config warning: {error})"));
                 } else {
@@ -968,8 +1037,36 @@ impl App {
             return false;
         }
         let secret = SecretString::new(std::mem::take(input).into_boxed_str());
-        match vault::unlock_vault(&self.vault_path, &secret) {
+        let mut config = AppConfig::load_or_default();
+        let mut config_dirty = false;
+        let device_id = match config.local_device_id.clone() {
+            Some(device_id) => device_id,
+            None => {
+                let device_id = vault::random_device_id();
+                config.local_device_id = Some(device_id.clone());
+                config_dirty = true;
+                device_id
+            }
+        };
+        if config.device_nickname.trim().is_empty() {
+            config.device_nickname = "This Mac".to_string();
+            config_dirty = true;
+        }
+
+        match vault::unlock_vault_with_device(&self.vault_path, &secret, device_id.clone()) {
             Ok(unlocked) => {
+                if let Err(register_error) =
+                    vault::register_device(&self.vault_path, &device_id, &config.device_nickname)
+                {
+                    *error = Some(format!("Device registration failed: {register_error}"));
+                    return false;
+                }
+                if config_dirty {
+                    config.vault_path = self.vault_path.clone();
+                    if let Err(save_error) = config.save() {
+                        self.flash_status(&format!("DEVICE CONFIG WARNING: {save_error}"));
+                    }
+                }
                 self.vault = Some(unlocked);
                 self.search_index = None;
                 self.flash_status("UNLOCKED.");
@@ -986,6 +1083,8 @@ impl App {
     fn load_selected_date(&mut self) {
         self.overlay = None;
         self.draft_recovered = false;
+        self.pending_conflict = None;
+        self.merge_context = None;
         self.last_autosave_check = Instant::now();
         self.last_save_kind = None;
         self.last_save_time = None;
@@ -1003,8 +1102,11 @@ impl App {
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.refresh_find_matches();
+                self.pending_conflict = state.conflict.clone();
                 if let Some(draft_text) = state.recovery_draft_text {
                     self.overlay = Some(Overlay::RecoverDraft { draft_text });
+                } else if let Some(conflict) = state.conflict {
+                    self.overlay = Some(Overlay::ConflictChoice(ConflictOverlay::new(conflict)));
                 }
             }
             Err(_) => {
@@ -1074,10 +1176,25 @@ impl App {
             return;
         };
         let body = self.buffer.to_text();
-        match vault.save_revision(self.selected_date, &body) {
+        let save_result = if let Some(merge_context) = &self.merge_context {
+            vault.save_merge_revision(
+                self.selected_date,
+                &body,
+                &merge_context.primary_hash,
+                &merge_context.merged_hashes,
+            )
+        } else {
+            vault.save_revision(self.selected_date, &body)
+        };
+
+        match save_result {
             Ok(()) => {
                 self.dirty = false;
                 self.search_index = None;
+                self.merge_context = None;
+                self.last_save_kind = Some(SaveKind::Saved);
+                self.last_save_time = Some(Local::now());
+                self.load_selected_date();
                 self.last_save_kind = Some(SaveKind::Saved);
                 self.last_save_time = Some(Local::now());
                 self.flash_status("SAVED.");
@@ -1110,6 +1227,9 @@ impl App {
             self.flash_status("DRAFT RECOVERED.");
         } else {
             self.flash_status("DRAFT IGNORED.");
+        }
+        if let Some(conflict) = self.pending_conflict.clone() {
+            self.overlay = Some(Overlay::ConflictChoice(ConflictOverlay::new(conflict)));
         }
     }
 
@@ -1280,6 +1400,52 @@ impl App {
             self.apply_pending_search_jump(Some(viewport_height));
         }
         self.flash_status("MATCH OPENED.");
+    }
+
+    fn execute_conflict_choice(&mut self, conflict: &ConflictOverlay, viewport_height: usize) {
+        let Some(head_a) = conflict.conflict.heads.first() else {
+            return;
+        };
+        let head_b = conflict.conflict.heads.get(1).unwrap_or(head_a);
+
+        match conflict.selected {
+            ConflictMode::ViewA => {
+                self.buffer = TextBuffer::from_text(&head_a.body);
+                self.scroll_row = 0;
+                self.dirty = false;
+                self.merge_context = None;
+                self.refresh_find_matches();
+                self.apply_pending_search_jump(Some(viewport_height));
+                self.flash_status("VIEW A.");
+            }
+            ConflictMode::ViewB => {
+                self.buffer = TextBuffer::from_text(&head_b.body);
+                self.scroll_row = 0;
+                self.dirty = false;
+                self.merge_context = None;
+                self.refresh_find_matches();
+                self.apply_pending_search_jump(Some(viewport_height));
+                self.flash_status("VIEW B.");
+            }
+            ConflictMode::Merge => {
+                self.buffer = TextBuffer::from_text(&head_a.body);
+                self.scroll_row = 0;
+                self.dirty = false;
+                self.refresh_find_matches();
+                self.merge_context = Some(MergeContext {
+                    primary_hash: head_a.revision_hash.clone(),
+                    merged_hashes: conflict
+                        .conflict
+                        .heads
+                        .iter()
+                        .skip(1)
+                        .map(|head| head.revision_hash.clone())
+                        .collect(),
+                });
+                self.overlay = Some(Overlay::MergeDiff(conflict.conflict.clone()));
+                self.flash_status("MERGE MODE.");
+            }
+        }
     }
 
     fn apply_pending_search_jump(&mut self, viewport_height: Option<usize>) {

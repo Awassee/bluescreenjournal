@@ -27,6 +27,13 @@ enum Command {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Sync encrypted revisions with a folder target
+    Sync {
+        #[arg(long)]
+        remote: Option<String>,
+    },
+    /// Verify revision hashchains
+    Verify,
 }
 
 fn main() {
@@ -67,6 +74,18 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Command::Sync { remote }) => {
+            if let Err(error) = run_cli_sync(remote.as_deref()) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        Some(Command::Verify) => {
+            if let Err(error) = run_cli_verify() {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
         None => {
             if let Err(error) = tui::run(None) {
                 eprintln!("failed to launch TUI: {error}");
@@ -97,22 +116,7 @@ fn run_cli_search(
     }
 
     let config = config::AppConfig::load_or_default();
-    if !vault::vault_exists(&config.vault_path) {
-        return Err(format!(
-            "vault not found at {}",
-            config.vault_path.display()
-        ));
-    }
-
-    let passphrase = match env::var("BSJ_PASSPHRASE") {
-        Ok(passphrase) => passphrase,
-        Err(_) => rpassword::prompt_password("Vault passphrase: ")
-            .map_err(|error| format!("failed to read passphrase: {error}"))?,
-    };
-    let secret = SecretString::new(passphrase.into_boxed_str());
-
-    let vault = vault::unlock_vault(&config.vault_path, &secret)
-        .map_err(|error| format!("unlock failed: {error}"))?;
+    let vault = unlock_cli_vault(&config)?;
     let documents = vault
         .load_search_documents()
         .map_err(|error| format!("failed to read entries: {error}"))?;
@@ -139,4 +143,100 @@ fn run_cli_search(
     }
 
     Ok(())
+}
+
+fn run_cli_sync(remote_arg: Option<&str>) -> Result<(), String> {
+    let mut config = config::AppConfig::load_or_default();
+    let remote_root = resolve_sync_target_path(&mut config, remote_arg)?;
+    let vault = unlock_cli_vault(&config)?;
+    let report = vault
+        .sync_folder(&remote_root)
+        .map_err(|error| format!("sync failed: {error}"))?;
+
+    println!("Pulled: {}", report.pulled);
+    println!("Pushed: {}", report.pushed);
+    if report.conflicts.is_empty() {
+        println!("Conflicts: none");
+    } else {
+        println!("Conflicts:");
+        for date in report.conflicts {
+            println!("  {}", date.format("%Y-%m-%d"));
+        }
+    }
+
+    Ok(())
+}
+
+fn run_cli_verify() -> Result<(), String> {
+    let config = config::AppConfig::load_or_default();
+    let vault = unlock_cli_vault(&config)?;
+    let report = vault
+        .verify_integrity()
+        .map_err(|error| format!("verify failed: {error}"))?;
+
+    if report.ok {
+        println!("OK");
+    } else {
+        println!("BROKEN");
+        for issue in report.issues {
+            match issue.date {
+                Some(date) => println!("{}  {}", date.format("%Y-%m-%d"), issue.message),
+                None => println!("{}", issue.message),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn unlock_cli_vault(config: &config::AppConfig) -> Result<vault::UnlockedVault, String> {
+    if !vault::vault_exists(&config.vault_path) {
+        return Err(format!(
+            "vault not found at {}",
+            config.vault_path.display()
+        ));
+    }
+
+    let secret = read_cli_secret()?;
+    vault::unlock_vault(&config.vault_path, &secret)
+        .map_err(|error| format!("unlock failed: {error}"))
+}
+
+fn read_cli_secret() -> Result<SecretString, String> {
+    let passphrase = match env::var("BSJ_PASSPHRASE") {
+        Ok(passphrase) => passphrase,
+        Err(_) => rpassword::prompt_password("Vault passphrase: ")
+            .map_err(|error| format!("failed to read passphrase: {error}"))?,
+    };
+    Ok(SecretString::new(passphrase.into_boxed_str()))
+}
+
+fn resolve_sync_target_path(
+    config: &mut config::AppConfig,
+    remote_arg: Option<&str>,
+) -> Result<std::path::PathBuf, String> {
+    if let Some(remote_arg) = remote_arg {
+        let remote_root = expand_tilde(remote_arg);
+        config.sync_target_path = Some(remote_root.clone());
+        config
+            .save()
+            .map_err(|error| format!("failed to save sync target: {error}"))?;
+        return Ok(remote_root);
+    }
+
+    config
+        .sync_target_path
+        .clone()
+        .ok_or_else(|| "missing sync target; use --remote PATH".to_string())
+}
+
+fn expand_tilde(input: &str) -> std::path::PathBuf {
+    if input == "~" {
+        return dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from(input));
+    }
+    if let Some(rest) = input.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    }
+    std::path::PathBuf::from(input)
 }

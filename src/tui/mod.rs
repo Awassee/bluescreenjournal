@@ -4,8 +4,8 @@ pub mod calendar;
 
 use crate::tui::{
     app::{
-        App, DatePicker, IndexState, Overlay, ReplacePrompt, ReplaceStage, SearchField,
-        SearchOverlay, SetupStep, SetupWizard,
+        App, ConflictMode, ConflictOverlay, DatePicker, IndexState, Overlay, ReplacePrompt,
+        ReplaceStage, SearchField, SearchOverlay, SetupStep, SetupWizard,
     },
     buffer::MatchPos,
 };
@@ -191,6 +191,8 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::Help => popup_rect(body_area, 72, 15),
         Overlay::DatePicker(_) => popup_rect(body_area, 38, 12),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
+        Overlay::ConflictChoice(_) => popup_rect(body_area, 72, 9),
+        Overlay::MergeDiff(_) => popup_rect(body_area, 92, 18),
         Overlay::Search(_) => popup_rect(body_area, 84, 16),
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
@@ -233,6 +235,14 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         }
         Overlay::DatePicker(picker) => {
             draw_date_picker_overlay(frame, inner, picker);
+            None
+        }
+        Overlay::ConflictChoice(conflict) => {
+            draw_conflict_choice_overlay(frame, inner, conflict);
+            None
+        }
+        Overlay::MergeDiff(conflict) => {
+            draw_merge_diff_overlay(frame, inner, conflict);
             None
         }
         Overlay::FindPrompt { input, error } => {
@@ -331,6 +341,7 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("| Calendar: Arrows move | PgUp/PgDn month            |"),
         Line::from("| Index: Up/Down/PgUp/PgDn | Enter opens date        |"),
         Line::from("| Search: Tab fields | Enter search/open result      |"),
+        Line::from("| Conflict: 1/2 view heads | 3 merge | F2 save merge |"),
         Line::from("| Save appends revision | Autosave keeps draft       |"),
         Line::from("| Recovery prompt appears when draft is newer        |"),
         Line::from("+----------------------------------------------------+"),
@@ -470,6 +481,76 @@ fn draw_search_overlay(
     ))
 }
 
+fn draw_conflict_choice_overlay(frame: &mut Frame<'_>, area: Rect, conflict: &ConflictOverlay) {
+    let head_a = conflict.conflict.heads.first();
+    let head_b = conflict.conflict.heads.get(1).or(head_a);
+    let more_heads = conflict.conflict.heads.len().saturating_sub(2);
+
+    let mut lines = vec![
+        Line::from("CONFLICT DETECTED"),
+        conflict_option_line("1) View A", conflict.selected == ConflictMode::ViewA),
+        Line::from(format!(
+            "A: {}",
+            head_a
+                .map(|head| format!("{} {} {}", head.device_id, head.seq, head.preview))
+                .unwrap_or_else(|| "Unavailable".to_string())
+        )),
+        conflict_option_line("2) View B", conflict.selected == ConflictMode::ViewB),
+        Line::from(format!(
+            "B: {}",
+            head_b
+                .map(|head| format!("{} {} {}", head.device_id, head.seq, head.preview))
+                .unwrap_or_else(|| "Unavailable".to_string())
+        )),
+        conflict_option_line("3) Merge", conflict.selected == ConflictMode::Merge),
+        Line::from(format!(
+            "Merge keeps all heads and writes a new revision.{}",
+            if more_heads > 0 {
+                format!(" +{more_heads} more head(s) will be merged.")
+            } else {
+                String::new()
+            }
+        )),
+        Line::from("Enter select  Tab cycle  Esc close"),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(std::mem::take(&mut lines)).style(screen_style()),
+        area,
+    );
+}
+
+fn draw_merge_diff_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    conflict: &crate::vault::ConflictState,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .split(area);
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[0]);
+
+    let left = conflict.heads.first();
+    let right = conflict.heads.get(1).or(left);
+
+    draw_conflict_pane(frame, panes[0], "View A", left);
+    draw_conflict_pane(frame, panes[1], "View B", right);
+
+    let footer = vec![
+        Line::from("Esc closes diff. Edit the main buffer underneath, then F2 saves the merge."),
+        Line::from("Losing revisions are preserved and linked into the merged head."),
+    ];
+    frame.render_widget(Paragraph::new(footer).style(screen_style()), chunks[1]);
+}
+
 fn draw_replace_prompt_overlay(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -551,6 +632,58 @@ fn input_line(label: &str, value: &str, active: bool) -> Line<'static> {
     Line::from(Span::styled(format!("{marker} {label}: {value}"), style))
 }
 
+fn conflict_option_line(label: &str, active: bool) -> Line<'static> {
+    let style = if active {
+        screen_style().add_modifier(Modifier::REVERSED)
+    } else {
+        screen_style().add_modifier(Modifier::BOLD)
+    };
+    Line::from(Span::styled(label.to_string(), style))
+}
+
+fn draw_conflict_pane(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    head: Option<&crate::vault::ConflictHead>,
+) {
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" {title} "))
+            .style(screen_style()),
+        area,
+    );
+    let inner = area.inner(ratatui::layout::Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let mut lines = Vec::new();
+    if let Some(head) = head {
+        lines.push(Line::from(format!(
+            "{} seq {}  {}",
+            head.device_id,
+            head.seq,
+            head.saved_at.format("%H:%M:%S")
+        )));
+        for line in head
+            .body
+            .lines()
+            .take(inner.height.saturating_sub(1) as usize)
+        {
+            lines.push(Line::from(truncate_to_width(line, inner.width as usize)));
+        }
+    } else {
+        lines.push(Line::from("Unavailable"));
+    }
+
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
+}
+
 fn weekday_label(day: chrono::Weekday) -> &'static str {
     match day {
         chrono::Weekday::Sun => "Su",
@@ -575,6 +708,8 @@ fn overlay_title(overlay: &Overlay) -> &'static str {
         Overlay::UnlockPrompt { .. } => " Unlock ",
         Overlay::Help => " Help ",
         Overlay::DatePicker(_) => " Dates ",
+        Overlay::ConflictChoice(_) => " Conflict ",
+        Overlay::MergeDiff(_) => " Merge ",
         Overlay::FindPrompt { .. } => " Find ",
         Overlay::Search(_) => " Search ",
         Overlay::ReplacePrompt(_) => " Replace ",

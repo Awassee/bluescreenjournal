@@ -19,6 +19,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub sync_target_path: Option<PathBuf>,
     #[serde(default)]
+    pub local_device_id: Option<String>,
+    #[serde(default = "default_device_nickname")]
+    pub device_nickname: String,
+    #[serde(default)]
     pub backup_retention: BackupRetentionConfig,
     #[serde(default)]
     pub macros: Vec<MacroConfig>,
@@ -83,6 +87,8 @@ impl AppConfig {
             Ok(None) | Err(_) => Self {
                 vault_path: default_vault_path(),
                 sync_target_path: None,
+                local_device_id: None,
+                device_nickname: default_device_nickname(),
                 backup_retention: BackupRetentionConfig::default(),
                 macros: Vec::new(),
             },
@@ -130,4 +136,8 @@ fn default_weekly_backups() -> usize {
 
 fn default_monthly_backups() -> usize {
     6
+}
+
+fn default_device_nickname() -> String {
+    "This Mac".to_string()
 }
