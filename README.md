@@ -8,6 +8,8 @@ BlueScreen Journal is a full-screen Rust TUI journal for macOS with a nostalgic 
 cargo run --
 ```
 
+Default vault location on first run: `~/Documents/BlueScreenJournal`
+
 Useful local commands:
 
 ```bash
@@ -24,16 +26,19 @@ cargo run -- --help
 cargo run -- --debug
 cargo run -- export 2026-03-16
 cargo run -- backup
+cargo run -- restore ~/Documents/BlueScreenJournal/vault/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore
 ```
 
 ## Vibe Features
 
 - `F9` edits the dedicated `Closing Thought` field
+- `F8` runs encrypted sync and shows a retro status screen
 - `F11` toggles `Reveal Codes`
 - `F12` locks the vault, drops the in-memory key, wipes the in-memory search index, and returns to the passphrase prompt
 - Reveal mode shows a retro metadata strip such as:
   - `⟦DATE:2026-03-16⟧ ⟦ENTRY:0000016⟧ ⟦TAG:work⟧ ⟦MOOD:7⟧ ⟦CLOSE:See you tomorrow.⟧`
 - Closing thoughts are encrypted inside revisions and drafts, and `bsj export YYYY-MM-DD` prints them as the final line
+- The header shows `VERIFY OK` or `VERIFY BROKEN N` after unlock, save, and sync
 
 ## Logging And Debug
 
@@ -76,7 +81,13 @@ Example config file: `~/Library/Application Support/bsj/config.json`
 }
 ```
 
-Roundtrip restore is implemented in code and covered by tests. There is no public `bsj restore` CLI yet.
+Restore into a target directory with:
+
+```bash
+cargo run -- restore ~/Documents/BlueScreenJournal/vault/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore
+```
+
+This decrypts the backup with the current vault key material, unpacks it into the target directory, and leaves the source vault untouched.
 
 ## Macros
 
@@ -246,8 +257,10 @@ Run these in both Terminal.app and iTerm2:
 
 1. Launch at `80x25` or larger and confirm the blue full-screen editor appears with header, body, and footer strip.
 2. Type a short entry, set a closing thought with `F9`, save with `F2`, quit, reopen, and confirm both persist.
-3. Press `F11` and confirm Reveal Codes appears; press it again and confirm normal view returns.
-4. Press `F12` and confirm the app returns to the passphrase prompt; unlock again and confirm the saved entry reloads.
-5. Resize below `80x25` and confirm the warning screen appears; resize back and confirm editing resumes cleanly.
-6. Run `cargo run -- backup`, confirm an encrypted file appears under `vault/backups/`, and confirm `rg` does not find plaintext journal text in that backup file.
-7. Run with `--debug` and confirm `~/Library/Logs/bsj/bsj.log` is written without journal plaintext.
+3. Press `F8` and confirm the sync status overlay appears, completes, and shows pulled/pushed counts plus verify status.
+4. Press `F11` and confirm Reveal Codes appears; press it again and confirm normal view returns.
+5. Press `F12` and confirm the app returns to the passphrase prompt; unlock again and confirm the saved entry reloads.
+6. Resize below `80x25` and confirm the warning screen appears; resize back and confirm editing resumes cleanly.
+7. Run `cargo run -- backup`, confirm an encrypted file appears under `vault/backups/`, and confirm `rg` does not find plaintext journal text in that backup file.
+8. Run `cargo run -- restore ... --into ...` and confirm the restored vault opens and matches the saved entry history.
+9. Run with `--debug` and confirm `~/Library/Logs/bsj/bsj.log` is written without journal plaintext.

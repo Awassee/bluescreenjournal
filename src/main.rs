@@ -15,7 +15,7 @@ use std::env;
     name = "bsj",
     about = "BlueScreen Journal",
     long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, append-only revisions, encrypted drafts, and encrypted sync targets.",
-    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj export 2026-03-16\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj export 2026-03-16\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj restore ~/Documents/BlueScreenJournal/vault/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
 )]
 struct Cli {
     #[arg(
@@ -51,6 +51,12 @@ enum Command {
     },
     /// Create an encrypted backup snapshot under vault/backups
     Backup,
+    /// Restore an encrypted backup snapshot into a target directory
+    Restore {
+        backup: String,
+        #[arg(long)]
+        into: String,
+    },
     /// Verify revision hashchains
     Verify,
 }
@@ -133,6 +139,13 @@ fn main() {
         Some(Command::Backup) => {
             if let Err(error) = run_cli_backup() {
                 log::error!("backup failed: {error}");
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        Some(Command::Restore { backup, into }) => {
+            if let Err(error) = run_cli_restore(&backup, &into) {
+                log::error!("restore failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
             }
@@ -295,6 +308,19 @@ fn run_cli_backup() -> Result<(), String> {
         .map_err(|error| format!("backup failed: {error}"))?;
     println!("Backup: {}", summary.path.display());
     println!("Pruned: {}", summary.pruned);
+    Ok(())
+}
+
+fn run_cli_restore(backup: &str, into: &str) -> Result<(), String> {
+    log::info!("running CLI restore");
+    let config = config::AppConfig::load_or_default();
+    let vault = unlock_cli_vault(&config)?;
+    let backup_path = expand_tilde(backup);
+    let restore_root = expand_tilde(into);
+    vault
+        .restore_backup_into(&backup_path, &restore_root)
+        .map_err(|error| format!("restore failed: {error}"))?;
+    println!("Restored: {}", restore_root.display());
     Ok(())
 }
 

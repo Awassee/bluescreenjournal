@@ -1,6 +1,7 @@
 use crate::{
     config::{AppConfig, MacroActionConfig, MacroCommandConfig, default_vault_path},
     search::{SearchIndex, SearchQuery, SearchResult},
+    sync,
     tui::{
         buffer::{MatchPos, TextBuffer},
         calendar,
@@ -12,6 +13,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use secrecy::SecretString;
 use std::{
     collections::BTreeSet,
+    env,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -43,6 +45,7 @@ pub enum Overlay {
     ReplacePrompt(ReplacePrompt),
     ReplaceConfirm(ReplaceConfirm),
     Index(IndexState),
+    SyncStatus(SyncStatusOverlay),
     RecoverDraft {
         draft_text: String,
     },
@@ -404,6 +407,79 @@ impl IndexState {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SyncPhase {
+    Pending,
+    Running,
+    Complete {
+        pulled: usize,
+        pushed: usize,
+        conflicts: Vec<NaiveDate>,
+        integrity_ok: bool,
+        integrity_issue_count: usize,
+    },
+    Error {
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncStatusOverlay {
+    pub backend_label: String,
+    pub target_label: String,
+    pub draft_notice: bool,
+    pub phase: SyncPhase,
+}
+
+impl SyncStatusOverlay {
+    fn pending(backend_label: String, target_label: String, draft_notice: bool) -> Self {
+        Self {
+            backend_label,
+            target_label,
+            draft_notice,
+            phase: SyncPhase::Pending,
+        }
+    }
+
+    fn mark_running(&mut self) {
+        self.phase = SyncPhase::Running;
+    }
+
+    fn set_complete(
+        &mut self,
+        report: vault::SyncReport,
+        integrity_status: Option<&IntegrityStatus>,
+    ) {
+        let (integrity_ok, integrity_issue_count) = integrity_status
+            .map(|status| (status.ok, status.issue_count))
+            .unwrap_or((true, 0));
+        self.phase = SyncPhase::Complete {
+            pulled: report.pulled,
+            pushed: report.pushed,
+            conflicts: report.conflicts,
+            integrity_ok,
+            integrity_issue_count,
+        };
+    }
+
+    fn set_error(&mut self, message: String) {
+        self.phase = SyncPhase::Error { message };
+    }
+
+    fn can_close(&self) -> bool {
+        !matches!(self.phase, SyncPhase::Pending | SyncPhase::Running)
+    }
+
+    fn wipe(&mut self) {
+        self.backend_label.zeroize();
+        self.target_label.zeroize();
+        if let SyncPhase::Error { message } = &mut self.phase {
+            message.zeroize();
+        }
+        self.phase = SyncPhase::Pending;
+    }
+}
+
 #[derive(Clone, Debug)]
 struct StatusMessage {
     text: String,
@@ -421,6 +497,56 @@ struct SearchJump {
 struct MergeContext {
     primary_hash: String,
     merged_hashes: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct IntegrityStatus {
+    ok: bool,
+    issue_count: usize,
+}
+
+impl IntegrityStatus {
+    fn label(&self) -> String {
+        if self.ok {
+            "VERIFY OK".to_string()
+        } else if self.issue_count > 0 {
+            format!("VERIFY BROKEN {}", self.issue_count)
+        } else {
+            "VERIFY BROKEN".to_string()
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum SyncRequest {
+    Folder {
+        remote_root: PathBuf,
+        target_label: String,
+    },
+    S3 {
+        target_label: String,
+    },
+    WebDav {
+        target_label: String,
+    },
+}
+
+impl SyncRequest {
+    fn backend_label(&self) -> &'static str {
+        match self {
+            SyncRequest::Folder { .. } => "FOLDER",
+            SyncRequest::S3 { .. } => "S3",
+            SyncRequest::WebDav { .. } => "WEBDAV",
+        }
+    }
+
+    fn target_label(&self) -> &str {
+        match self {
+            SyncRequest::Folder { target_label, .. }
+            | SyncRequest::S3 { target_label }
+            | SyncRequest::WebDav { target_label } => target_label,
+        }
+    }
 }
 
 impl ReplaceConfirm {
@@ -472,11 +598,13 @@ pub struct App {
     last_save_kind: Option<SaveKind>,
     last_save_time: Option<DateTime<Local>>,
     draft_recovered: bool,
+    integrity_status: Option<IntegrityStatus>,
     search_index: Option<SearchIndex>,
     pending_search_jump: Option<SearchJump>,
     pending_conflict: Option<vault::ConflictState>,
     pending_recovery_closing: Option<Option<String>>,
     merge_context: Option<MergeContext>,
+    pending_sync_request: Option<SyncRequest>,
     reveal_codes: bool,
     last_viewport_height: usize,
     last_autosave_check: Instant,
@@ -527,11 +655,13 @@ impl App {
             last_save_kind: None,
             last_save_time: None,
             draft_recovered: false,
+            integrity_status: None,
             search_index: None,
             pending_search_jump: None,
             pending_conflict: None,
             pending_recovery_closing: None,
             merge_context: None,
+            pending_sync_request: None,
             reveal_codes: false,
             last_viewport_height: 23,
             last_autosave_check: Instant::now(),
@@ -620,6 +750,13 @@ impl App {
         }
     }
 
+    pub fn integrity_status_label(&self) -> String {
+        self.integrity_status
+            .as_ref()
+            .map(IntegrityStatus::label)
+            .unwrap_or_default()
+    }
+
     pub fn editor_viewport_height(&self, body_rows: usize) -> usize {
         let reserved_rows = 1usize + usize::from(self.reveal_codes);
         body_rows.saturating_sub(reserved_rows).max(1)
@@ -636,6 +773,10 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        if self.pending_sync_request.is_some() {
+            self.run_pending_sync();
+        }
+
         if let Some(status) = &self.status_flash
             && Instant::now() >= status.expires_at
         {
@@ -695,6 +836,10 @@ impl App {
         }
         if key.code == KeyCode::F(9) {
             self.open_closing_prompt();
+            return;
+        }
+        if key.code == KeyCode::F(8) {
+            self.begin_sync();
             return;
         }
         if key.code == KeyCode::F(11) || Self::is_ctrl_char(&key, 'r') {
@@ -1047,6 +1192,12 @@ impl App {
                 }
                 _ => {}
             },
+            Overlay::SyncStatus(sync_status) => match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::F(8) if sync_status.can_close() => {
+                    keep_overlay = false;
+                }
+                _ => {}
+            },
             Overlay::RecoverDraft { draft_text } => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     self.apply_recovery_choice(true, draft_text);
@@ -1147,6 +1298,7 @@ impl App {
                 log::info!("vault created and unlocked");
                 self.vault = Some(unlocked);
                 self.search_index = None;
+                self.refresh_integrity_status();
                 self.vault_path = vault_path.clone();
                 self.config = config.clone();
                 if let Err(error) = config.save() {
@@ -1208,6 +1360,7 @@ impl App {
                 self.config = config;
                 self.vault = Some(unlocked);
                 self.search_index = None;
+                self.refresh_integrity_status();
                 self.flash_status("UNLOCKED.");
                 self.load_selected_date();
                 true
@@ -1291,6 +1444,39 @@ impl App {
         });
     }
 
+    fn begin_sync(&mut self) {
+        if self.vault.is_none() {
+            self.flash_status("LOCKED.");
+            return;
+        }
+
+        let draft_notice = self.dirty;
+        if draft_notice {
+            self.autosave_current_date();
+        }
+
+        let request = match self.resolve_sync_request() {
+            Ok(request) => request,
+            Err(error) => {
+                self.overlay = Some(Overlay::SyncStatus(SyncStatusOverlay {
+                    backend_label: "SYNC".to_string(),
+                    target_label: "UNCONFIGURED".to_string(),
+                    draft_notice,
+                    phase: SyncPhase::Error { message: error },
+                }));
+                self.flash_status("SYNC FAILED.");
+                return;
+            }
+        };
+
+        self.overlay = Some(Overlay::SyncStatus(SyncStatusOverlay::pending(
+            request.backend_label().to_string(),
+            request.target_label().to_string(),
+            draft_notice,
+        )));
+        self.pending_sync_request = Some(request);
+    }
+
     fn lock_vault(&mut self) {
         if self.vault.is_none() {
             return;
@@ -1301,6 +1487,7 @@ impl App {
         log::info!("locking vault and clearing in-memory state");
         self.clear_sensitive_state();
         self.vault = None;
+        self.integrity_status = None;
         self.overlay = Some(Overlay::UnlockPrompt {
             input: String::new(),
             error: Some("Vault locked. Enter passphrase.".to_string()),
@@ -1340,7 +1527,111 @@ impl App {
             index.wipe();
         }
         self.search_index = None;
+        self.pending_sync_request = None;
         self.reveal_codes = false;
+    }
+
+    fn run_pending_sync(&mut self) {
+        let Some(request) = self.pending_sync_request.take() else {
+            return;
+        };
+
+        if let Some(Overlay::SyncStatus(sync_status)) = &mut self.overlay {
+            sync_status.mark_running();
+        }
+
+        let result = self.execute_sync_request(&request);
+        match result {
+            Ok(report) => {
+                self.refresh_integrity_status();
+                let integrity_status = self.integrity_status.clone();
+                if let Some(Overlay::SyncStatus(sync_status)) = &mut self.overlay {
+                    sync_status.set_complete(report, integrity_status.as_ref());
+                }
+                self.flash_status("SYNC COMPLETE.");
+            }
+            Err(error) => {
+                if let Some(Overlay::SyncStatus(sync_status)) = &mut self.overlay {
+                    sync_status.set_error(error.clone());
+                }
+                self.flash_status("SYNC FAILED.");
+            }
+        }
+    }
+
+    fn execute_sync_request(&self, request: &SyncRequest) -> Result<vault::SyncReport, String> {
+        let vault = self
+            .vault
+            .as_ref()
+            .ok_or_else(|| "Vault locked.".to_string())?;
+
+        match request {
+            SyncRequest::Folder { remote_root, .. } => vault
+                .sync_folder(remote_root)
+                .map_err(|error| format!("sync failed: {error}")),
+            SyncRequest::S3 { .. } => {
+                let mut backend = sync::S3Backend::from_remote(None)?;
+                vault
+                    .sync_with_backend(&mut backend)
+                    .map_err(|error| format!("sync failed: {error}"))
+            }
+            SyncRequest::WebDav { .. } => {
+                let mut backend = sync::WebDavBackend::from_remote(None)?;
+                vault
+                    .sync_with_backend(&mut backend)
+                    .map_err(|error| format!("sync failed: {error}"))
+            }
+        }
+    }
+
+    fn resolve_sync_request(&self) -> Result<SyncRequest, String> {
+        let backend = env::var("BSJ_SYNC_BACKEND")
+            .ok()
+            .map(|value| value.to_ascii_lowercase());
+
+        match backend.as_deref() {
+            Some("s3") => Ok(SyncRequest::S3 {
+                target_label: sync_target_label_s3()?,
+            }),
+            Some("webdav") => Ok(SyncRequest::WebDav {
+                target_label: sync_target_label_webdav()?,
+            }),
+            Some("folder") | None => {
+                let remote_root = self
+                    .config
+                    .sync_target_path
+                    .clone()
+                    .ok_or_else(|| "No folder sync target configured. Run `bsj sync --backend folder --remote PATH` once, or set BSJ_SYNC_BACKEND=s3|webdav and the corresponding env vars.".to_string())?;
+                Ok(SyncRequest::Folder {
+                    target_label: remote_root.display().to_string(),
+                    remote_root,
+                })
+            }
+            Some(other) => Err(format!(
+                "Invalid BSJ_SYNC_BACKEND '{other}'. Expected folder, s3, or webdav."
+            )),
+        }
+    }
+
+    fn refresh_integrity_status(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.integrity_status = None;
+            return;
+        };
+
+        self.integrity_status = match vault.verify_integrity() {
+            Ok(report) => Some(IntegrityStatus {
+                ok: report.ok,
+                issue_count: report.issues.len(),
+            }),
+            Err(error) => {
+                log::warn!("integrity verification failed: {error}");
+                Some(IntegrityStatus {
+                    ok: false,
+                    issue_count: 1,
+                })
+            }
+        };
     }
 
     fn load_entry_dates(&mut self) -> BTreeSet<NaiveDate> {
@@ -1392,7 +1683,8 @@ impl App {
                 log::info!("manual save completed");
                 self.dirty = false;
                 self.search_index = None;
-                self.merge_context = None;
+                self.wipe_merge_context();
+                self.refresh_integrity_status();
                 self.last_save_kind = Some(SaveKind::Saved);
                 self.last_save_time = Some(Local::now());
                 self.load_selected_date();
@@ -1877,6 +2169,22 @@ fn normalize_overlay_text(input: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+fn sync_target_label_s3() -> Result<String, String> {
+    let bucket = env::var("BSJ_S3_BUCKET")
+        .map_err(|_| "BSJ_S3_BUCKET is required for TUI S3 sync.".to_string())?;
+    let prefix = env::var("BSJ_S3_PREFIX").unwrap_or_default();
+    if prefix.trim().is_empty() {
+        Ok(format!("s3://{bucket}"))
+    } else {
+        Ok(format!("s3://{bucket}/{}", prefix.trim_matches('/')))
+    }
+}
+
+fn sync_target_label_webdav() -> Result<String, String> {
+    env::var("BSJ_WEBDAV_URL")
+        .map_err(|_| "BSJ_WEBDAV_URL is required for TUI WebDAV sync.".to_string())
+}
+
 fn zeroize_optional_string(value: &mut Option<String>) {
     if let Some(mut string) = value.take() {
         string.zeroize();
@@ -1922,6 +2230,7 @@ fn wipe_overlay(overlay: &mut Overlay) {
         Overlay::ReplacePrompt(prompt) => prompt.wipe(),
         Overlay::ReplaceConfirm(confirm) => confirm.wipe(),
         Overlay::Index(index) => index.wipe(),
+        Overlay::SyncStatus(sync_status) => sync_status.wipe(),
         Overlay::RecoverDraft { draft_text } => draft_text.zeroize(),
     }
 }
@@ -2093,8 +2402,9 @@ fn parse_optional_overlay_date(label: &str, input: &str) -> Result<Option<NaiveD
 #[cfg(test)]
 mod tests {
     use super::{
-        App, IndexState, Overlay, SearchField, SearchJump, SearchOverlay, format_reveal_codes,
-        macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
+        App, IndexState, Overlay, SearchField, SearchJump, SearchOverlay, SyncPhase, SyncRequest,
+        SyncStatusOverlay, format_reveal_codes, macro_key_matches, parse_optional_overlay_date,
+        resolve_recovery_text,
     };
     use crate::{
         search::{SearchDocument, SearchIndex, SearchResult, Snippet},
@@ -2259,5 +2569,71 @@ mod tests {
         assert!(app.pending_search_jump.is_none());
         assert!(matches!(app.overlay, Some(Overlay::UnlockPrompt { .. })));
         assert_eq!(app.lock_status_label(), "LOCKED");
+    }
+
+    #[test]
+    fn pending_folder_sync_updates_overlay_and_integrity_status() {
+        let dir = tempdir().expect("tempdir");
+        let local_root = dir.path().join("local");
+        let remote_root = dir.path().join("remote");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+
+        let metadata =
+            vault::create_vault(&local_root, &passphrase, None, "Local").expect("create local");
+        vault::create_vault(&remote_root, &passphrase, None, "Remote").expect("create remote");
+        let local_metadata = std::fs::read(local_root.join("vault.json")).expect("local metadata");
+        std::fs::write(remote_root.join("vault.json"), local_metadata).expect("align metadata");
+
+        let unlocked =
+            vault::unlock_vault_with_device(&local_root, &passphrase, metadata.device_id.clone())
+                .expect("unlock local");
+        unlocked
+            .save_revision(
+                NaiveDate::from_ymd_opt(2026, 3, 16).expect("date"),
+                "synced entry",
+            )
+            .expect("save");
+
+        let mut app =
+            App::with_initial_date(Some(NaiveDate::from_ymd_opt(2026, 3, 16).expect("date")));
+        app.vault = Some(unlocked);
+        app.vault_path = local_root.clone();
+        app.config.sync_target_path = Some(remote_root.clone());
+        app.overlay = Some(Overlay::SyncStatus(SyncStatusOverlay::pending(
+            "FOLDER".to_string(),
+            remote_root.display().to_string(),
+            false,
+        )));
+        app.pending_sync_request = Some(SyncRequest::Folder {
+            remote_root: remote_root.clone(),
+            target_label: remote_root.display().to_string(),
+        });
+
+        app.run_pending_sync();
+
+        match app.overlay.as_ref().expect("sync overlay") {
+            Overlay::SyncStatus(SyncStatusOverlay {
+                phase:
+                    SyncPhase::Complete {
+                        pulled,
+                        pushed,
+                        integrity_ok,
+                        ..
+                    },
+                ..
+            }) => {
+                assert_eq!(*pulled, 0);
+                assert_eq!(*pushed, 1);
+                assert!(*integrity_ok);
+            }
+            other => panic!("unexpected overlay after sync: {other:?}"),
+        }
+        assert_eq!(app.integrity_status_label(), "VERIFY OK");
+        let synced_files = std::fs::read_dir(remote_root.join("entries/2026/2026-03-16"))
+            .expect("synced dir")
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(synced_files, 1);
     }
 }

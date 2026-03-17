@@ -5,7 +5,8 @@ pub mod calendar;
 use crate::tui::{
     app::{
         App, ConflictMode, ConflictOverlay, DatePicker, IndexState, Overlay, ReplacePrompt,
-        ReplaceStage, SearchField, SearchOverlay, SetupStep, SetupWizard,
+        ReplaceStage, SearchField, SearchOverlay, SetupStep, SetupWizard, SyncPhase,
+        SyncStatusOverlay,
     },
     buffer::MatchPos,
 };
@@ -121,6 +122,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
     let mut right_parts = vec![
         app.lock_status_label().to_string(),
+        app.integrity_status_label(),
         app.save_status_label(),
         app.draft_recovered_label().to_string(),
     ];
@@ -218,7 +220,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     }
     let status = app.status_text().unwrap_or("");
-    let strip = "F1Help F2Save F3Date F4Find F5Srch F6Repl F7Idx F9Close F10Quit F11Rev F12Lock";
+    let strip = "F1Help F2Save F3Date F4Find F5Srch F6Repl F7Idx F8Sync F9Cls F10Q F11Rev F12Lk";
     let content = join_left_right(area.width as usize, status, strip);
     frame.render_widget(
         Paragraph::new(Line::from(content)).style(
@@ -269,6 +271,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
         Overlay::Index(_) => popup_rect(body_area, 78, 14),
+        Overlay::SyncStatus(_) => popup_rect(body_area, 76, 10),
         Overlay::RecoverDraft { .. } => popup_rect(body_area, 44, 5),
         Overlay::QuitConfirm => popup_rect(body_area, 44, 5),
     };
@@ -366,6 +369,10 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
             draw_index_overlay(frame, inner, index);
             None
         }
+        Overlay::SyncStatus(sync_status) => {
+            draw_sync_overlay(frame, inner, sync_status);
+            None
+        }
         Overlay::RecoverDraft { .. } => {
             let lines = vec![
                 Line::from("RECOVER UNSAVED DRAFT? (Y/N)"),
@@ -417,17 +424,19 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("+----------------------------------------------------+"),
         Line::from("| F1 Help         F2 Save        F3 Dates            |"),
         Line::from("| F4 Find         F5 Search      F6 Replace          |"),
-        Line::from("| F7 Index        F9 Closing     F10 Quit            |"),
-        Line::from("| F11 Reveal      F12 Lock       Ctrl+S Save         |"),
-        Line::from("| Ctrl+F Find                                          |"),
+        Line::from("| F7 Index        F8 Sync        F9 Closing          |"),
+        Line::from("| F10 Quit        F11 Reveal     F12 Lock            |"),
+        Line::from("| Ctrl+S Save     Ctrl+F Find                         |"),
         Line::from("|                                                    |"),
         Line::from("| Arrows move cursor | PgUp/PgDn scroll              |"),
         Line::from("| Find updates as you type | Search runs on Enter    |"),
         Line::from("| Calendar: Arrows move | PgUp/PgDn month            |"),
         Line::from("| Index: Up/Down/PgUp/PgDn | Enter opens date        |"),
         Line::from("| Search: Tab fields | Enter search/open result      |"),
+        Line::from("| Sync: F8 runs encrypted sync and shows results     |"),
         Line::from("| Closing Thought lives above footer | F9 edits it   |"),
         Line::from("| Reveal shows DATE / ENTRY / TAG / MOOD / CLOSE     |"),
+        Line::from("| Header shows VERIFY OK / BROKEN after unlock/save  |"),
         Line::from("| F12 locks and clears in-memory editor/search state |"),
         Line::from("+----------------------------------------------------+"),
     ];
@@ -707,6 +716,80 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
+fn draw_sync_overlay(frame: &mut Frame<'_>, area: Rect, sync_status: &SyncStatusOverlay) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let mut lines = vec![
+        Line::from(format!("Backend: {}", sync_status.backend_label)),
+        Line::from(format!(
+            "Target : {}",
+            truncate_to_width(
+                &sync_status.target_label,
+                area.width.saturating_sub(9) as usize
+            )
+        )),
+        Line::from(""),
+    ];
+
+    match &sync_status.phase {
+        SyncPhase::Pending => {
+            lines.push(Line::from("Preparing encrypted sync..."));
+        }
+        SyncPhase::Running => {
+            lines.push(Line::from("SYNCING ENCRYPTED BLOBS..."));
+            lines.push(Line::from("Pull  Reconcile  Conflict Check  Push  Verify"));
+        }
+        SyncPhase::Complete {
+            pulled,
+            pushed,
+            conflicts,
+            integrity_ok,
+            integrity_issue_count,
+        } => {
+            lines.push(Line::from("SYNC COMPLETE"));
+            lines.push(Line::from(format!("Pulled   : {pulled}")));
+            lines.push(Line::from(format!("Pushed   : {pushed}")));
+            lines.push(Line::from(if conflicts.is_empty() {
+                "Conflicts: none".to_string()
+            } else {
+                format!(
+                    "Conflicts: {}",
+                    conflicts
+                        .iter()
+                        .map(|date| date.format("%Y-%m-%d").to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }));
+            lines.push(Line::from(if *integrity_ok {
+                "Verify   : OK".to_string()
+            } else {
+                format!("Verify   : BROKEN ({integrity_issue_count})")
+            }));
+            lines.push(Line::from("Enter/Esc close"));
+        }
+        SyncPhase::Error { message } => {
+            lines.push(Line::from("SYNC FAILED"));
+            lines.push(Line::from(truncate_to_width(
+                message,
+                area.width.saturating_sub(1) as usize,
+            )));
+            lines.push(Line::from("Enter/Esc close"));
+        }
+    }
+
+    if sync_status.draft_notice {
+        lines.push(Line::from(""));
+        lines.push(Line::from(
+            "Note: unsaved edits were autosaved locally; only revisions sync.",
+        ));
+    }
+
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+}
+
 fn input_line(label: &str, value: &str, active: bool) -> Line<'static> {
     let marker = if active { '>' } else { ' ' };
     let style = if active {
@@ -801,6 +884,7 @@ fn overlay_title(overlay: &Overlay) -> &'static str {
         Overlay::ReplacePrompt(_) => " Replace ",
         Overlay::ReplaceConfirm(_) => " Replace ",
         Overlay::Index(_) => " Index ",
+        Overlay::SyncStatus(_) => " Sync ",
         Overlay::RecoverDraft { .. } => " Recovery ",
         Overlay::QuitConfirm => " Quit ",
     }

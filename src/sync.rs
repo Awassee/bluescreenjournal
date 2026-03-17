@@ -13,6 +13,8 @@ use std::{
     env, fs,
     io::Write,
     path::{Component, Path, PathBuf},
+    thread,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +39,52 @@ enum SyncObjectKind {
 struct SyncInventory {
     keys: BTreeSet<String>,
     revision_keys: BTreeSet<String>,
+}
+
+const REQUEST_MIN_INTERVAL: Duration = Duration::from_millis(150);
+const REQUEST_MAX_ATTEMPTS: usize = 4;
+const REQUEST_INITIAL_BACKOFF: Duration = Duration::from_millis(200);
+
+#[derive(Default)]
+struct RequestThrottle {
+    last_request_at: Option<Instant>,
+}
+
+impl RequestThrottle {
+    fn wait_for_turn(&mut self) {
+        if let Some(last_request_at) = self.last_request_at {
+            let elapsed = last_request_at.elapsed();
+            if elapsed < REQUEST_MIN_INTERVAL {
+                thread::sleep(REQUEST_MIN_INTERVAL - elapsed);
+            }
+        }
+        self.last_request_at = Some(Instant::now());
+    }
+}
+
+fn retry_sync_operation<T, F>(label: &str, mut operation: F) -> VaultResult<T>
+where
+    F: FnMut() -> VaultResult<T>,
+{
+    let mut delay = REQUEST_INITIAL_BACKOFF;
+    for attempt in 1..=REQUEST_MAX_ATTEMPTS {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if attempt < REQUEST_MAX_ATTEMPTS && is_retryable_sync_error(&error) => {
+                log::warn!(
+                    "{label} failed on attempt {attempt}/{REQUEST_MAX_ATTEMPTS}: {error}; retrying"
+                );
+                thread::sleep(delay);
+                delay = delay.saturating_mul(2);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("retry loop returns on success or final error")
+}
+
+fn is_retryable_sync_error(error: &VaultError) -> bool {
+    matches!(error, VaultError::Sync(_) | VaultError::Io(_))
 }
 
 pub struct FolderBackend {
@@ -68,6 +116,7 @@ pub struct S3Backend {
     client: S3Client,
     bucket: String,
     prefix: String,
+    throttle: RequestThrottle,
 }
 
 impl S3Backend {
@@ -96,6 +145,7 @@ impl S3Backend {
             client,
             bucket,
             prefix: normalize_prefix(&prefix),
+            throttle: RequestThrottle::default(),
         })
     }
 
@@ -114,10 +164,9 @@ impl S3Backend {
             key.strip_prefix(&self.prefix).map(ToString::to_string)
         }
     }
-}
 
-impl SyncBackend for S3Backend {
-    fn list_keys(&mut self) -> VaultResult<BTreeSet<String>> {
+    fn list_keys_once(&mut self) -> VaultResult<BTreeSet<String>> {
+        self.throttle.wait_for_turn();
         let bucket = self.bucket.clone();
         let prefix = self.prefix.clone();
         self.runtime.block_on(async {
@@ -156,7 +205,8 @@ impl SyncBackend for S3Backend {
         })
     }
 
-    fn read(&mut self, key: &str) -> VaultResult<Vec<u8>> {
+    fn read_once(&mut self, key: &str) -> VaultResult<Vec<u8>> {
+        self.throttle.wait_for_turn();
         let bucket = self.bucket.clone();
         let remote_key = self.remote_key(key);
         self.runtime.block_on(async {
@@ -176,7 +226,8 @@ impl SyncBackend for S3Backend {
         })
     }
 
-    fn write(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
+    fn write_once(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
+        self.throttle.wait_for_turn();
         let bucket = self.bucket.clone();
         let remote_key = self.remote_key(key);
         let body = ByteStream::from(bytes.to_vec());
@@ -194,12 +245,27 @@ impl SyncBackend for S3Backend {
     }
 }
 
+impl SyncBackend for S3Backend {
+    fn list_keys(&mut self) -> VaultResult<BTreeSet<String>> {
+        retry_sync_operation("S3 list", || self.list_keys_once())
+    }
+
+    fn read(&mut self, key: &str) -> VaultResult<Vec<u8>> {
+        retry_sync_operation(&format!("S3 read {key}"), || self.read_once(key))
+    }
+
+    fn write(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
+        retry_sync_operation(&format!("S3 write {key}"), || self.write_once(key, bytes))
+    }
+}
+
 pub struct WebDavBackend {
     base_url: Url,
     client: HttpClient,
     username: Option<String>,
     password: Option<String>,
     known_collections: HashSet<String>,
+    throttle: RequestThrottle,
 }
 
 impl WebDavBackend {
@@ -237,6 +303,7 @@ impl WebDavBackend {
             username,
             password,
             known_collections: HashSet::new(),
+            throttle: RequestThrottle::default(),
         })
     }
 
@@ -288,7 +355,7 @@ impl WebDavBackend {
             }
 
             let response = self
-                .request(
+                .throttled_request(
                     Method::from_bytes(b"MKCOL").expect("MKCOL"),
                     self.collection_url(&current)?,
                 )
@@ -315,7 +382,7 @@ impl WebDavBackend {
     }
 
     fn list_recursive(
-        &self,
+        &mut self,
         prefix: &str,
         visited: &mut HashSet<String>,
         keys: &mut BTreeSet<String>,
@@ -326,7 +393,7 @@ impl WebDavBackend {
         }
 
         let response = self
-            .request(
+            .throttled_request(
                 Method::from_bytes(b"PROPFIND").expect("PROPFIND"),
                 self.collection_url(&normalized_prefix)?,
             )
@@ -381,6 +448,51 @@ impl WebDavBackend {
             }
         }
 
+        Ok(())
+    }
+
+    fn throttled_request(&mut self, method: Method, url: Url) -> RequestBuilder {
+        self.throttle.wait_for_turn();
+        self.request(method, url)
+    }
+
+    fn list_keys_once(&mut self) -> VaultResult<BTreeSet<String>> {
+        let mut visited = HashSet::new();
+        let mut keys = BTreeSet::new();
+        self.list_recursive("", &mut visited, &mut keys)?;
+        Ok(keys)
+    }
+
+    fn read_once(&mut self, key: &str) -> VaultResult<Vec<u8>> {
+        let response = self
+            .throttled_request(Method::GET, self.file_url(key)?)
+            .send()
+            .map_err(|error| VaultError::Sync(format!("WebDAV GET failed for {key}: {error}")))?;
+        if !response.status().is_success() {
+            return Err(VaultError::Sync(format!(
+                "WebDAV GET failed for {key}: {}",
+                response.status()
+            )));
+        }
+        response
+            .bytes()
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| VaultError::Sync(format!("WebDAV read failed for {key}: {error}")))
+    }
+
+    fn write_once(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
+        self.ensure_parent_collections(key)?;
+        let response = self
+            .throttled_request(Method::PUT, self.file_url(key)?)
+            .body(bytes.to_vec())
+            .send()
+            .map_err(|error| VaultError::Sync(format!("WebDAV PUT failed for {key}: {error}")))?;
+        if !response.status().is_success() {
+            return Err(VaultError::Sync(format!(
+                "WebDAV PUT failed for {key}: {}",
+                response.status()
+            )));
+        }
         Ok(())
     }
 
@@ -439,43 +551,17 @@ impl WebDavBackend {
 
 impl SyncBackend for WebDavBackend {
     fn list_keys(&mut self) -> VaultResult<BTreeSet<String>> {
-        let mut visited = HashSet::new();
-        let mut keys = BTreeSet::new();
-        self.list_recursive("", &mut visited, &mut keys)?;
-        Ok(keys)
+        retry_sync_operation("WebDAV list", || self.list_keys_once())
     }
 
     fn read(&mut self, key: &str) -> VaultResult<Vec<u8>> {
-        let response = self
-            .request(Method::GET, self.file_url(key)?)
-            .send()
-            .map_err(|error| VaultError::Sync(format!("WebDAV GET failed for {key}: {error}")))?;
-        if !response.status().is_success() {
-            return Err(VaultError::Sync(format!(
-                "WebDAV GET failed for {key}: {}",
-                response.status()
-            )));
-        }
-        response
-            .bytes()
-            .map(|bytes| bytes.to_vec())
-            .map_err(|error| VaultError::Sync(format!("WebDAV read failed for {key}: {error}")))
+        retry_sync_operation(&format!("WebDAV read {key}"), || self.read_once(key))
     }
 
     fn write(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
-        self.ensure_parent_collections(key)?;
-        let response = self
-            .request(Method::PUT, self.file_url(key)?)
-            .body(bytes.to_vec())
-            .send()
-            .map_err(|error| VaultError::Sync(format!("WebDAV PUT failed for {key}: {error}")))?;
-        if !response.status().is_success() {
-            return Err(VaultError::Sync(format!(
-                "WebDAV PUT failed for {key}: {}",
-                response.status()
-            )));
-        }
-        Ok(())
+        retry_sync_operation(&format!("WebDAV write {key}"), || {
+            self.write_once(key, bytes)
+        })
     }
 }
 
@@ -918,5 +1004,34 @@ mod tests {
         let backend =
             WebDavBackend::from_remote(Some("https://example.com/bsj-test")).expect("backend");
         assert_eq!(backend.base_url.as_str(), "https://example.com/bsj-test/");
+    }
+
+    #[test]
+    fn retry_sync_operation_retries_transient_sync_errors() {
+        let mut attempts = 0usize;
+        let value = retry_sync_operation("test retry", || {
+            attempts += 1;
+            if attempts == 1 {
+                Err(VaultError::Sync("try again".to_string()))
+            } else {
+                Ok(attempts)
+            }
+        })
+        .expect("retry succeeds");
+
+        assert_eq!(value, 2);
+    }
+
+    #[test]
+    fn retry_sync_operation_does_not_retry_invalid_format_errors() {
+        let mut attempts = 0usize;
+        let error = retry_sync_operation("test invalid", || {
+            attempts += 1;
+            Err::<(), _>(VaultError::InvalidFormat("bad".to_string()))
+        })
+        .expect_err("no retry");
+
+        assert_eq!(attempts, 1);
+        assert!(error.to_string().contains("bad"));
     }
 }

@@ -117,8 +117,12 @@ impl AppConfig {
 }
 
 pub fn default_vault_path() -> PathBuf {
+    if let Some(documents_dir) = dirs::document_dir() {
+        return documents_dir.join("BlueScreenJournal");
+    }
+
     let base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("bluescreenjournal").join("vault")
+    base.join("Documents").join("BlueScreenJournal")
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
@@ -140,4 +144,22 @@ fn default_monthly_backups() -> usize {
 
 fn default_device_nickname() -> String {
     "This Mac".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_vault_path;
+
+    #[test]
+    fn default_vault_path_targets_documents_bluescreenjournal() {
+        let path = default_vault_path();
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("BlueScreenJournal")
+        );
+        assert!(
+            path.components()
+                .any(|component| component.as_os_str() == "Documents")
+        );
+    }
 }
