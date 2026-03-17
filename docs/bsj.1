@@ -1,0 +1,116 @@
+.Dd March 17, 2026
+.Dt BSJ 1
+.Os macOS
+.Sh NAME
+.Nm bsj
+.Nd encrypted nostalgic blue-screen journal for macOS terminals
+.Sh SYNOPSIS
+.Nm
+.Op Fl -debug
+.Op Ar command
+.Sh DESCRIPTION
+.Nm
+is a full-screen terminal journal for macOS with encrypted local storage,
+append-only revisions, encrypted drafts, encrypted backups, and encrypted sync
+targets.
+.Pp
+Without a subcommand,
+.Nm
+launches the full-screen TUI editor.
+.Sh COMMANDS
+.Bl -tag -width "settings set"
+.It Cm open Ar YYYY-MM-DD
+Launch the TUI directly on a specific date.
+.It Cm export Ar YYYY-MM-DD Op Fl -format Ar text|markdown Op Fl -output Ar path
+Print or write the selected entry in plain text or markdown.
+.It Cm search Ar query Op Fl -from Ar YYYY-MM-DD Op Fl -to Ar YYYY-MM-DD
+Search unlocked journal data without creating a plaintext on-disk index.
+.It Cm sync Op Fl -backend Ar folder|s3|webdav Op Fl -remote Ar target
+Sync encrypted revisions to a folder, S3, or WebDAV target.
+.It Cm backup
+Create an encrypted snapshot under the vault backup directory.
+.It Cm "backup list"
+List encrypted backups under
+.Pa <vault>/backups .
+.It Cm "backup prune" Op Fl -apply
+Preview or apply retention-based backup pruning.
+.It Cm restore Ar backup Fl -into Ar directory
+Restore an encrypted snapshot into a target directory.
+.It Cm verify
+Verify revision hashchains.
+.It Cm settings Op Fl -json
+Show effective settings, config paths, vault metadata status, and environment
+status.
+.It Cm "settings init" Op Fl -force
+Create or replace the local config file.
+.It Cm "settings get" Ar key
+Read one supported setting value.
+.It Cm "settings set" Ar key Ar value
+Update one editable setting value.
+.It Cm guide Op Ar setup|settings|distribution
+Print setup, settings, or distribution guidance.
+.It Cm doctor Op Fl -unlock Op Fl -json
+Run install, config, sync, and vault diagnostics.
+.It Cm completions Ar bash|zsh|fish
+Print shell completion scripts to stdout.
+.El
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl -debug
+Enable verbose logging to
+.Pa ~/Library/Logs/bsj/bsj.log .
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa ~/Documents/BlueScreenJournal
+Default vault location.
+.It Pa ~/Library/Application Support/bsj/config.json
+Application configuration file.
+.It Pa ~/Library/Logs/bsj/bsj.log
+Application log file.
+.El
+.Sh INSTALLATION
+Source install:
+.Bd -literal -offset indent
+./install.sh --source
+.Ed
+.Pp
+Prebuilt release bundle install:
+.Bd -literal -offset indent
+./install.sh --prebuilt
+.Ed
+.Pp
+The installer also installs shell completions for Bash, Zsh, and Fish.
+.Sh KEY BINDINGS
+.Bl -tag -width Ds
+.It F1
+Help
+.It F2
+Save revision
+.It F3
+Date picker
+.It F4
+Find in entry
+.It F5
+Global search
+.It F6
+Replace
+.It F7
+Index
+.It F8
+Sync
+.It F9
+Closing Thought
+.It F10
+Quit
+.It F11
+Reveal Codes
+.It F12
+Lock
+.El
+.Sh SEE ALSO
+.Pa docs/SETUP_GUIDE.md ,
+.Pa docs/SETTINGS_GUIDE.md ,
+.Pa docs/DISTRIBUTION.md
+.Sh AUTHORS
+Maintained in the bsj repository workspace.

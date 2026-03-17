@@ -2,6 +2,25 @@ use serde::{Deserialize, Serialize};
 use std::{fs, io::Write, path::PathBuf};
 use thiserror::Error;
 
+const READABLE_SETTING_KEYS: &[&str] = &[
+    "vault_path",
+    "sync_target_path",
+    "device_nickname",
+    "backup_retention.daily",
+    "backup_retention.weekly",
+    "backup_retention.monthly",
+    "local_device_id",
+];
+
+const EDITABLE_SETTING_KEYS: &[&str] = &[
+    "vault_path",
+    "sync_target_path",
+    "device_nickname",
+    "backup_retention.daily",
+    "backup_retention.weekly",
+    "backup_retention.monthly",
+];
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to determine config directory")]
@@ -125,9 +144,115 @@ pub fn default_vault_path() -> PathBuf {
     base.join("Documents").join("BlueScreenJournal")
 }
 
-fn config_file_path() -> Result<PathBuf, ConfigError> {
+pub fn config_file_path() -> Result<PathBuf, ConfigError> {
     let dir = dirs::config_dir().ok_or(ConfigError::MissingConfigDir)?;
     Ok(dir.join("bsj").join("config.json"))
+}
+
+pub fn readable_setting_keys() -> &'static [&'static str] {
+    READABLE_SETTING_KEYS
+}
+
+pub fn editable_setting_keys() -> &'static [&'static str] {
+    EDITABLE_SETTING_KEYS
+}
+
+pub fn get_setting_value(config: &AppConfig, key: &str) -> Result<String, String> {
+    match key {
+        "vault_path" => Ok(config.vault_path.display().to_string()),
+        "sync_target_path" => Ok(config
+            .sync_target_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "null".to_string())),
+        "device_nickname" => Ok(config.device_nickname.clone()),
+        "backup_retention.daily" => Ok(config.backup_retention.daily.to_string()),
+        "backup_retention.weekly" => Ok(config.backup_retention.weekly.to_string()),
+        "backup_retention.monthly" => Ok(config.backup_retention.monthly.to_string()),
+        "local_device_id" => Ok(config
+            .local_device_id
+            .clone()
+            .unwrap_or_else(|| "null".to_string())),
+        _ => Err(format!(
+            "unknown setting '{key}'. Known keys: {}",
+            READABLE_SETTING_KEYS.join(", ")
+        )),
+    }
+}
+
+pub fn set_setting_value(config: &mut AppConfig, key: &str, value: &str) -> Result<String, String> {
+    match key {
+        "vault_path" => {
+            config.vault_path = expand_path_like(value);
+            Ok(config.vault_path.display().to_string())
+        }
+        "sync_target_path" => {
+            config.sync_target_path = normalize_optional_path(value);
+            Ok(config
+                .sync_target_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "null".to_string()))
+        }
+        "device_nickname" => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Err("device_nickname cannot be empty".to_string());
+            }
+            config.device_nickname = trimmed.to_string();
+            Ok(config.device_nickname.clone())
+        }
+        "backup_retention.daily" => {
+            config.backup_retention.daily = parse_retention_value(value, key)?;
+            Ok(config.backup_retention.daily.to_string())
+        }
+        "backup_retention.weekly" => {
+            config.backup_retention.weekly = parse_retention_value(value, key)?;
+            Ok(config.backup_retention.weekly.to_string())
+        }
+        "backup_retention.monthly" => {
+            config.backup_retention.monthly = parse_retention_value(value, key)?;
+            Ok(config.backup_retention.monthly.to_string())
+        }
+        "local_device_id" => {
+            Err("local_device_id is app-managed and cannot be set manually".to_string())
+        }
+        _ => Err(format!(
+            "unknown setting '{key}'. Editable keys: {}",
+            EDITABLE_SETTING_KEYS.join(", ")
+        )),
+    }
+}
+
+pub fn expand_path_like(input: &str) -> PathBuf {
+    if input == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(input));
+    }
+    if let Some(rest) = input.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    }
+    PathBuf::from(input)
+}
+
+fn normalize_optional_path(value: &str) -> Option<PathBuf> {
+    let trimmed = value.trim();
+    if trimmed.eq_ignore_ascii_case("null")
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("unset")
+    {
+        None
+    } else {
+        Some(expand_path_like(trimmed))
+    }
+}
+
+fn parse_retention_value(value: &str, key: &str) -> Result<usize, String> {
+    value
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| format!("{key} must be a non-negative integer"))
 }
 
 fn default_daily_backups() -> usize {
@@ -148,7 +273,10 @@ fn default_device_nickname() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::default_vault_path;
+    use super::{
+        AppConfig, BackupRetentionConfig, default_vault_path, get_setting_value, set_setting_value,
+    };
+    use std::path::PathBuf;
 
     #[test]
     fn default_vault_path_targets_documents_bluescreenjournal() {
@@ -161,5 +289,63 @@ mod tests {
             path.components()
                 .any(|component| component.as_os_str() == "Documents")
         );
+    }
+
+    #[test]
+    fn get_setting_value_reports_known_keys() {
+        let config = AppConfig {
+            vault_path: PathBuf::from("/tmp/vault"),
+            sync_target_path: Some(PathBuf::from("/tmp/remote")),
+            local_device_id: Some("device".to_string()),
+            device_nickname: "QA Mac".to_string(),
+            backup_retention: BackupRetentionConfig {
+                daily: 5,
+                weekly: 4,
+                monthly: 3,
+            },
+            macros: Vec::new(),
+        };
+
+        assert_eq!(
+            get_setting_value(&config, "backup_retention.daily").expect("daily"),
+            "5"
+        );
+        assert_eq!(
+            get_setting_value(&config, "local_device_id").expect("device id"),
+            "device"
+        );
+    }
+
+    #[test]
+    fn set_setting_value_updates_paths_and_retention() {
+        let mut config = AppConfig {
+            vault_path: PathBuf::from("/tmp/vault"),
+            sync_target_path: None,
+            local_device_id: None,
+            device_nickname: "This Mac".to_string(),
+            backup_retention: BackupRetentionConfig::default(),
+            macros: Vec::new(),
+        };
+
+        set_setting_value(&mut config, "sync_target_path", "/tmp/remote").expect("sync target");
+        set_setting_value(&mut config, "backup_retention.weekly", "9").expect("weekly");
+
+        assert_eq!(config.sync_target_path, Some(PathBuf::from("/tmp/remote")));
+        assert_eq!(config.backup_retention.weekly, 9);
+    }
+
+    #[test]
+    fn set_setting_value_can_unset_optional_path() {
+        let mut config = AppConfig {
+            vault_path: PathBuf::from("/tmp/vault"),
+            sync_target_path: Some(PathBuf::from("/tmp/remote")),
+            local_device_id: None,
+            device_nickname: "This Mac".to_string(),
+            backup_retention: BackupRetentionConfig::default(),
+            macros: Vec::new(),
+        };
+
+        set_setting_value(&mut config, "sync_target_path", "unset").expect("unset");
+        assert!(config.sync_target_path.is_none());
     }
 }

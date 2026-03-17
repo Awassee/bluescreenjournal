@@ -1,266 +1,288 @@
 # bsj
 
-BlueScreen Journal is a full-screen Rust TUI journal for macOS with a nostalgic blue-screen editing surface, encrypted local storage, append-only revisions, and encrypted sync targets.
+BlueScreen Journal is a full-screen Rust TUI journal for macOS with a nostalgic blue-screen editor, encrypted local storage, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.
 
-## Quickstart
+## Install
 
-```bash
-cargo run --
-```
-
-Default vault location on first run: `~/Documents/BlueScreenJournal`
-
-Useful local commands:
+Prebuilt release bundle:
 
 ```bash
-just fmt
-just clippy
-just test
-just run
+./install.sh --prebuilt
 ```
 
-Useful CLI commands:
+Source install from a checkout:
 
 ```bash
-cargo run -- --help
-cargo run -- --debug
-cargo run -- export 2026-03-16
-cargo run -- backup
-cargo run -- restore ~/Documents/BlueScreenJournal/vault/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore
+./install.sh --source
 ```
 
-## Vibe Features
-
-- `F9` edits the dedicated `Closing Thought` field
-- `F8` runs encrypted sync and shows a retro status screen
-- `F11` toggles `Reveal Codes`
-- `F12` locks the vault, drops the in-memory key, wipes the in-memory search index, and returns to the passphrase prompt
-- Reveal mode shows a retro metadata strip such as:
-  - `⟦DATE:2026-03-16⟧ ⟦ENTRY:0000016⟧ ⟦TAG:work⟧ ⟦MOOD:7⟧ ⟦CLOSE:See you tomorrow.⟧`
-- Closing thoughts are encrypted inside revisions and drafts, and `bsj export YYYY-MM-DD` prints them as the final line
-- The header shows `VERIFY OK` or `VERIFY BROKEN N` after unlock, save, and sync
-
-## Logging And Debug
-
-- `--debug` enables verbose file logging
-- Log file: `~/Library/Logs/bsj/bsj.log`
-- Logs intentionally avoid journal plaintext and secrets
-
-Examples:
+Direct Cargo fallback:
 
 ```bash
-cargo run -- --debug
-cargo run -- --debug backup
+cargo install --path . --locked --force
 ```
 
-## Backups
+Installer behavior:
 
-`bsj backup` creates an encrypted snapshot under `vault/backups/`.
+- installs `bsj`
+- installs docs and man page
+- installs shell completions for Bash, Zsh, and Fish
+- prints the exact `PATH` fix if your bin dir is not already on `PATH`
 
-- Snapshot contents are tar+zstd in memory, then encrypted before writing
-- Included data:
-  - `vault.json`
-  - `devices/*.json`
-  - encrypted entry revisions
-  - encrypted drafts
-- Backups exclude the `backups/` directory itself
-- Backup retention uses the app config:
-  - `daily`
-  - `weekly`
-  - `monthly`
+Default install locations:
 
-Example config file: `~/Library/Application Support/bsj/config.json`
+- prebuilt: `~/.local/bin/bsj`
+- source via installer: `~/.cargo/bin/bsj`
+- docs: `<prefix>/share/doc/bsj`
+- man page: `<prefix>/share/man/man1/bsj.1`
 
-```json
-{
-  "backup_retention": {
-    "daily": 7,
-    "weekly": 4,
-    "monthly": 6
-  }
-}
-```
+## First Run
 
-Restore into a target directory with:
+Launch the app:
 
 ```bash
-cargo run -- restore ~/Documents/BlueScreenJournal/vault/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore
+bsj
 ```
 
-This decrypts the backup with the current vault key material, unpacks it into the target directory, and leaves the source vault untouched.
+If no vault exists, the TUI setup wizard asks for:
 
-## Macros
+1. Vault path
+2. Passphrase
+3. Passphrase confirmation
+4. Optional epoch date for `ENTRY NO.`
 
-Macros live in the same config file and map a key binding to either inserted text or an internal command.
+Default vault path:
 
-Example:
-
-```json
-{
-  "macros": [
-    {
-      "key": "ctrl-j",
-      "type": "insert_template",
-      "text": "TODAY I NOTICED:\n\n"
-    },
-    {
-      "key": "ctrl-d",
-      "type": "command",
-      "command": "insert_date_header"
-    },
-    {
-      "key": "ctrl-g",
-      "type": "command",
-      "command": "jump_today"
-    },
-    {
-      "key": "ctrl-o",
-      "type": "command",
-      "command": "insert_closing_line"
-    }
-  ]
-}
+```text
+~/Documents/BlueScreenJournal
 ```
 
-Supported internal commands:
-
-- `insert_date_header`
-- `insert_closing_line`
-- `jump_today`
-
-Avoid binding macros to reserved controls such as `F1`-`F12`, which are used by the core UI.
-
-## Packaging
-
-Install locally:
+## Built-In Help
 
 ```bash
-cargo install --path .
+bsj --help
+bsj guide setup
+bsj guide settings
+bsj guide distribution
+bsj settings
+bsj settings --json
+bsj doctor
+bsj doctor --unlock
 ```
 
-Optional Homebrew formula template:
+## Daily Commands
 
-```ruby
-class Bsj < Formula
-  desc "BlueScreen Journal terminal journal"
-  homepage "https://example.com/bsj"
-  url "https://example.com/bsj/archive/v0.1.0.tar.gz"
-  sha256 "REPLACE_WITH_TARBALL_SHA256"
-  license "MIT"
-
-  depends_on "rust" => :build
-
-  def install
-    system "cargo", "install", *std_cargo_args(path: ".")
-  end
-
-  test do
-    assert_match "BlueScreen Journal", shell_output("#{bin}/bsj --help")
-  end
-end
+```bash
+bsj
+bsj open 2026-03-16
+bsj search "quiet morning" --from 2026-03-01 --to 2026-03-31
+bsj export 2026-03-16
+bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md
+bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj backup
+bsj backup list
+bsj backup prune
+bsj backup prune --apply
+bsj restore ~/Documents/BlueScreenJournal/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore
+bsj verify
 ```
 
-## Sync Backends
+## TUI Keys
 
-`bsj sync` moves only encrypted revision blobs plus plaintext vault metadata:
+- `F1` help
+- `F2` save revision
+- `F3` date picker
+- `F4` incremental find
+- `F5` global search
+- `F6` replace with `Y/N/A/Q`
+- `F7` index
+- `F8` sync
+- `F9` closing thought
+- `F10` quit
+- `F11` reveal codes
+- `F12` lock
+- `Ctrl+S` save fallback
+- `Ctrl+F` find fallback
+
+## Settings And Diagnostics
+
+Config file:
+
+```text
+~/Library/Application Support/bsj/config.json
+```
+
+Useful settings commands:
+
+```bash
+bsj settings init
+bsj settings get vault_path
+bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync
+bsj settings set backup_retention.daily 14
+```
+
+Useful diagnostics commands:
+
+```bash
+bsj doctor
+bsj doctor --unlock
+bsj doctor --unlock --json
+```
+
+Editable settings:
+
+- `vault_path`
+- `sync_target_path`
+- `device_nickname`
+- `backup_retention.daily`
+- `backup_retention.weekly`
+- `backup_retention.monthly`
+
+App-managed settings:
+
+- `local_device_id`
+- `vault.json` metadata and KDF parameters
+
+Environment variables:
+
+- `BSJ_PASSPHRASE`
+- `BSJ_SYNC_BACKEND`
+- `BSJ_S3_BUCKET`
+- `BSJ_S3_PREFIX`
+- `AWS_REGION`
+- `BSJ_WEBDAV_URL`
+- `BSJ_WEBDAV_USERNAME`
+- `BSJ_WEBDAV_PASSWORD`
+
+## Sync
+
+`bsj sync` transfers only:
 
 - `vault.json`
 - `devices/<deviceId>.json`
-- `entries/YYYY/YYYY-MM-DD/rev-*.bsj.enc`
+- encrypted `entries/.../rev-*.bsj.enc`
 
-It never uploads plaintext journal bodies, drafts, or a plaintext search index.
+It does not upload plaintext journal bodies, drafts, or a plaintext search index.
 
-### Folder Backend
-
-Use this for iCloud Drive, Dropbox, Syncthing, or any shared folder.
+Folder sync:
 
 ```bash
-cargo run -- sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
 ```
 
-If you omit `--backend`, folder mode is the default unless `--remote` looks like `s3://...` or `https://...`.
-
-### S3 Backend
-
-Configuration uses standard AWS credentials from the environment or your normal AWS config chain. No AWS secrets are written to `vault.json`.
-
-Required environment:
+S3 sync:
 
 ```bash
 export BSJ_SYNC_BACKEND=s3
 export BSJ_S3_BUCKET=your-bucket
 export BSJ_S3_PREFIX=bluescreenjournal
 export AWS_REGION=us-east-1
+bsj sync
 ```
 
-Then run:
-
-```bash
-cargo run -- sync
-```
-
-Or override the bucket/prefix directly:
-
-```bash
-cargo run -- sync --backend s3 --remote s3://your-bucket/bluescreenjournal
-```
-
-### WebDAV Backend
-
-Configuration uses environment variables only by default. Credentials are not stored in `vault.json`.
+WebDAV sync:
 
 ```bash
 export BSJ_SYNC_BACKEND=webdav
 export BSJ_WEBDAV_URL=https://dav.example.com/BlueScreenJournal/
 export BSJ_WEBDAV_USERNAME=your-user
 export BSJ_WEBDAV_PASSWORD=your-password
+bsj sync
 ```
 
-Then run:
+## Backups
+
+`bsj backup` creates an encrypted snapshot under:
+
+```text
+<vault>/backups/
+```
+
+Inspect retention and prune behavior:
 
 ```bash
-cargo run -- sync
+bsj backup list
+bsj backup prune
+bsj backup prune --apply
 ```
 
-Or override the URL directly:
+## Completions
+
+Generate completions on demand:
 
 ```bash
-cargo run -- sync --backend webdav --remote https://dav.example.com/BlueScreenJournal/
+bsj completions bash
+bsj completions zsh
+bsj completions fish
 ```
 
-## Security Notes
+The installer also places completion files under the install prefix.
 
-- Journal bodies are encrypted at rest with Argon2id + XChaCha20-Poly1305.
-- Closing thoughts are encrypted inside the same revision and draft payloads.
-- Sync transports move encrypted revision blobs only.
-- Backup snapshots are encrypted before they hit disk.
-- `vault.json` contains vault metadata and KDF parameters, not journal plaintext.
-- `F12` locking drops the vault key and wipes in-memory editor/search state.
-- Credentials are expected from environment variables. Local secret storage is not written into the vault format.
+## Logging
 
-## Tests
+- `--debug` enables verbose file logging
+- log path: `~/Library/Logs/bsj/bsj.log`
+- logs intentionally avoid journal plaintext and secrets
 
-Run the full local suite with:
+Examples:
 
 ```bash
-cargo test --all-targets
+bsj --debug
+bsj --debug sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync
 ```
 
-S3 and WebDAV smoke tests are skipped unless the corresponding environment variables are present:
+## Distribution
 
-- S3: `BSJ_S3_BUCKET`
-- WebDAV: `BSJ_WEBDAV_URL`
+Build a release bundle:
 
-## Manual Smoke Test Checklist
+```bash
+./scripts/package-release.sh
+```
 
-Run these in both Terminal.app and iTerm2:
+Smoke-test the release bundle install:
 
-1. Launch at `80x25` or larger and confirm the blue full-screen editor appears with header, body, and footer strip.
-2. Type a short entry, set a closing thought with `F9`, save with `F2`, quit, reopen, and confirm both persist.
-3. Press `F8` and confirm the sync status overlay appears, completes, and shows pulled/pushed counts plus verify status.
-4. Press `F11` and confirm Reveal Codes appears; press it again and confirm normal view returns.
-5. Press `F12` and confirm the app returns to the passphrase prompt; unlock again and confirm the saved entry reloads.
-6. Resize below `80x25` and confirm the warning screen appears; resize back and confirm editing resumes cleanly.
-7. Run `cargo run -- backup`, confirm an encrypted file appears under `vault/backups/`, and confirm `rg` does not find plaintext journal text in that backup file.
-8. Run `cargo run -- restore ... --into ...` and confirm the restored vault opens and matches the saved entry history.
-9. Run with `--debug` and confirm `~/Library/Logs/bsj/bsj.log` is written without journal plaintext.
+```bash
+./scripts/smoke-release-install.sh
+```
+
+Artifacts:
+
+- `dist/bsj-<version>-<target>/`
+- `dist/bsj-<version>-<target>.tar.gz`
+- `dist/bsj-<version>-<target>.tar.gz.sha256`
+- `dist/bsj-<version>-<target>/packaging/homebrew/bsj.rb`
+
+## Reference Docs
+
+- `docs/SETUP_GUIDE.md`
+- `docs/SETTINGS_GUIDE.md`
+- `docs/DISTRIBUTION.md`
+- `docs/config.example.json`
+- `docs/bsj.1`
+
+## Manual Smoke Checklist
+
+Terminal.app:
+
+1. Open a window at least `80x25`.
+2. Launch `bsj`.
+3. Verify the blue-screen layout, visible footer strip, and block cursor behavior.
+4. Save a revision, lock with `F12`, unlock again, and confirm the entry reloads.
+5. Trigger `F3`, `F5`, `F7`, `F8`, `F11`, and `F12`.
+
+iTerm2:
+
+1. Launch `bsj`.
+2. Resize below `80x25` and confirm the warning screen appears without panic.
+3. Resize back up and confirm the editor redraws cleanly.
+4. Verify function keys and `Ctrl+S` / `Ctrl+F` fallbacks work.
+
+## Development
+
+```bash
+just fmt
+just clippy
+just test
+just package
+just smoke-dist
+```

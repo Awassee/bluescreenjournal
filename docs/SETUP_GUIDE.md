@@ -1,0 +1,131 @@
+# Setup Guide
+
+## Install Paths
+
+Preferred end-user install from a release bundle:
+
+```bash
+./install.sh --prebuilt
+```
+
+Source install from a repo checkout:
+
+```bash
+./install.sh --source
+```
+
+Manual Cargo fallback:
+
+```bash
+cargo install --path . --locked --force
+```
+
+The installer:
+
+- installs the `bsj` binary
+- installs docs and the man page
+- installs Bash, Zsh, and Fish completions
+- prints the exact `PATH` fix if needed
+
+## First Launch
+
+Start the app:
+
+```bash
+bsj
+```
+
+If no vault exists, the TUI setup wizard asks for:
+
+1. Vault path
+2. Passphrase
+3. Passphrase confirmation
+4. Optional epoch date for `ENTRY NO.`
+
+Default vault path:
+
+```text
+~/Documents/BlueScreenJournal
+```
+
+The setup wizard creates:
+
+- `vault.json`
+- `devices/<deviceId>.json`
+- `entries/`
+
+## First CLI Checks
+
+After setup:
+
+```bash
+bsj settings
+bsj doctor
+bsj doctor --unlock
+bsj verify
+```
+
+## Common Daily Tasks
+
+Open today or a specific date:
+
+```bash
+bsj
+bsj open 2026-03-16
+```
+
+Search without writing a plaintext on-disk index:
+
+```bash
+bsj search "quiet morning" --from 2026-03-01 --to 2026-03-31
+```
+
+Export:
+
+```bash
+bsj export 2026-03-16
+bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md
+```
+
+Sync, backup, restore, verify:
+
+```bash
+bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj backup
+bsj backup list
+bsj backup prune
+bsj restore ~/Documents/BlueScreenJournal/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore
+bsj verify
+```
+
+## TUI Keys
+
+- `F1` help
+- `F2` save revision
+- `F3` date picker
+- `F4` find
+- `F5` global search
+- `F6` replace
+- `F7` index
+- `F8` sync
+- `F9` closing thought
+- `F10` quit
+- `F11` reveal codes
+- `F12` lock
+- `Ctrl+S` save fallback
+- `Ctrl+F` find fallback
+
+## Troubleshooting
+
+- `bsj settings` shows effective config, vault path, and env status.
+- `bsj doctor --unlock` verifies vault integrity and sync readiness.
+- `bsj --debug` enables verbose logs without journal plaintext.
+- Logs are written to `~/Library/Logs/bsj/bsj.log`.
+- If the editor warns that the terminal is too small, resize to at least `80x25`.
+
+## More Reference
+
+- `bsj guide settings`
+- `bsj guide distribution`
+- `docs/SETTINGS_GUIDE.md`
+- `docs/DISTRIBUTION.md`

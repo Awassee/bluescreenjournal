@@ -1,0 +1,17 @@
+class Bsj < Formula
+  desc "Encrypted nostalgic blue-screen journaling TUI for macOS"
+  homepage "@HOMEPAGE@"
+  url "@URL@"
+  version "@VERSION@"
+  sha256 "@SHA256@"
+
+  def install
+    bin.install "bin/bsj"
+    man1.install "docs/bsj.1"
+    pkgshare.install "README.md", "docs"
+  end
+
+  test do
+    assert_match "BlueScreen Journal", shell_output("#{bin}/bsj --help")
+  end
+end

@@ -1,0 +1,33 @@
+{
+  "vault_path": "/Users/you/Documents/BlueScreenJournal",
+  "sync_target_path": "/Users/you/Library/Mobile Documents/com~apple~CloudDocs/BlueScreenJournal",
+  "local_device_id": null,
+  "device_nickname": "This Mac",
+  "backup_retention": {
+    "daily": 7,
+    "weekly": 4,
+    "monthly": 6
+  },
+  "macros": [
+    {
+      "key": "ctrl-j",
+      "type": "insert_template",
+      "text": "TODAY I NOTICED:\n\n"
+    },
+    {
+      "key": "ctrl-d",
+      "type": "command",
+      "command": "insert_date_header"
+    },
+    {
+      "key": "ctrl-o",
+      "type": "command",
+      "command": "insert_closing_line"
+    },
+    {
+      "key": "ctrl-g",
+      "type": "command",
+      "command": "jump_today"
+    }
+  ]
+}

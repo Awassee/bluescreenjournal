@@ -143,6 +143,21 @@ pub struct BackupSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackupEntry {
+    pub path: PathBuf,
+    pub created_at: DateTime<Utc>,
+    pub size_bytes: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedEntry {
+    pub date: NaiveDate,
+    pub entry_number: String,
+    pub body: String,
+    pub closing_thought: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IntegrityIssue {
     pub date: Option<NaiveDate>,
     pub message: String,
@@ -342,12 +357,27 @@ impl UnlockedVault {
         atomic_write(&path, &encrypted.to_bytes())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn export_entry_text(&self, date: NaiveDate) -> VaultResult<Option<String>> {
+        Ok(self
+            .export_entry(date)?
+            .map(|entry| format_export_text(&entry.body, entry.closing_thought.as_deref())))
+    }
+
+    pub fn export_entry(&self, date: NaiveDate) -> VaultResult<Option<ExportedEntry>> {
         let records = self.scan_date_revisions(date)?;
         let heads = head_records(&records);
         let primary = heads.first().or_else(|| records.first());
-        Ok(primary
-            .map(|record| format_export_text(&record.body, record.closing_thought.as_deref())))
+        let Some(record) = primary else {
+            return Ok(None);
+        };
+        let epoch = self.metadata.epoch_date()?;
+        Ok(Some(ExportedEntry {
+            date,
+            entry_number: compute_entry_number(epoch, date),
+            body: record.body.clone(),
+            closing_thought: record.closing_thought.clone(),
+        }))
     }
 
     pub fn create_backup(&self, retention: &BackupRetentionConfig) -> VaultResult<BackupSummary> {
@@ -551,6 +581,40 @@ impl UnlockedVault {
         self.sync_with_backend(&mut backend)
     }
 
+    pub fn list_backups(&self) -> VaultResult<Vec<BackupEntry>> {
+        let backup_dir = self.root.join("backups");
+        list_backup_artifacts(&backup_dir)?
+            .into_iter()
+            .map(|artifact| backup_artifact_to_entry(&artifact))
+            .collect()
+    }
+
+    pub fn preview_backup_prune(
+        &self,
+        retention: &BackupRetentionConfig,
+    ) -> VaultResult<Vec<BackupEntry>> {
+        let backup_dir = self.root.join("backups");
+        prune_candidates(&backup_dir, retention)?
+            .into_iter()
+            .map(|artifact| backup_artifact_to_entry(&artifact))
+            .collect()
+    }
+
+    pub fn prune_backups_now(
+        &self,
+        retention: &BackupRetentionConfig,
+    ) -> VaultResult<Vec<BackupEntry>> {
+        let backup_dir = self.root.join("backups");
+        let candidates = prune_candidates(&backup_dir, retention)?;
+        let mut pruned = Vec::with_capacity(candidates.len());
+        for artifact in candidates {
+            let entry = backup_artifact_to_entry(&artifact)?;
+            fs::remove_file(&artifact.path)?;
+            pruned.push(entry);
+        }
+        Ok(pruned)
+    }
+
     fn save_revision_internal(
         &self,
         date: NaiveDate,
@@ -634,6 +698,11 @@ pub fn vault_exists(path: &Path) -> bool {
     path.join("vault.json").is_file()
 }
 
+pub fn load_vault_metadata(path: &Path) -> VaultResult<VaultMetadata> {
+    let metadata: VaultMetadata = serde_json::from_slice(&fs::read(path.join("vault.json"))?)?;
+    Ok(metadata)
+}
+
 pub fn create_vault(
     path: &Path,
     passphrase: &SecretString,
@@ -676,7 +745,7 @@ pub fn create_vault(
 }
 
 pub fn unlock_vault(path: &Path, passphrase: &SecretString) -> VaultResult<UnlockedVault> {
-    let metadata: VaultMetadata = serde_json::from_slice(&fs::read(path.join("vault.json"))?)?;
+    let metadata = load_vault_metadata(path)?;
     let key = derive_key(passphrase, &metadata.kdf)?;
     Ok(UnlockedVault {
         root: path.to_path_buf(),
@@ -1113,9 +1182,22 @@ fn list_backup_artifacts(backup_dir: &Path) -> VaultResult<Vec<BackupArtifact>> 
 }
 
 fn prune_backups(backup_dir: &Path, retention: &BackupRetentionConfig) -> VaultResult<usize> {
+    let artifacts = prune_candidates(backup_dir, retention)?;
+    let mut pruned = 0usize;
+    for artifact in artifacts {
+        fs::remove_file(artifact.path)?;
+        pruned += 1;
+    }
+    Ok(pruned)
+}
+
+fn prune_candidates(
+    backup_dir: &Path,
+    retention: &BackupRetentionConfig,
+) -> VaultResult<Vec<BackupArtifact>> {
     let artifacts = list_backup_artifacts(backup_dir)?;
     if artifacts.is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
 
     let mut keep = HashSet::new();
@@ -1145,15 +1227,18 @@ fn prune_backups(backup_dir: &Path, retention: &BackupRetentionConfig) -> VaultR
         }
     }
 
-    let mut pruned = 0usize;
-    for artifact in artifacts {
-        if keep.contains(&artifact.path) {
-            continue;
-        }
-        fs::remove_file(artifact.path)?;
-        pruned += 1;
-    }
-    Ok(pruned)
+    Ok(artifacts
+        .into_iter()
+        .filter(|artifact| !keep.contains(&artifact.path))
+        .collect())
+}
+
+fn backup_artifact_to_entry(artifact: &BackupArtifact) -> VaultResult<BackupEntry> {
+    Ok(BackupEntry {
+        path: artifact.path.clone(),
+        created_at: artifact.created_at,
+        size_bytes: fs::metadata(&artifact.path)?.len(),
+    })
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> VaultResult<()> {
@@ -1621,6 +1706,71 @@ mod tests {
             restored_state.recovery_draft_closing_thought.as_deref(),
             Some("Draft closing.")
         );
+    }
+
+    #[test]
+    fn backup_listing_and_prune_preview_work() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        vault
+            .save_entry_revision(date, "secret backup body", Some("Lights out."))
+            .expect("save revision");
+
+        let created = vault
+            .create_backup(&BackupRetentionConfig {
+                daily: 7,
+                weekly: 4,
+                monthly: 6,
+            })
+            .expect("backup");
+        let original_bytes = fs::read(&created.path).expect("read backup");
+        let backup_dir = root.join("backups");
+        fs::write(
+            backup_dir.join("backup-20260316T000000Z.bsjbak.enc"),
+            &original_bytes,
+        )
+        .expect("seed old backup");
+        fs::write(
+            backup_dir.join("backup-20260317T000000Z.bsjbak.enc"),
+            &original_bytes,
+        )
+        .expect("seed new backup");
+
+        let backups = vault.list_backups().expect("list backups");
+        assert!(backups.len() >= 2);
+
+        let prune_preview = vault
+            .preview_backup_prune(&BackupRetentionConfig {
+                daily: 1,
+                weekly: 0,
+                monthly: 0,
+            })
+            .expect("prune preview");
+        assert!(!prune_preview.is_empty());
+    }
+
+    #[test]
+    fn export_entry_includes_entry_number() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        let epoch = NaiveDate::from_ymd_opt(2026, 3, 1).expect("epoch");
+        create_vault(&root, &passphrase, Some(epoch), "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+
+        vault
+            .save_entry_revision(date, "body text", Some("Good night."))
+            .expect("save revision");
+
+        let exported = vault.export_entry(date).expect("export").expect("entry");
+        assert_eq!(exported.entry_number, compute_entry_number(epoch, date));
+        assert_eq!(exported.body, "body text");
+        assert_eq!(exported.closing_thought.as_deref(), Some("Good night."));
     }
 
     fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
