@@ -58,6 +58,10 @@ test -f "$INSTALL_PREFIX/share/bsj/examples/config.example.json"
 test -f "$INSTALL_PREFIX/share/bash-completion/completions/bsj"
 test -f "$INSTALL_PREFIX/share/zsh/site-functions/_bsj"
 test -f "$INSTALL_PREFIX/share/fish/vendor_completions.d/bsj.fish"
+if strings "$INSTALL_PREFIX/bin/bsj" | rg -q '(/Users/|\\.cargo/registry|seanheiney|sean-mba-m2-2071|pinehollow)'; then
+  echo "Installed binary leaks local build paths or identifiers" >&2
+  exit 1
+fi
 
 cat <<EOF
 Smoke test passed:

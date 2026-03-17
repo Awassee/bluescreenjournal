@@ -5,6 +5,7 @@ edition = "2024"
 description = "Encrypted nostalgic blue-screen journaling TUI for macOS"
 readme = "README.md"
 rust-version = "1.85"
+license = "MIT"
 keywords = ["journal", "tui", "macos", "encryption"]
 categories = ["command-line-utilities", "text-editors"]
 
@@ -37,3 +38,7 @@ zeroize = { version = "1.8.1", features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3.18.0"
+
+[profile.release]
+debug = 0
+strip = true

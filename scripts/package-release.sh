@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_DIR="$ROOT_DIR/dist"
 TARGET=""
+PACKAGE_RUSTFLAGS="${RUSTFLAGS:-}"
 
 usage() {
   cat <<'EOF'
@@ -42,6 +43,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+append_rustflag() {
+  if [[ -n "$PACKAGE_RUSTFLAGS" ]]; then
+    PACKAGE_RUSTFLAGS+=" "
+  fi
+  PACKAGE_RUSTFLAGS+="$1"
+}
+
+append_rustflag "--remap-path-prefix=$ROOT_DIR=/workspace"
+if [[ -n "${HOME:-}" ]]; then
+  append_rustflag "--remap-path-prefix=$HOME=/home/builder"
+fi
+
 NAME="$(awk -F ' *= *' '$1=="name"{gsub(/"/,"",$2); print $2; exit}' "$ROOT_DIR/Cargo.toml")"
 VERSION="$(awk -F ' *= *' '$1=="version"{gsub(/"/,"",$2); print $2; exit}' "$ROOT_DIR/Cargo.toml")"
 HOST_TARGET="$(rustc -vV | awk '/^host: / {print $2}')"
@@ -50,13 +63,13 @@ BUILD_TARGET="${TARGET:-$HOST_TARGET}"
 if [[ -n "$TARGET" ]]; then
   (
     cd "$ROOT_DIR"
-    cargo build --release --locked --target "$TARGET"
+    RUSTFLAGS="$PACKAGE_RUSTFLAGS" cargo build --release --locked --target "$TARGET"
   )
   BINARY_PATH="$ROOT_DIR/target/$TARGET/release/$NAME"
 else
   (
     cd "$ROOT_DIR"
-    cargo build --release --locked
+    RUSTFLAGS="$PACKAGE_RUSTFLAGS" cargo build --release --locked
   )
   BINARY_PATH="$ROOT_DIR/target/release/$NAME"
 fi
