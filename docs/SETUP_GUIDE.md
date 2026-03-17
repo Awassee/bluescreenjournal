@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Install a specific tagged release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.4
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.5
 ```
 
 Install from source instead:
@@ -136,6 +136,14 @@ bsj verify
 
 - `docs/START_HERE.md`
 - `docs/QUICKSTART.md`
+- `bsj guide docs`
+- `bsj guide quickstart`
+- `bsj guide troubleshooting`
+- `bsj guide sync`
+- `bsj guide backup`
+- `bsj guide macros`
+- `bsj guide terminal`
+- `bsj guide privacy`
 - `bsj guide product`
 - `bsj guide datasheet`
 - `bsj guide faq`
@@ -143,6 +151,12 @@ bsj verify
 - `bsj guide settings`
 - `bsj guide distribution`
 - `docs/PRODUCT_GUIDE.md`
+- `docs/TROUBLESHOOTING.md`
+- `docs/SYNC_GUIDE.md`
+- `docs/BACKUP_RESTORE.md`
+- `docs/MACRO_GUIDE.md`
+- `docs/TERMINAL_GUIDE.md`
+- `docs/PRIVACY.md`
 - `docs/DATASHEET.md`
 - `docs/FAQ.md`
 - `docs/SETTINGS_GUIDE.md`

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.5
+
+- added troubleshooting, sync, backup/restore, terminal, privacy, and macro operator guides
+- added roadmap and contributing docs plus a pull request template
+- added new built-in guide topics for troubleshooting, sync, backup, macros, terminal, and privacy
+- improved packaged-install validation so the new operator docs ship in release bundles
+
 ## v0.1.4
 
 - added docs hub, quickstart, FAQ, comparison guide, support policy, and security policy

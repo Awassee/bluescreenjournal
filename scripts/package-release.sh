@@ -169,9 +169,7 @@ mkdir -p \
 
 install -m 755 "$BINARY_PATH" "$BUNDLE_DIR/bin/$NAME"
 install -m 755 "$ROOT_DIR/install.sh" "$BUNDLE_DIR/install.sh"
-install -m 644 "$ROOT_DIR/README.md" "$BUNDLE_DIR/README.md"
-install -m 644 "$ROOT_DIR/LICENSE" "$BUNDLE_DIR/LICENSE"
-for root_doc in CHANGELOG.md SUPPORT.md SECURITY.md; do
+for root_doc in README.md LICENSE CHANGELOG.md SUPPORT.md SECURITY.md CONTRIBUTING.md ROADMAP.md; do
   if [[ -f "$ROOT_DIR/$root_doc" ]]; then
     install -m 644 "$ROOT_DIR/$root_doc" "$BUNDLE_DIR/$root_doc"
   fi

@@ -21,7 +21,7 @@ use std::{
     name = "bsj",
     about = "BlueScreen Journal",
     long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, a menu-driven TUI, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.",
-    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
 )]
 struct Cli {
     #[arg(
@@ -81,7 +81,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<SettingsCommand>,
     },
-    /// Print the docs hub, quickstart, product, datasheet, FAQ, support, settings, or distribution guide
+    /// Print the docs hub, quickstart, troubleshooting, sync, backup, macros, terminal, privacy, product, datasheet, FAQ, support, settings, or distribution guide
     Guide {
         #[arg(value_enum, default_value_t = GuideTopicArg::Setup)]
         topic: GuideTopicArg,
@@ -135,6 +135,12 @@ enum SyncBackendArg {
 enum GuideTopicArg {
     Docs,
     Quickstart,
+    Troubleshooting,
+    Sync,
+    Backup,
+    Macros,
+    Terminal,
+    Privacy,
     Setup,
     Product,
     Datasheet,
@@ -670,6 +676,12 @@ fn run_cli_guide(topic: GuideTopicArg) -> Result<(), String> {
     let output = match topic {
         GuideTopicArg::Docs => help::render_docs_hub(),
         GuideTopicArg::Quickstart => help::render_quickstart_guide(),
+        GuideTopicArg::Troubleshooting => help::render_troubleshooting_guide(),
+        GuideTopicArg::Sync => help::render_sync_guide(),
+        GuideTopicArg::Backup => help::render_backup_restore_guide(),
+        GuideTopicArg::Macros => help::render_macro_guide(),
+        GuideTopicArg::Terminal => help::render_terminal_guide(),
+        GuideTopicArg::Privacy => help::render_privacy_guide(),
         GuideTopicArg::Setup => {
             help::render_setup_guide(&config_path, &default_vault_path, &log_path)
         }

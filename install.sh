@@ -98,7 +98,7 @@ Environment overrides:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
-  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.4
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.5
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
 EOF
 }
@@ -437,13 +437,7 @@ install_prebuilt() {
 
   install -m 755 "$ROOT_DIR/bin/bsj" "$final_bin_dir/bsj"
 
-  if [[ -f "$ROOT_DIR/README.md" ]]; then
-    install -m 644 "$ROOT_DIR/README.md" "$final_doc_dir/README.md"
-  fi
-  if [[ -f "$ROOT_DIR/LICENSE" ]]; then
-    install -m 644 "$ROOT_DIR/LICENSE" "$final_doc_dir/LICENSE"
-  fi
-  for root_doc in CHANGELOG.md SUPPORT.md SECURITY.md; do
+  for root_doc in README.md LICENSE CHANGELOG.md SUPPORT.md SECURITY.md CONTRIBUTING.md ROADMAP.md; do
     if [[ -f "$ROOT_DIR/$root_doc" ]]; then
       install -m 644 "$ROOT_DIR/$root_doc" "$final_doc_dir/$root_doc"
     fi

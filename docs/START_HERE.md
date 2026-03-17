@@ -14,8 +14,18 @@ If you are new to BlueScreen Journal, use this page to choose the right next doc
   - `docs/COMPARE.md`
 - I want to understand config, environment variables, and settings:
   - `docs/SETTINGS_GUIDE.md`
+- I want to understand daily operations, privacy, and failure recovery:
+  - `docs/TROUBLESHOOTING.md`
+  - `docs/SYNC_GUIDE.md`
+  - `docs/BACKUP_RESTORE.md`
+  - `docs/TERMINAL_GUIDE.md`
+  - `docs/PRIVACY.md`
+  - `docs/MACRO_GUIDE.md`
 - I want to understand packaging, release bundles, and installer behavior:
   - `docs/DISTRIBUTION.md`
+- I want to understand the project plan or contribute:
+  - `ROADMAP.md`
+  - `CONTRIBUTING.md`
 - I have a question or a problem:
   - `docs/FAQ.md`
   - `SUPPORT.md`
@@ -37,7 +47,15 @@ If you are new to BlueScreen Journal, use this page to choose the right next doc
 
 The app can print the main operator docs directly:
 
+- `bsj guide docs`
 - `bsj guide quickstart`
+- `bsj guide troubleshooting`
+- `bsj guide sync`
+- `bsj guide backup`
+- `bsj guide macros`
+- `bsj guide terminal`
+- `bsj guide privacy`
+- `bsj guide setup`
 - `bsj guide product`
 - `bsj guide datasheet`
 - `bsj guide faq`

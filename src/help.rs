@@ -14,6 +14,12 @@ const QUICKSTART_GUIDE_BODY: &str = include_str!("../docs/QUICKSTART.md");
 const PRODUCT_GUIDE_BODY: &str = include_str!("../docs/PRODUCT_GUIDE.md");
 const DATASHEET_BODY: &str = include_str!("../docs/DATASHEET.md");
 const FAQ_BODY: &str = include_str!("../docs/FAQ.md");
+const TROUBLESHOOTING_GUIDE_BODY: &str = include_str!("../docs/TROUBLESHOOTING.md");
+const SYNC_GUIDE_BODY: &str = include_str!("../docs/SYNC_GUIDE.md");
+const BACKUP_RESTORE_GUIDE_BODY: &str = include_str!("../docs/BACKUP_RESTORE.md");
+const MACRO_GUIDE_BODY: &str = include_str!("../docs/MACRO_GUIDE.md");
+const TERMINAL_GUIDE_BODY: &str = include_str!("../docs/TERMINAL_GUIDE.md");
+const PRIVACY_GUIDE_BODY: &str = include_str!("../docs/PRIVACY.md");
 const SETTINGS_GUIDE_BODY: &str = include_str!("../docs/SETTINGS_GUIDE.md");
 const DISTRIBUTION_GUIDE_BODY: &str = include_str!("../docs/DISTRIBUTION.md");
 const SUPPORT_BODY: &str = include_str!("../SUPPORT.md");
@@ -117,6 +123,48 @@ pub fn render_datasheet() -> String {
 
 pub fn render_faq() -> String {
     format!("BlueScreen Journal FAQ\n\n{}\n", FAQ_BODY.trim_end())
+}
+
+pub fn render_troubleshooting_guide() -> String {
+    format!(
+        "BlueScreen Journal Troubleshooting Guide\n\n{}\n",
+        TROUBLESHOOTING_GUIDE_BODY.trim_end()
+    )
+}
+
+pub fn render_sync_guide() -> String {
+    format!(
+        "BlueScreen Journal Sync Guide\n\n{}\n",
+        SYNC_GUIDE_BODY.trim_end()
+    )
+}
+
+pub fn render_backup_restore_guide() -> String {
+    format!(
+        "BlueScreen Journal Backup And Restore Guide\n\n{}\n",
+        BACKUP_RESTORE_GUIDE_BODY.trim_end()
+    )
+}
+
+pub fn render_macro_guide() -> String {
+    format!(
+        "BlueScreen Journal Macro Guide\n\n{}\n",
+        MACRO_GUIDE_BODY.trim_end()
+    )
+}
+
+pub fn render_terminal_guide() -> String {
+    format!(
+        "BlueScreen Journal Terminal Guide\n\n{}\n",
+        TERMINAL_GUIDE_BODY.trim_end()
+    )
+}
+
+pub fn render_privacy_guide() -> String {
+    format!(
+        "BlueScreen Journal Privacy Guide\n\n{}\n",
+        PRIVACY_GUIDE_BODY.trim_end()
+    )
 }
 
 pub fn render_distribution_guide() -> String {
@@ -311,6 +359,24 @@ pub fn render_settings_report(
     push_row(&mut output, "guide_faq", "bsj guide faq".to_string());
     push_row(
         &mut output,
+        "guide_troubleshooting",
+        "bsj guide troubleshooting".to_string(),
+    );
+    push_row(&mut output, "guide_sync", "bsj guide sync".to_string());
+    push_row(&mut output, "guide_backup", "bsj guide backup".to_string());
+    push_row(&mut output, "guide_macros", "bsj guide macros".to_string());
+    push_row(
+        &mut output,
+        "guide_terminal",
+        "bsj guide terminal".to_string(),
+    );
+    push_row(
+        &mut output,
+        "guide_privacy",
+        "bsj guide privacy".to_string(),
+    );
+    push_row(
+        &mut output,
         "guide_support",
         "bsj guide support".to_string(),
     );
@@ -412,9 +478,10 @@ fn macro_command_name(command: &MacroCommandConfig) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        EnvironmentSettings, render_datasheet, render_docs_hub, render_faq, render_product_guide,
+        EnvironmentSettings, render_backup_restore_guide, render_datasheet, render_docs_hub,
+        render_faq, render_macro_guide, render_privacy_guide, render_product_guide,
         render_quickstart_guide, render_settings_guide, render_settings_report, render_setup_guide,
-        render_support,
+        render_support, render_sync_guide, render_terminal_guide, render_troubleshooting_guide,
     };
     use crate::config::{AppConfig, BackupRetentionConfig, MacroActionConfig, MacroConfig};
     use crate::vault::{KdfParams, VaultMetadata, VaultOptions};
@@ -479,6 +546,48 @@ mod tests {
         let text = render_faq();
         assert!(text.contains("plaintext"));
         assert!(text.contains("search index"));
+    }
+
+    #[test]
+    fn troubleshooting_mentions_verify_and_doctor() {
+        let text = render_troubleshooting_guide();
+        assert!(text.contains("bsj doctor"));
+        assert!(text.contains("verify"));
+    }
+
+    #[test]
+    fn sync_guide_mentions_folder_and_conflicts() {
+        let text = render_sync_guide();
+        assert!(text.contains("folder"));
+        assert!(text.contains("conflict"));
+    }
+
+    #[test]
+    fn backup_guide_mentions_restore_and_drill() {
+        let text = render_backup_restore_guide();
+        assert!(text.contains("restore"));
+        assert!(text.contains("drill"));
+    }
+
+    #[test]
+    fn macro_guide_mentions_reserved_keys_and_commands() {
+        let text = render_macro_guide();
+        assert!(text.contains("F1"));
+        assert!(text.contains("jump_today"));
+    }
+
+    #[test]
+    fn terminal_guide_mentions_terminals_and_function_keys() {
+        let text = render_terminal_guide();
+        assert!(text.contains("Terminal.app"));
+        assert!(text.contains("function"));
+    }
+
+    #[test]
+    fn privacy_guide_mentions_exports_and_plaintext() {
+        let text = render_privacy_guide();
+        assert!(text.contains("export"));
+        assert!(text.contains("plaintext"));
     }
 
     #[test]

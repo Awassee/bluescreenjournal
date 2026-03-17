@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.4
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.5
 ```
 
 Install from source instead of the prebuilt release:
@@ -229,6 +229,12 @@ bsj doctor
 bsj doctor --unlock
 bsj guide docs
 bsj guide quickstart
+bsj guide troubleshooting
+bsj guide sync
+bsj guide backup
+bsj guide macros
+bsj guide terminal
+bsj guide privacy
 bsj guide product
 bsj guide datasheet
 bsj guide faq
@@ -261,17 +267,25 @@ Start here on GitHub:
 
 - [Start Here](docs/START_HERE.md)
 - [Quickstart](docs/QUICKSTART.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Sync Guide](docs/SYNC_GUIDE.md)
+- [Backup And Restore](docs/BACKUP_RESTORE.md)
+- [Macro Guide](docs/MACRO_GUIDE.md)
+- [Terminal Guide](docs/TERMINAL_GUIDE.md)
+- [Privacy Guide](docs/PRIVACY.md)
 - [Product Guide](docs/PRODUCT_GUIDE.md)
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v0.1.4.md)
+- [Release Notes](docs/releases/v0.1.5.md)
 - [Setup Guide](docs/SETUP_GUIDE.md)
 - [Settings Guide](docs/SETTINGS_GUIDE.md)
 - [Distribution Guide](docs/DISTRIBUTION.md)
 - [Man Page](docs/bsj.1)
 - [Example Config](docs/config.example.json)
 - [Changelog](CHANGELOG.md)
+- [Roadmap](ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
 - [Support](SUPPORT.md)
 - [Security Policy](SECURITY.md)
 
@@ -279,6 +293,8 @@ Start here on GitHub:
 
 - Need help getting unstuck: [SUPPORT.md](SUPPORT.md)
 - Need common answers first: [docs/FAQ.md](docs/FAQ.md)
+- Need troubleshooting steps: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- Need sync or backup operating guidance: [docs/SYNC_GUIDE.md](docs/SYNC_GUIDE.md) and [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md)
 - Need to evaluate fit: [docs/COMPARE.md](docs/COMPARE.md)
 - Need security disclosure guidance: [SECURITY.md](SECURITY.md)
 

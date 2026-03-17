@@ -226,8 +226,16 @@ It is not:
 - `docs/QUICKSTART.md` for the fastest onboarding path
 - `README.md` for install and quick orientation
 - `docs/SETUP_GUIDE.md` for onboarding
+- `docs/TROUBLESHOOTING.md` for failure recovery and operator fixes
+- `docs/SYNC_GUIDE.md` for encrypted sync operations
+- `docs/BACKUP_RESTORE.md` for backup drills and restore procedure
+- `docs/TERMINAL_GUIDE.md` for Terminal.app and iTerm2 setup
+- `docs/PRIVACY.md` for the plaintext boundary and operator precautions
+- `docs/MACRO_GUIDE.md` for safe workflow acceleration
 - `docs/FAQ.md` for common product and security questions
 - `docs/COMPARE.md` for product-fit decisions
 - `docs/SETTINGS_GUIDE.md` for config and environment details
 - `docs/DATASHEET.md` for the concise capability sheet
 - `docs/DISTRIBUTION.md` for release packaging and installer behavior
+- `ROADMAP.md` for the planned product direction
+- `CONTRIBUTING.md` for contributor workflow
