@@ -4,10 +4,36 @@
 
 This repo supports two install paths:
 
-1. source install with Cargo
-2. prebuilt release bundle install without Cargo
+1. turnkey bootstrap install from a one-line shell command
+2. source install with Cargo
 
-The prebuilt release bundle is the intended end-user distribution format.
+The prebuilt release bundle is the intended end-user distribution format, and the bootstrap installer is the intended public entry point.
+
+For the user-facing product story and capability summary, pair this guide with:
+
+- `docs/PRODUCT_GUIDE.md`
+- `docs/DATASHEET.md`
+
+## Turnkey Public Install
+
+Users should be able to paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
+```
+
+That bootstrap installer:
+
+1. downloads the latest public macOS release bundle
+2. verifies the `.sha256` file when present
+3. extracts the bundle into a temp directory
+4. runs the bundled `install.sh --prebuilt`
+
+Pin a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.2
+```
 
 ## Release Bundle Layout
 
@@ -42,6 +68,8 @@ dist/
         bsj.rb.template
   bsj-<version>-<target>.tar.gz
   bsj-<version>-<target>.tar.gz.sha256
+  bsj-<target>.tar.gz
+  bsj-<target>.tar.gz.sha256
 ```
 
 ## Build A Release Bundle
@@ -94,7 +122,8 @@ That script:
 1. builds or reuses a release bundle
 2. extracts it into a temp directory
 3. runs the bundled installer in `--prebuilt` mode
-4. verifies the installed binary, docs, man page, example config, shell completions, and binary privacy audit
+4. runs the top-level piped installer path with `--archive`
+5. verifies the installed binary, docs, man page, example config, shell completions, and binary privacy audit
 
 ## Install From A Release Bundle
 
@@ -103,6 +132,15 @@ After extracting the tarball:
 ```bash
 ./install.sh --prebuilt
 ```
+
+Stable asset names published alongside versioned archives:
+
+```text
+bsj-universal-apple-darwin.tar.gz
+bsj-universal-apple-darwin.tar.gz.sha256
+```
+
+Those stable names are what the turnkey installer downloads from GitHub Releases.
 
 Default prebuilt install target:
 
@@ -187,7 +225,7 @@ Release workflow:
 Release automation flow:
 
 ```bash
-git tag v0.1.1
+git tag v0.1.2
 git push origin main --tags
 ```
 
@@ -204,6 +242,9 @@ git push origin main --tags
 9. Update the Homebrew formula URL if you publish a formula
 
 ## Notes
+
+- The GitHub landing page should point readers to the product guide, datasheet, setup guide, and turnkey install command.
+- The installer and bundled docs are part of the release surface, not optional extras.
 
 - No plaintext journal content is included in release artifacts.
 - Release bundles include docs, completions, examples, and license text, not user vault data.

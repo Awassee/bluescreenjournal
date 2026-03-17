@@ -42,6 +42,7 @@ fi
 
 TMP_DIR="$(mktemp -d /tmp/bsj-dist-smoke.XXXXXX)"
 INSTALL_PREFIX="$TMP_DIR/install-root"
+BOOTSTRAP_PREFIX="$TMP_DIR/bootstrap-root"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -61,9 +62,15 @@ test -f "$INSTALL_PREFIX/share/zsh/site-functions/_bsj"
 test -f "$INSTALL_PREFIX/share/fish/vendor_completions.d/bsj.fish"
 "$ROOT_DIR/scripts/audit-release.sh" --binary "$INSTALL_PREFIX/bin/bsj"
 
+cat "$ROOT_DIR/install.sh" | bash -s -- --prebuilt --archive "$ARCHIVE" --prefix "$BOOTSTRAP_PREFIX"
+"$BOOTSTRAP_PREFIX/bin/bsj" --help >/dev/null
+test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/README.md"
+test -f "$BOOTSTRAP_PREFIX/share/man/man1/bsj.1"
+
 cat <<EOF
 Smoke test passed:
   Archive: $ARCHIVE
   Bundle:  $BUNDLE_DIR
   Prefix:  $INSTALL_PREFIX
+  Bootstrap Prefix: $BOOTSTRAP_PREFIX
 EOF

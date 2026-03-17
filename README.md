@@ -1,55 +1,88 @@
 # bsj
 
-BlueScreen Journal is a full-screen Rust TUI journal for macOS with a nostalgic blue-screen editor, encrypted local storage, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.
+BlueScreen Journal is an encrypted, local-first journaling app for macOS terminals.
+It is built for people who want the focused feel of an old DOS word processor, but with modern safety features: encrypted storage, append-only history, encrypted drafts, encrypted backups, and encrypted sync.
 
-## Install
+The product goal is narrow on purpose: launch, unlock once, and start writing immediately in a blue-screen full-screen editor that feels like a dedicated writing appliance.
 
-Prebuilt release bundle:
+## Why bsj exists
+
+Most journaling tools force one of two bad tradeoffs:
+
+- modern note apps give you sync and search, but pull you into a GUI workflow full of chrome
+- plaintext file workflows keep control local, but leave sensitive writing exposed on disk and in cloud folders
+
+bsj is designed to avoid both.
+
+It gives you:
+
+- a keyboard-only writing flow with a persistent command strip and nostalgic `80x25` screen discipline
+- encrypted-at-rest journal content, drafts, backups, and sync blobs
+- append-only revisions so intentional saves create history instead of overwriting it
+- menu-driven discovery so the app still feels learnable without memorizing every function key
+
+## Product snapshot
+
+- platform: macOS
+- interface: full-screen Rust TUI in Terminal.app and iTerm2
+- visual direction: royal-blue background, white monospaced text, classic DOS-era workspace
+- storage model: local-first encrypted vault on disk
+- sync model: encrypted folder sync, plus S3 and WebDAV backends
+- history model: append-only revisions plus encrypted per-date autosave drafts
+- search model: in-memory index after unlock, with no plaintext search index on disk
+
+## Turnkey install
+
+Public one-line install:
 
 ```bash
-./install.sh --prebuilt
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
 ```
 
-Source install from a checkout:
+Pin a specific release:
 
 ```bash
-./install.sh --source
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.2
 ```
 
-Direct Cargo fallback:
+Install from source instead of the prebuilt release:
 
 ```bash
-cargo install --path . --locked --force
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
 ```
 
-Installer behavior:
+Local install from a checkout:
 
+```bash
+./install.sh
+```
+
+What the installer does:
+
+- downloads the latest public release bundle automatically when needed
 - installs `bsj`
-- installs docs and man page
+- installs bundled docs and the man page
 - installs shell completions for Bash, Zsh, and Fish
-- prints the exact `PATH` fix if your bin dir is not already on `PATH`
+- prints the exact `PATH` fix if your install directory is not already on `PATH`
+- verifies the downloaded archive against its `.sha256` file when available
 
-Default install locations:
+Default prebuilt install path:
 
-- prebuilt: `~/.local/bin/bsj`
-- source via installer: `~/.cargo/bin/bsj`
-- docs: `<prefix>/share/doc/bsj`
-- man page: `<prefix>/share/man/man1/bsj.1`
-
-## First Run
-
-Launch the app:
-
-```bash
-bsj
+```text
+~/.local/bin/bsj
 ```
 
-If no vault exists, the TUI setup wizard asks for:
+## First five minutes
 
-1. Vault path
-2. Passphrase
-3. Passphrase confirmation
-4. Optional epoch date for `ENTRY NO.`
+1. Run `bsj`
+2. If this is the first launch, complete the in-product setup wizard:
+   - vault path
+   - passphrase
+   - passphrase confirmation
+   - optional epoch date for `ENTRY NO.`
+3. Start typing immediately into today's entry
+4. Press `F2` to create your first encrypted saved revision
+5. Reopen with `bsj` or jump to another date with `bsj open YYYY-MM-DD`
 
 Default vault path:
 
@@ -57,20 +90,136 @@ Default vault path:
 ~/Documents/BlueScreenJournal
 ```
 
-## Built-In Help
+## What using it feels like
+
+The live screen is intentionally constrained to a centered DOS-style `80x25` workspace, even on a large terminal.
+
+The layout is stable:
+
+- header: product title, date/time, entry number, lock state, verify state, save state
+- menu bar: `FILE`, `EDIT`, `SEARCH`, `GO`, `TOOLS`, `SETUP`, `HELP`
+- body: text editor plus optional Reveal Codes line and Closing Thought line
+- footer: always-visible function-key command strip
+
+The app is direct by design:
+
+- launch into the editor, not a dashboard
+- type without reaching for the mouse
+- save milestones intentionally
+- let encrypted drafts protect the gap between saves
+- navigate by date, index, or search when needed
+- lock the vault when you step away
+
+## Core features and why they matter
+
+| Feature | What it does | User value |
+| --- | --- | --- |
+| Full-screen editor | Opens directly into the current entry | Removes friction between launch and writing |
+| Menu-driven TUI | Keeps all major commands discoverable in-product | Makes the app usable without memorizing everything |
+| Append-only revisions | Every manual save creates a new revision file | Preserves history and supports safer recovery |
+| Encrypted autosave drafts | Autosaves per-date draft state without making revision spam | Protects unsaved work without plaintext leakage |
+| Crash recovery | Prompts to recover a newer draft | Prevents accidental loss after interruption |
+| Stable entry numbers | Computes `ENTRY NO.` from epoch date and entry date | Keeps numbering deterministic across machines |
+| Real index and calendar | Browse saved dates as a journal, not just as files | Faster recall and better chronological navigation |
+| In-entry find and replace | Incremental find and retro `Y/N/A/Q` replace flow | Keeps editing fast inside the writing surface |
+| Global search | Searches saved entries after unlock without disk plaintext index | Fast retrieval without leaving search residue on disk |
+| Encrypted sync | Syncs encrypted revision blobs to folder, S3, or WebDAV targets | Lets you use cloud storage without uploading plaintext |
+| Integrity verify | Checks revision hashchains | Detects missing or tampered history |
+| Reveal Codes | Shows metadata inline in a retro-friendly way | Gives structural visibility without cluttering normal view |
+| Closing Thought | Dedicated final line field for each entry | Encourages deliberate endings and cleaner exports |
+| Encrypted backup and restore | Creates encrypted snapshots with retention support | Gives offline recovery without plaintext archives |
+| Lock command | Wipes unlocked state and returns to passphrase prompt | Safer on visible or shared terminals |
+
+## Everyday workflow
+
+### Write
+
+- `bsj` launches the TUI on the current date
+- type immediately into the editor
+- `F2` or `FILE -> Save Entry` creates a new encrypted revision
+- autosave maintains an encrypted draft every few seconds
+
+### Move through time
+
+- `F3` or `GO -> Open Calendar` opens the month grid
+- `F7` or `GO -> Index Timeline` lists existing saved entries
+- `bsj open YYYY-MM-DD` launches directly into a date from the CLI
+
+### Find things
+
+- `F4` or `EDIT -> Find in Entry` searches inside the current entry
+- `F6` or `EDIT -> Replace in Entry` runs replace confirmation in a retro style
+- `F5` or `SEARCH -> Search Vault` searches across saved entries
+- `bsj search "query" --from YYYY-MM-DD --to YYYY-MM-DD` searches from the CLI
+
+### Protect and move data
+
+- `F8` or `TOOLS -> Sync Vault` syncs encrypted blobs
+- `TOOLS -> Verify Integrity` checks the revision chain
+- `bsj backup` creates an encrypted snapshot under `<vault>/backups/`
+- `bsj restore ... --into ...` restores a backup to another directory
+
+### Lock down
+
+- `F12` or `FILE -> Lock Vault` clears unlocked state and returns to the passphrase prompt
+
+## Menus and keys
+
+The menu bar is the primary discoverability surface.
+
+- `Esc` opens the menu bar
+- arrows move between menus and menu items
+- `Enter` runs the selected command
+- function keys remain as direct shortcuts
+
+Primary keys:
+
+- `F1` help
+- `F2` save revision
+- `F3` date picker
+- `F4` find in entry
+- `F5` global search
+- `F6` replace in entry
+- `F7` index
+- `F8` sync
+- `F9` closing thought
+- `F10` quit
+- `F11` reveal codes
+- `F12` lock
+- `Ctrl+S` save fallback
+- `Ctrl+F` find fallback
+
+## Security model
+
+bsj is local-first, not service-first.
+
+Practical implications:
+
+- journal content is not intended to be written to disk in plaintext
+- `vault.json` stores metadata and KDF parameters, not entry text
+- saved revisions, autosave drafts, and backups are encrypted before write
+- sync targets receive encrypted revision blobs, not plaintext bodies
+- search indexes are built in memory after unlock and not persisted as plaintext
+- logs intentionally avoid secrets and journal text
+
+## Built-in guides and operator help
+
+These commands are intended to make the product self-describing after install:
 
 ```bash
 bsj --help
-bsj guide setup
-bsj guide settings
-bsj guide distribution
 bsj settings
 bsj settings --json
 bsj doctor
 bsj doctor --unlock
+bsj guide product
+bsj guide datasheet
+bsj guide setup
+bsj guide settings
+bsj guide distribution
 ```
 
-## Daily Commands
+## Command quick reference
 
 ```bash
 bsj
@@ -87,226 +236,44 @@ bsj restore ~/Documents/BlueScreenJournal/backups/backup-20260316T120000Z.bsjbak
 bsj verify
 ```
 
-## TUI Keys
+## Documentation map
 
-- `F1` help
-- `F2` save revision
-- `F3` date picker
-- `F4` incremental find
-- `F5` global search
-- `F6` replace with `Y/N/A/Q`
-- `F7` index
-- `F8` sync
-- `F9` closing thought
-- `F10` quit
-- `F11` reveal codes
-- `F12` lock
-- `Ctrl+S` save fallback
-- `Ctrl+F` find fallback
+Start here on GitHub:
 
-## Settings And Diagnostics
+- [Product Guide](docs/PRODUCT_GUIDE.md)
+- [Datasheet](docs/DATASHEET.md)
+- [Setup Guide](docs/SETUP_GUIDE.md)
+- [Settings Guide](docs/SETTINGS_GUIDE.md)
+- [Distribution Guide](docs/DISTRIBUTION.md)
+- [Man Page](docs/bsj.1)
+- [Example Config](docs/config.example.json)
 
-Config file:
+## Packaging and release surface
 
-```text
-~/Library/Application Support/bsj/config.json
-```
-
-Useful settings commands:
-
-```bash
-bsj settings init
-bsj settings get vault_path
-bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync
-bsj settings set backup_retention.daily 14
-```
-
-Useful diagnostics commands:
-
-```bash
-bsj doctor
-bsj doctor --unlock
-bsj doctor --unlock --json
-```
-
-Editable settings:
-
-- `vault_path`
-- `sync_target_path`
-- `device_nickname`
-- `backup_retention.daily`
-- `backup_retention.weekly`
-- `backup_retention.monthly`
-
-App-managed settings:
-
-- `local_device_id`
-- `vault.json` metadata and KDF parameters
-
-Environment variables:
-
-- `BSJ_PASSPHRASE`
-- `BSJ_SYNC_BACKEND`
-- `BSJ_S3_BUCKET`
-- `BSJ_S3_PREFIX`
-- `AWS_REGION`
-- `BSJ_WEBDAV_URL`
-- `BSJ_WEBDAV_USERNAME`
-- `BSJ_WEBDAV_PASSWORD`
-
-## Sync
-
-`bsj sync` transfers only:
-
-- `vault.json`
-- `devices/<deviceId>.json`
-- encrypted `entries/.../rev-*.bsj.enc`
-
-It does not upload plaintext journal bodies, drafts, or a plaintext search index.
-
-Folder sync:
-
-```bash
-bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
-```
-
-S3 sync:
-
-```bash
-export BSJ_SYNC_BACKEND=s3
-export BSJ_S3_BUCKET=your-bucket
-export BSJ_S3_PREFIX=bluescreenjournal
-export AWS_REGION=us-east-1
-bsj sync
-```
-
-WebDAV sync:
-
-```bash
-export BSJ_SYNC_BACKEND=webdav
-export BSJ_WEBDAV_URL=https://dav.example.com/BlueScreenJournal/
-export BSJ_WEBDAV_USERNAME=your-user
-export BSJ_WEBDAV_PASSWORD=your-password
-bsj sync
-```
-
-## Backups
-
-`bsj backup` creates an encrypted snapshot under:
-
-```text
-<vault>/backups/
-```
-
-Inspect retention and prune behavior:
-
-```bash
-bsj backup list
-bsj backup prune
-bsj backup prune --apply
-```
-
-## Completions
-
-Generate completions on demand:
-
-```bash
-bsj completions bash
-bsj completions zsh
-bsj completions fish
-```
-
-The installer also places completion files under the install prefix.
-
-## Logging
-
-- `--debug` enables verbose file logging
-- log path: `~/Library/Logs/bsj/bsj.log`
-- logs intentionally avoid journal plaintext and secrets
-
-Examples:
-
-```bash
-bsj --debug
-bsj --debug sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync
-```
-
-## Distribution
-
-Build a host-architecture release bundle:
+Build a host-architecture bundle:
 
 ```bash
 ./scripts/package-release.sh
 ```
 
-Build a universal macOS release bundle:
+Build a universal macOS bundle:
 
 ```bash
 ./scripts/package-release.sh --universal
 ```
 
-Note:
-
-- local universal builds require both `aarch64-apple-darwin` and `x86_64-apple-darwin` targets
-- the GitHub release workflow installs both targets automatically
-
-Smoke-test the release bundle install:
+Smoke-test a bundle install:
 
 ```bash
 ./scripts/smoke-release-install.sh
 ```
 
-Run the release privacy audit directly:
+## Non-goals
 
-```bash
-./scripts/audit-release.sh
-```
+bsj is intentionally not trying to be:
 
-Artifacts:
-
-- `dist/bsj-<version>-<target>/`
-- `dist/bsj-<version>-<target>.tar.gz`
-- `dist/bsj-<version>-<target>.tar.gz.sha256`
-- `dist/bsj-<version>-<target>/packaging/homebrew/bsj.rb`
-
-Automation:
-
-- `.github/workflows/ci.yml` runs lint, tests, packaging, smoke install, and the release audit
-- `.github/workflows/release.yml` builds a universal macOS bundle and publishes it on pushed `v*` tags
-
-## Reference Docs
-
-- `docs/SETUP_GUIDE.md`
-- `docs/SETTINGS_GUIDE.md`
-- `docs/DISTRIBUTION.md`
-- `docs/config.example.json`
-- `docs/bsj.1`
-
-## Manual Smoke Checklist
-
-Terminal.app:
-
-1. Open a window at least `80x25`.
-2. Launch `bsj`.
-3. Verify the blue-screen layout, visible footer strip, and block cursor behavior.
-4. Save a revision, lock with `F12`, unlock again, and confirm the entry reloads.
-5. Trigger `F3`, `F5`, `F7`, `F8`, `F11`, and `F12`.
-
-iTerm2:
-
-1. Launch `bsj`.
-2. Resize below `80x25` and confirm the warning screen appears without panic.
-3. Resize back up and confirm the editor redraws cleanly.
-4. Verify function keys and `Ctrl+S` / `Ctrl+F` fallbacks work.
-
-## Development
-
-```bash
-just fmt
-just clippy
-just test
-just audit-release
-just package
-just package-universal
-just smoke-dist
-```
+- a collaborative multi-user editor
+- a mobile journaling app
+- a rich-text desktop publishing tool
+- a markdown PKM platform with backlinks and plugins
+- a hosted cloud account product

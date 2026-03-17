@@ -9,6 +9,8 @@ use std::{
 };
 
 const SETUP_GUIDE_BODY: &str = include_str!("../docs/SETUP_GUIDE.md");
+const PRODUCT_GUIDE_BODY: &str = include_str!("../docs/PRODUCT_GUIDE.md");
+const DATASHEET_BODY: &str = include_str!("../docs/DATASHEET.md");
 const SETTINGS_GUIDE_BODY: &str = include_str!("../docs/SETTINGS_GUIDE.md");
 const DISTRIBUTION_GUIDE_BODY: &str = include_str!("../docs/DISTRIBUTION.md");
 
@@ -78,6 +80,20 @@ Reference paths\n\
         default_vault_path.display(),
         log_path.display(),
         SETTINGS_GUIDE_BODY.trim_end()
+    )
+}
+
+pub fn render_product_guide() -> String {
+    format!(
+        "BlueScreen Journal Product Guide\n\n{}\n",
+        PRODUCT_GUIDE_BODY.trim_end()
+    )
+}
+
+pub fn render_datasheet() -> String {
+    format!(
+        "BlueScreen Journal Datasheet\n\n{}\n",
+        DATASHEET_BODY.trim_end()
     )
 }
 
@@ -249,6 +265,16 @@ pub fn render_settings_report(
     push_row(&mut output, "guide_setup", "bsj guide setup".to_string());
     push_row(
         &mut output,
+        "guide_product",
+        "bsj guide product".to_string(),
+    );
+    push_row(
+        &mut output,
+        "guide_datasheet",
+        "bsj guide datasheet".to_string(),
+    );
+    push_row(
+        &mut output,
         "guide_settings",
         "bsj guide settings".to_string(),
     );
@@ -345,7 +371,8 @@ fn macro_command_name(command: &MacroCommandConfig) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        EnvironmentSettings, render_settings_guide, render_settings_report, render_setup_guide,
+        EnvironmentSettings, render_datasheet, render_product_guide, render_settings_guide,
+        render_settings_report, render_setup_guide,
     };
     use crate::config::{AppConfig, BackupRetentionConfig, MacroActionConfig, MacroConfig};
     use crate::vault::{KdfParams, VaultMetadata, VaultOptions};
@@ -373,6 +400,22 @@ mod tests {
         assert!(text.contains("vault_path"));
         assert!(text.contains("BSJ_SYNC_BACKEND"));
         assert!(text.contains("epochDate"));
+    }
+
+    #[test]
+    fn product_guide_mentions_core_workflow_and_value() {
+        let text = render_product_guide();
+        assert!(text.contains("Start writing"));
+        assert!(text.contains("Menu-driven TUI"));
+        assert!(text.contains("append-only"));
+    }
+
+    #[test]
+    fn datasheet_mentions_install_surface_and_guides() {
+        let text = render_datasheet();
+        assert!(text.contains("curl -fsSL"));
+        assert!(text.contains("bsj guide product"));
+        assert!(text.contains("BlueScreen Journal (`bsj`)"));
     }
 
     #[test]

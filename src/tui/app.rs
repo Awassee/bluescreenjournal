@@ -1,5 +1,5 @@
 use crate::{
-    config::{AppConfig, MacroActionConfig, MacroCommandConfig, default_vault_path},
+    config::{self, AppConfig, MacroActionConfig, MacroCommandConfig, default_vault_path},
     search::{SearchIndex, SearchQuery, SearchResult},
     sync,
     tui::{
@@ -44,6 +44,7 @@ pub enum Overlay {
     Search(SearchOverlay),
     ReplacePrompt(ReplacePrompt),
     ReplaceConfirm(ReplaceConfirm),
+    SettingPrompt(SettingPrompt),
     Index(IndexState),
     SyncStatus(SyncStatusOverlay),
     RecoverDraft {
@@ -480,6 +481,246 @@ impl SyncStatusOverlay {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuId {
+    File,
+    Edit,
+    Search,
+    Go,
+    Tools,
+    Setup,
+    Help,
+}
+
+impl MenuId {
+    pub fn title(self) -> &'static str {
+        match self {
+            MenuId::File => "FILE",
+            MenuId::Edit => "EDIT",
+            MenuId::Search => "SEARCH",
+            MenuId::Go => "GO",
+            MenuId::Tools => "TOOLS",
+            MenuId::Setup => "SETUP",
+            MenuId::Help => "HELP",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        const MENUS: [MenuId; 7] = [
+            MenuId::File,
+            MenuId::Edit,
+            MenuId::Search,
+            MenuId::Go,
+            MenuId::Tools,
+            MenuId::Setup,
+            MenuId::Help,
+        ];
+        &MENUS
+    }
+
+    fn from_hotkey(ch: char) -> Option<Self> {
+        match ch.to_ascii_lowercase() {
+            'f' => Some(Self::File),
+            'e' => Some(Self::Edit),
+            's' => Some(Self::Search),
+            'g' => Some(Self::Go),
+            't' => Some(Self::Tools),
+            'u' => Some(Self::Setup),
+            'h' => Some(Self::Help),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingField {
+    VaultPath,
+    SyncTargetPath,
+    DeviceNickname,
+    BackupDaily,
+    BackupWeekly,
+    BackupMonthly,
+}
+
+impl SettingField {
+    fn key(self) -> &'static str {
+        match self {
+            SettingField::VaultPath => "vault_path",
+            SettingField::SyncTargetPath => "sync_target_path",
+            SettingField::DeviceNickname => "device_nickname",
+            SettingField::BackupDaily => "backup_retention.daily",
+            SettingField::BackupWeekly => "backup_retention.weekly",
+            SettingField::BackupMonthly => "backup_retention.monthly",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingField::VaultPath => "Vault Path",
+            SettingField::SyncTargetPath => "Sync Folder",
+            SettingField::DeviceNickname => "Device Name",
+            SettingField::BackupDaily => "Daily Backups",
+            SettingField::BackupWeekly => "Weekly Backups",
+            SettingField::BackupMonthly => "Monthly Backups",
+        }
+    }
+
+    pub fn prompt(self) -> &'static str {
+        match self {
+            SettingField::VaultPath => "Set vault path:",
+            SettingField::SyncTargetPath => "Set folder sync path (blank clears):",
+            SettingField::DeviceNickname => "Set device nickname:",
+            SettingField::BackupDaily => "Keep daily backups:",
+            SettingField::BackupWeekly => "Keep weekly backups:",
+            SettingField::BackupMonthly => "Keep monthly backups:",
+        }
+    }
+
+    pub fn help(self) -> &'static str {
+        match self {
+            SettingField::VaultPath => "Changing the path relocks into the selected vault.",
+            SettingField::SyncTargetPath => "Folder sync target for iCloud / Dropbox style sync.",
+            SettingField::DeviceNickname => "Shown in devices/<deviceId>.json and conflicts.",
+            SettingField::BackupDaily
+            | SettingField::BackupWeekly
+            | SettingField::BackupMonthly => "Retention count; use a non-negative integer.",
+        }
+    }
+
+    fn current_input(self, config: &AppConfig) -> String {
+        match self {
+            SettingField::VaultPath => config.vault_path.display().to_string(),
+            SettingField::SyncTargetPath => config
+                .sync_target_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+            SettingField::DeviceNickname => config.device_nickname.clone(),
+            SettingField::BackupDaily => config.backup_retention.daily.to_string(),
+            SettingField::BackupWeekly => config.backup_retention.weekly.to_string(),
+            SettingField::BackupMonthly => config.backup_retention.monthly.to_string(),
+        }
+    }
+
+    fn current_label(self, config: &AppConfig) -> String {
+        match self {
+            SettingField::SyncTargetPath => config
+                .sync_target_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "[unset]".to_string()),
+            _ => self.current_input(config),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SettingPrompt {
+    pub field: SettingField,
+    pub input: String,
+    pub error: Option<String>,
+}
+
+impl SettingPrompt {
+    fn new(field: SettingField, config: &AppConfig) -> Self {
+        Self {
+            field,
+            input: field.current_input(config),
+            error: None,
+        }
+    }
+
+    fn wipe(&mut self) {
+        self.input.zeroize();
+        zeroize_optional_string(&mut self.error);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuAction {
+    Save,
+    Backup,
+    Lock,
+    Quit,
+    Find,
+    Replace,
+    ClosingThought,
+    ToggleReveal,
+    GlobalSearch,
+    FindNext,
+    FindPrevious,
+    RebuildSearchIndex,
+    Dates,
+    Today,
+    Index,
+    Sync,
+    Verify,
+    EditSetting(SettingField),
+    Help,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuItem {
+    pub label: String,
+    pub detail: String,
+    pub action: MenuAction,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuState {
+    pub selected_menu: MenuId,
+    pub selected_item: usize,
+}
+
+impl MenuState {
+    fn new(selected_menu: MenuId, app: &App) -> Self {
+        let mut state = Self {
+            selected_menu,
+            selected_item: 0,
+        };
+        state.clamp_selection(app);
+        state
+    }
+
+    fn move_menu(&mut self, delta: isize, app: &App) {
+        let menus = MenuId::all();
+        let current = menus
+            .iter()
+            .position(|menu| *menu == self.selected_menu)
+            .unwrap_or(0);
+        let next = (current as isize + delta).rem_euclid(menus.len() as isize) as usize;
+        self.selected_menu = menus[next];
+        self.selected_item = 0;
+        self.clamp_selection(app);
+    }
+
+    fn jump_to_menu(&mut self, menu: MenuId, app: &App) {
+        self.selected_menu = menu;
+        self.selected_item = 0;
+        self.clamp_selection(app);
+    }
+
+    fn move_item(&mut self, delta: isize, app: &App) {
+        let len = app.menu_items(self.selected_menu).len();
+        if len == 0 {
+            self.selected_item = 0;
+            return;
+        }
+        let next = (self.selected_item as isize + delta).clamp(0, len as isize - 1) as usize;
+        self.selected_item = next;
+    }
+
+    fn clamp_selection(&mut self, app: &App) {
+        let len = app.menu_items(self.selected_menu).len();
+        if len == 0 {
+            self.selected_item = 0;
+        } else if self.selected_item >= len {
+            self.selected_item = len - 1;
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct StatusMessage {
     text: String,
@@ -586,6 +827,7 @@ pub struct App {
     closing_thought: Option<String>,
     selected_date: NaiveDate,
     scroll_row: usize,
+    menu: Option<MenuState>,
     overlay: Option<Overlay>,
     status_flash: Option<StatusMessage>,
     find_query: Option<String>,
@@ -643,6 +885,7 @@ impl App {
             closing_thought: None,
             selected_date: initial_date.unwrap_or_else(|| Local::now().date_naive()),
             scroll_row: 0,
+            menu: None,
             overlay,
             status_flash: None,
             find_query: None,
@@ -686,6 +929,10 @@ impl App {
 
     pub fn overlay(&self) -> Option<&Overlay> {
         self.overlay.as_ref()
+    }
+
+    pub fn menu(&self) -> Option<&MenuState> {
+        self.menu.as_ref()
     }
 
     pub fn status_text(&self) -> Option<&str> {
@@ -757,6 +1004,157 @@ impl App {
             .unwrap_or_default()
     }
 
+    fn setting_menu_item(&self, field: SettingField) -> MenuItem {
+        MenuItem {
+            label: field.label().to_string(),
+            detail: field.current_label(&self.config),
+            action: MenuAction::EditSetting(field),
+            enabled: true,
+        }
+    }
+
+    pub fn menu_items(&self, menu: MenuId) -> Vec<MenuItem> {
+        match menu {
+            MenuId::File => vec![
+                MenuItem {
+                    label: "Save Entry".to_string(),
+                    detail: "F2".to_string(),
+                    action: MenuAction::Save,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Backup Snapshot".to_string(),
+                    detail: "NOW".to_string(),
+                    action: MenuAction::Backup,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Lock Vault".to_string(),
+                    detail: "F12".to_string(),
+                    action: MenuAction::Lock,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Quit Program".to_string(),
+                    detail: "F10".to_string(),
+                    action: MenuAction::Quit,
+                    enabled: true,
+                },
+            ],
+            MenuId::Edit => vec![
+                MenuItem {
+                    label: "Find in Entry".to_string(),
+                    detail: "F4".to_string(),
+                    action: MenuAction::Find,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Replace in Entry".to_string(),
+                    detail: "F6".to_string(),
+                    action: MenuAction::Replace,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Closing Thought".to_string(),
+                    detail: "F9".to_string(),
+                    action: MenuAction::ClosingThought,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Reveal Codes".to_string(),
+                    detail: if self.reveal_codes {
+                        "ON".to_string()
+                    } else {
+                        "OFF".to_string()
+                    },
+                    action: MenuAction::ToggleReveal,
+                    enabled: true,
+                },
+            ],
+            MenuId::Search => vec![
+                MenuItem {
+                    label: "Search Vault".to_string(),
+                    detail: "F5".to_string(),
+                    action: MenuAction::GlobalSearch,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Find Next".to_string(),
+                    detail: "DOWN".to_string(),
+                    action: MenuAction::FindNext,
+                    enabled: self.find_query.is_some(),
+                },
+                MenuItem {
+                    label: "Find Previous".to_string(),
+                    detail: "UP".to_string(),
+                    action: MenuAction::FindPrevious,
+                    enabled: self.find_query.is_some(),
+                },
+                MenuItem {
+                    label: "Rebuild Search Cache".to_string(),
+                    detail: "RAM".to_string(),
+                    action: MenuAction::RebuildSearchIndex,
+                    enabled: self.vault.is_some(),
+                },
+            ],
+            MenuId::Go => vec![
+                MenuItem {
+                    label: "Open Calendar".to_string(),
+                    detail: "F3".to_string(),
+                    action: MenuAction::Dates,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Jump to Today".to_string(),
+                    detail: "NOW".to_string(),
+                    action: MenuAction::Today,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Index Timeline".to_string(),
+                    detail: "F7".to_string(),
+                    action: MenuAction::Index,
+                    enabled: self.vault.is_some(),
+                },
+            ],
+            MenuId::Tools => vec![
+                MenuItem {
+                    label: "Sync Vault".to_string(),
+                    detail: "F8".to_string(),
+                    action: MenuAction::Sync,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Verify Integrity".to_string(),
+                    detail: self.integrity_status_label(),
+                    action: MenuAction::Verify,
+                    enabled: self.vault.is_some(),
+                },
+            ],
+            MenuId::Setup => vec![
+                self.setting_menu_item(SettingField::VaultPath),
+                self.setting_menu_item(SettingField::SyncTargetPath),
+                self.setting_menu_item(SettingField::DeviceNickname),
+                self.setting_menu_item(SettingField::BackupDaily),
+                self.setting_menu_item(SettingField::BackupWeekly),
+                self.setting_menu_item(SettingField::BackupMonthly),
+            ],
+            MenuId::Help => vec![MenuItem {
+                label: "Key and Menu Guide".to_string(),
+                detail: "F1".to_string(),
+                action: MenuAction::Help,
+                enabled: true,
+            }],
+        }
+    }
+
+    fn open_setting_prompt(&mut self, field: SettingField) {
+        self.overlay = Some(Overlay::SettingPrompt(SettingPrompt::new(
+            field,
+            &self.config,
+        )));
+    }
+
     pub fn editor_viewport_height(&self, body_rows: usize) -> usize {
         let reserved_rows = 1usize + usize::from(self.reveal_codes);
         body_rows.saturating_sub(reserved_rows).max(1)
@@ -818,8 +1216,18 @@ impl App {
             return;
         }
 
+        if self.menu.is_some() {
+            self.handle_menu_key(key, viewport_height);
+            return;
+        }
+
         if self.overlay.is_some() {
             self.handle_overlay_key(key, viewport_height);
+            return;
+        }
+
+        if key.code == KeyCode::Esc || Self::is_ctrl_char(&key, 'g') {
+            self.open_menu(MenuId::File);
             return;
         }
 
@@ -894,6 +1302,51 @@ impl App {
             self.refresh_find_matches();
         }
         self.ensure_cursor_visible(viewport_height);
+    }
+
+    fn handle_menu_key(&mut self, key: KeyEvent, viewport_height: usize) {
+        let Some(mut menu) = self.menu.take() else {
+            return;
+        };
+        let mut keep_menu = true;
+
+        match key.code {
+            KeyCode::Esc => keep_menu = false,
+            KeyCode::Left => menu.move_menu(-1, self),
+            KeyCode::Right => menu.move_menu(1, self),
+            KeyCode::Tab => menu.move_menu(1, self),
+            KeyCode::BackTab => menu.move_menu(-1, self),
+            KeyCode::Up => menu.move_item(-1, self),
+            KeyCode::Down => menu.move_item(1, self),
+            KeyCode::Home => menu.selected_item = 0,
+            KeyCode::End => {
+                let len = self.menu_items(menu.selected_menu).len();
+                if len > 0 {
+                    menu.selected_item = len - 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(item) = self
+                    .menu_items(menu.selected_menu)
+                    .get(menu.selected_item)
+                    .cloned()
+                {
+                    keep_menu = false;
+                    self.perform_menu_action(item.action, viewport_height);
+                }
+            }
+            KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
+                if let Some(target_menu) = MenuId::from_hotkey(ch) {
+                    menu.jump_to_menu(target_menu, self);
+                }
+            }
+            _ => {}
+        }
+
+        if keep_menu {
+            menu.clamp_selection(self);
+            self.menu = Some(menu);
+        }
     }
 
     fn handle_overlay_key(&mut self, key: KeyEvent, viewport_height: usize) {
@@ -1171,6 +1624,31 @@ impl App {
                 }
                 _ => {}
             },
+            Overlay::SettingPrompt(prompt) => match key.code {
+                KeyCode::Esc => keep_overlay = false,
+                KeyCode::Backspace => {
+                    prompt.input.pop();
+                    prompt.error = None;
+                }
+                KeyCode::Enter => {
+                    if self.apply_setting_prompt(prompt) {
+                        keep_overlay = false;
+                    }
+                }
+                KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
+                    let accepts_char = match prompt.field {
+                        SettingField::BackupDaily
+                        | SettingField::BackupWeekly
+                        | SettingField::BackupMonthly => ch.is_ascii_digit(),
+                        _ => true,
+                    };
+                    if accepts_char {
+                        prompt.input.push(ch);
+                        prompt.error = None;
+                    }
+                }
+                _ => {}
+            },
             Overlay::Index(index) => match key.code {
                 KeyCode::Esc | KeyCode::F(7) => keep_overlay = false,
                 KeyCode::Up => index.move_selection(-1),
@@ -1374,6 +1852,7 @@ impl App {
     }
 
     fn load_selected_date(&mut self) {
+        self.menu = None;
         self.wipe_overlay_state();
         self.wipe_entry_buffer();
         self.wipe_pending_state();
@@ -1422,6 +1901,7 @@ impl App {
     }
 
     fn open_date_picker(&mut self) {
+        self.menu = None;
         let entry_dates = self.load_entry_dates();
         self.overlay = Some(Overlay::DatePicker(DatePicker::new(
             self.selected_date,
@@ -1430,18 +1910,79 @@ impl App {
     }
 
     fn open_search_overlay(&mut self) {
+        self.menu = None;
         self.overlay = Some(Overlay::Search(SearchOverlay::new(self.find_query.clone())));
     }
 
     fn open_index_overlay(&mut self) {
+        self.menu = None;
         let items = self.load_index_entries();
         self.overlay = Some(Overlay::Index(IndexState::new(items, self.selected_date)));
     }
 
     fn open_closing_prompt(&mut self) {
+        self.menu = None;
         self.overlay = Some(Overlay::ClosingPrompt {
             input: self.closing_thought.clone().unwrap_or_default(),
         });
+    }
+
+    fn open_menu(&mut self, menu: MenuId) {
+        self.menu = Some(MenuState::new(menu, self));
+    }
+
+    fn perform_menu_action(&mut self, action: MenuAction, viewport_height: usize) {
+        match action {
+            MenuAction::Save => self.save_current_date(),
+            MenuAction::Backup => self.create_backup_now(),
+            MenuAction::Lock => self.lock_vault(),
+            MenuAction::Quit => self.overlay = Some(Overlay::QuitConfirm),
+            MenuAction::Find => {
+                self.overlay = Some(Overlay::FindPrompt {
+                    input: self.find_query.clone().unwrap_or_default(),
+                    error: None,
+                });
+            }
+            MenuAction::Replace => {
+                self.overlay = Some(Overlay::ReplacePrompt(ReplacePrompt::new()))
+            }
+            MenuAction::ClosingThought => self.open_closing_prompt(),
+            MenuAction::ToggleReveal => self.toggle_reveal_codes(viewport_height),
+            MenuAction::GlobalSearch => self.open_search_overlay(),
+            MenuAction::FindNext => {
+                if self.find_query.is_some() {
+                    self.select_next_find_match(viewport_height);
+                    self.flash_status("NEXT MATCH.");
+                } else {
+                    self.overlay = Some(Overlay::FindPrompt {
+                        input: String::new(),
+                        error: None,
+                    });
+                }
+            }
+            MenuAction::FindPrevious => {
+                if self.find_query.is_some() {
+                    self.select_previous_find_match(viewport_height);
+                    self.flash_status("PREVIOUS MATCH.");
+                } else {
+                    self.overlay = Some(Overlay::FindPrompt {
+                        input: String::new(),
+                        error: None,
+                    });
+                }
+            }
+            MenuAction::RebuildSearchIndex => self.rebuild_search_index(),
+            MenuAction::Dates => self.open_date_picker(),
+            MenuAction::Today => {
+                self.open_date(Local::now().date_naive());
+                self.flash_status("JUMPED TO TODAY.");
+            }
+            MenuAction::Index => self.open_index_overlay(),
+            MenuAction::Sync => self.begin_sync(),
+            MenuAction::Verify => self.verify_integrity_now(),
+            MenuAction::EditSetting(field) => self.open_setting_prompt(field),
+            MenuAction::Help => self.overlay = Some(Overlay::Help),
+        }
     }
 
     fn begin_sync(&mut self) {
@@ -1475,6 +2016,38 @@ impl App {
             draft_notice,
         )));
         self.pending_sync_request = Some(request);
+    }
+
+    fn create_backup_now(&mut self) {
+        if self.vault.is_none() {
+            self.flash_status("LOCKED.");
+            return;
+        }
+        if self.dirty {
+            self.autosave_current_date();
+        }
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+        match vault.create_backup(&self.config.backup_retention) {
+            Ok(summary) => {
+                let file_name = summary
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("backup");
+                if summary.pruned > 0 {
+                    self.flash_status(&format!("BACKUP {file_name} (+{} PRUNED).", summary.pruned));
+                } else {
+                    self.flash_status(&format!("BACKUP {file_name}."));
+                }
+            }
+            Err(error) => {
+                log::warn!("backup failed: {error}");
+                self.flash_status("BACKUP FAILED.");
+            }
+        }
     }
 
     fn lock_vault(&mut self) {
@@ -1519,7 +2092,17 @@ impl App {
         });
     }
 
+    fn verify_integrity_now(&mut self) {
+        self.refresh_integrity_status();
+        match &self.integrity_status {
+            Some(status) if status.ok => self.flash_status("VERIFY OK."),
+            Some(status) => self.flash_status(&format!("VERIFY BROKEN {}.", status.issue_count)),
+            None => self.flash_status("LOCKED."),
+        }
+    }
+
     fn clear_sensitive_state(&mut self) {
+        self.menu = None;
         self.wipe_overlay_state();
         self.wipe_entry_buffer();
         self.wipe_pending_state();
@@ -1529,6 +2112,17 @@ impl App {
         self.search_index = None;
         self.pending_sync_request = None;
         self.reveal_codes = false;
+    }
+
+    fn rebuild_search_index(&mut self) {
+        if let Some(index) = &mut self.search_index {
+            index.wipe();
+        }
+        self.search_index = None;
+        if let Err(error) = self.ensure_search_index() {
+            log::warn!("search index rebuild failed: {error}");
+            self.flash_status("SEARCH CACHE FAILED.");
+        }
     }
 
     fn run_pending_sync(&mut self) {
@@ -1632,6 +2226,74 @@ impl App {
                 })
             }
         };
+    }
+
+    fn apply_setting_prompt(&mut self, prompt: &mut SettingPrompt) -> bool {
+        let mut config = self.config.clone();
+        let value =
+            if prompt.field == SettingField::SyncTargetPath && prompt.input.trim().is_empty() {
+                "unset"
+            } else {
+                prompt.input.as_str()
+            };
+
+        if let Err(error) = config::set_setting_value(&mut config, prompt.field.key(), value) {
+            prompt.error = Some(error);
+            return false;
+        }
+
+        if prompt.field == SettingField::DeviceNickname
+            && self.vault.is_some()
+            && let Some(device_id) = config.local_device_id.as_deref()
+            && let Err(error) =
+                vault::register_device(&self.vault_path, device_id, &config.device_nickname)
+        {
+            prompt.error = Some(format!("Failed to update device file: {error}"));
+            return false;
+        }
+
+        if let Err(error) = config.save() {
+            prompt.error = Some(format!("Failed to save config: {error}"));
+            return false;
+        }
+
+        self.config = config;
+        if prompt.field == SettingField::VaultPath {
+            if self.vault.is_some() && self.dirty {
+                self.autosave_current_date();
+            }
+            let new_vault_path = self.config.vault_path.clone();
+            self.vault_path = new_vault_path.clone();
+            self.clear_sensitive_state();
+            self.vault = None;
+            self.integrity_status = None;
+            self.overlay = if vault::vault_exists(&new_vault_path) {
+                Some(Overlay::UnlockPrompt {
+                    input: String::new(),
+                    error: Some("Vault path changed. Enter passphrase.".to_string()),
+                })
+            } else {
+                Some(Overlay::SetupWizard(SetupWizard::new(&new_vault_path)))
+            };
+            self.flash_status("VAULT PATH SET.");
+            return true;
+        }
+
+        self.flash_status(match prompt.field {
+            SettingField::VaultPath => "VAULT PATH SET.",
+            SettingField::SyncTargetPath => {
+                if self.config.sync_target_path.is_some() {
+                    "SYNC FOLDER SET."
+                } else {
+                    "SYNC FOLDER CLEARED."
+                }
+            }
+            SettingField::DeviceNickname => "DEVICE NAME SET.",
+            SettingField::BackupDaily
+            | SettingField::BackupWeekly
+            | SettingField::BackupMonthly => "RETENTION UPDATED.",
+        });
+        true
     }
 
     fn load_entry_dates(&mut self) -> BTreeSet<NaiveDate> {
@@ -2229,6 +2891,7 @@ fn wipe_overlay(overlay: &mut Overlay) {
         Overlay::Search(search) => search.wipe(),
         Overlay::ReplacePrompt(prompt) => prompt.wipe(),
         Overlay::ReplaceConfirm(confirm) => confirm.wipe(),
+        Overlay::SettingPrompt(prompt) => prompt.wipe(),
         Overlay::Index(index) => index.wipe(),
         Overlay::SyncStatus(sync_status) => sync_status.wipe(),
         Overlay::RecoverDraft { draft_text } => draft_text.zeroize(),
@@ -2402,9 +3065,9 @@ fn parse_optional_overlay_date(label: &str, input: &str) -> Result<Option<NaiveD
 #[cfg(test)]
 mod tests {
     use super::{
-        App, IndexState, Overlay, SearchField, SearchJump, SearchOverlay, SyncPhase, SyncRequest,
-        SyncStatusOverlay, format_reveal_codes, macro_key_matches, parse_optional_overlay_date,
-        resolve_recovery_text,
+        App, IndexState, MenuId, Overlay, SearchField, SearchJump, SearchOverlay, SyncPhase,
+        SyncRequest, SyncStatusOverlay, format_reveal_codes, macro_key_matches,
+        parse_optional_overlay_date, resolve_recovery_text,
     };
     use crate::{
         search::{SearchDocument, SearchIndex, SearchResult, Snippet},
@@ -2457,6 +3120,56 @@ mod tests {
         let initial = NaiveDate::from_ymd_opt(2026, 4, 2).expect("date");
         let app = App::with_initial_date(Some(initial));
         assert!(app.header_date_time_label().starts_with("2026-04-02"));
+    }
+
+    #[test]
+    fn escape_opens_file_menu_when_editor_is_active() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+            20,
+        );
+
+        assert!(matches!(
+            app.menu(),
+            Some(menu) if menu.selected_menu == MenuId::File
+        ));
+    }
+
+    #[test]
+    fn menu_navigation_moves_between_sections() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+            20,
+        );
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty())),
+            20,
+        );
+
+        assert!(matches!(
+            app.menu(),
+            Some(menu) if menu.selected_menu == MenuId::Edit
+        ));
+    }
+
+    #[test]
+    fn setup_menu_lists_live_settings() {
+        let app = App::with_initial_date(None);
+        let items = app.menu_items(MenuId::Setup);
+        let labels = items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"Vault Path"));
+        assert!(labels.contains(&"Sync Folder"));
+        assert!(labels.contains(&"Device Name"));
+        assert!(labels.contains(&"Daily Backups"));
     }
 
     #[test]

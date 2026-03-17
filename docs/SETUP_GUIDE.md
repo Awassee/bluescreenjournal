@@ -2,30 +2,39 @@
 
 ## Install Paths
 
-Preferred end-user install from a release bundle:
+Preferred end-user install:
 
 ```bash
-./install.sh --prebuilt
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
 ```
 
-Source install from a repo checkout:
+Install a specific tagged release:
 
 ```bash
-./install.sh --source
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.2
 ```
 
-Manual Cargo fallback:
+Install from source instead:
 
 ```bash
-cargo install --path . --locked --force
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
+```
+
+Local install from an extracted bundle or repo checkout:
+
+```bash
+./install.sh
 ```
 
 The installer:
 
+- downloads the latest public macOS release bundle automatically when needed
 - installs the `bsj` binary
 - installs docs and the man page
 - installs Bash, Zsh, and Fish completions
 - prints the exact `PATH` fix if needed
+
+The default public install path uses the prebuilt universal binary, so Rust and Cargo are not required.
 
 ## First Launch
 
@@ -125,7 +134,11 @@ bsj verify
 
 ## More Reference
 
+- `bsj guide product`
+- `bsj guide datasheet`
 - `bsj guide settings`
 - `bsj guide distribution`
+- `docs/PRODUCT_GUIDE.md`
+- `docs/DATASHEET.md`
 - `docs/SETTINGS_GUIDE.md`
 - `docs/DISTRIBUTION.md`

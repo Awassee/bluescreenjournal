@@ -4,9 +4,9 @@ pub mod calendar;
 
 use crate::tui::{
     app::{
-        App, ConflictMode, ConflictOverlay, DatePicker, IndexState, Overlay, ReplacePrompt,
-        ReplaceStage, SearchField, SearchOverlay, SetupStep, SetupWizard, SyncPhase,
-        SyncStatusOverlay,
+        App, ConflictMode, ConflictOverlay, DatePicker, IndexState, MenuId, MenuItem, Overlay,
+        ReplacePrompt, ReplaceStage, SearchField, SearchOverlay, SettingPrompt, SetupStep,
+        SetupWizard, SyncPhase, SyncStatusOverlay,
     },
     buffer::MatchPos,
 };
@@ -29,6 +29,8 @@ use std::{env, io, sync::OnceLock, time::Duration};
 
 const MIN_WIDTH: u16 = 80;
 const MIN_HEIGHT: u16 = 25;
+const DOS_WIDTH: u16 = 80;
+const DOS_HEIGHT: u16 = 25;
 
 pub fn run(initial_date: Option<NaiveDate>) -> io::Result<()> {
     enable_raw_mode()?;
@@ -63,7 +65,8 @@ fn run_loop(
     while !app.should_quit() {
         terminal.draw(|frame| draw(frame, &app))?;
         let area = terminal.size()?;
-        let viewport_height = app.editor_viewport_height(area.height.saturating_sub(2) as usize);
+        let screen = canonical_screen_rect(Rect::new(0, 0, area.width, area.height));
+        let viewport_height = app.editor_viewport_height(screen.height.saturating_sub(3) as usize);
 
         if event::poll(poll_timeout)? {
             let ev = event::read()?;
@@ -88,23 +91,28 @@ fn draw(frame: &mut Frame<'_>, app: &App) {
     }
 
     frame.render_widget(Block::new().style(screen_style()), area);
+    let screen = canonical_screen_rect(area);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Min(1),
             Constraint::Length(1),
         ])
-        .split(area);
+        .split(screen);
 
     let header_area = chunks[0];
-    let body_area = chunks[1];
-    let footer_area = chunks[2];
+    let menu_area = chunks[1];
+    let body_area = chunks[2];
+    let footer_area = chunks[3];
 
     draw_header(frame, app, header_area);
+    draw_menu_bar(frame, app, menu_area);
     let editor_cursor = draw_editor(frame, app, body_area);
     draw_footer(frame, app, footer_area);
 
+    draw_menu_dropdown(frame, app, menu_area, body_area);
     let overlay_cursor = draw_overlay(frame, app, body_area);
     if let Some((x, y)) = overlay_cursor.or(editor_cursor) {
         frame.set_cursor_position((x, y));
@@ -137,6 +145,116 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
         ),
         area,
     );
+}
+
+fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let tabs = menu_tabs(area);
+    let mut spans = Vec::new();
+    for (index, tab) in tabs.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw(" "));
+        }
+        let mut style = screen_style().add_modifier(Modifier::BOLD);
+        if app
+            .menu()
+            .map(|menu| menu.selected_menu == tab.id)
+            .unwrap_or(false)
+        {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        spans.push(Span::styled(format!(" {} ", tab.label), style));
+    }
+
+    let hint = if app.menu().is_some() {
+        "ARROWS MOVE  ENTER OPEN  ESC CLOSE"
+    } else {
+        "ESC MENUS"
+    };
+    let left_width = spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum::<usize>();
+    let hint_width = hint.chars().count();
+    if area.width as usize > left_width + hint_width + 1 {
+        spans.push(Span::raw(
+            " ".repeat(area.width as usize - left_width - hint_width),
+        ));
+        spans.push(Span::styled(
+            hint.to_string(),
+            screen_style().add_modifier(Modifier::UNDERLINED),
+        ));
+    }
+
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(screen_style()),
+        area,
+    );
+}
+
+fn draw_menu_dropdown(frame: &mut Frame<'_>, app: &App, menu_area: Rect, body_area: Rect) {
+    let Some(menu) = app.menu() else {
+        return;
+    };
+    if body_area.width == 0 || body_area.height == 0 {
+        return;
+    }
+
+    let items = app.menu_items(menu.selected_menu);
+    if items.is_empty() {
+        return;
+    }
+
+    let tabs = menu_tabs(menu_area);
+    let Some(selected_tab) = tabs.iter().find(|tab| tab.id == menu.selected_menu) else {
+        return;
+    };
+
+    let content_width = items
+        .iter()
+        .map(|item| item.label.chars().count() + item.detail.chars().count() + 3)
+        .max()
+        .unwrap_or(18)
+        .max(selected_tab.label.chars().count() + 4);
+    let width = (content_width as u16 + 2).min(body_area.width.max(1));
+    let height = (items.len() as u16 + 2).min(body_area.height.max(1));
+    let max_x = body_area.right().saturating_sub(width);
+    let x = selected_tab.x.max(body_area.x).min(max_x.max(body_area.x));
+    let rect = Rect::new(x, body_area.y, width, height);
+
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" {} ", menu.selected_menu.title()))
+            .style(screen_style()),
+        rect,
+    );
+    let inner = rect.inner(ratatui::layout::Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    let visible_rows = inner.height as usize;
+    let start = menu
+        .selected_item
+        .saturating_sub(visible_rows.saturating_sub(1) / 2)
+        .min(items.len().saturating_sub(visible_rows));
+    let end = (start + visible_rows).min(items.len());
+    let mut lines = Vec::new();
+    for (offset, item) in items[start..end].iter().enumerate() {
+        let absolute_idx = start + offset;
+        lines.push(menu_item_line(
+            inner.width as usize,
+            item,
+            absolute_idx == menu.selected_item,
+        ));
+    }
+
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
 }
 
 fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16)> {
@@ -220,7 +338,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     }
     let status = app.status_text().unwrap_or("");
-    let strip = "F1Help F2Save F3Date F4Find F5Srch F6Repl F7Idx F8Sync F9Cls F10Q F11Rev F12Lk";
+    let strip = "EscMenu F1Hl F2Sv F3Dt F4Fd F5Sr F6Rp F7Ix F8Sy F9Cl F10Qt F11Rv F12Lk";
     let content = join_left_right(area.width as usize, status, strip);
     frame.render_widget(
         Paragraph::new(Line::from(content)).style(
@@ -240,7 +358,7 @@ fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
         centered_line(
             area.width as usize,
             &format!(
-                "TERMINAL TOO SMALL: NEED AT LEAST {}x{}",
+                "TERMINAL TOO SMALL: NEED AT LEAST {}x{} DOS SCREEN",
                 MIN_WIDTH, MIN_HEIGHT
             ),
         ),
@@ -250,7 +368,7 @@ fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
         ),
         centered_line(
             area.width as usize,
-            "Resize to restore prompts and editing.",
+            "Resize to restore menus, prompts, and editing.",
         ),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
@@ -261,7 +379,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
     let rect = match overlay {
         Overlay::SetupWizard(_) => popup_rect(body_area, 76, 9),
         Overlay::UnlockPrompt { .. } => popup_rect(body_area, 64, 6),
-        Overlay::Help => popup_rect(body_area, 72, 15),
+        Overlay::Help => popup_rect(body_area, 72, 18),
         Overlay::DatePicker(_) => popup_rect(body_area, 38, 12),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
         Overlay::ClosingPrompt { .. } => popup_rect(body_area, 58, 5),
@@ -270,6 +388,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::Search(_) => popup_rect(body_area, 84, 16),
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
+        Overlay::SettingPrompt(_) => popup_rect(body_area, 70, 7),
         Overlay::Index(_) => popup_rect(body_area, 78, 14),
         Overlay::SyncStatus(_) => popup_rect(body_area, 76, 10),
         Overlay::RecoverDraft { .. } => popup_rect(body_area, 44, 5),
@@ -365,6 +484,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
             frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
             None
         }
+        Overlay::SettingPrompt(prompt) => draw_setting_prompt_overlay(frame, inner, prompt),
         Overlay::Index(index) => {
             draw_index_overlay(frame, inner, index);
             None
@@ -422,6 +542,9 @@ fn draw_setup_overlay(
 fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
         Line::from("+----------------------------------------------------+"),
+        Line::from("| Active screen stays centered at classic 80x25      |"),
+        Line::from("| Esc Menus opens FILE / EDIT / SEARCH / GO / ...    |"),
+        Line::from("| Menus use Left/Right + Up/Down + Enter             |"),
         Line::from("| F1 Help         F2 Save        F3 Dates            |"),
         Line::from("| F4 Find         F5 Search      F6 Replace          |"),
         Line::from("| F7 Index        F8 Sync        F9 Closing          |"),
@@ -676,6 +799,25 @@ fn draw_replace_prompt_overlay(
     ))
 }
 
+fn draw_setting_prompt_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    prompt: &SettingPrompt,
+) -> Option<(u16, u16)> {
+    let lines = vec![
+        Line::from(prompt.field.label()),
+        Line::from(prompt.field.prompt()),
+        Line::from(format!("> {}", prompt.input)),
+        Line::from(prompt.field.help()),
+        Line::from(prompt.error.clone().unwrap_or_default()),
+    ];
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+    Some((
+        (area.x + 2 + prompt.input.chars().count() as u16).min(area.right().saturating_sub(1)),
+        (area.y + 2).min(area.bottom().saturating_sub(1)),
+    ))
+}
+
 fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -852,6 +994,54 @@ fn draw_conflict_pane(
     frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
 }
 
+struct MenuTab {
+    id: MenuId,
+    label: &'static str,
+    x: u16,
+}
+
+fn menu_tabs(area: Rect) -> Vec<MenuTab> {
+    let mut tabs = Vec::new();
+    let mut x = area.x;
+    for menu in MenuId::all() {
+        let label = menu.title();
+        let width = label.chars().count() as u16 + 2;
+        if x + width > area.right() {
+            break;
+        }
+        tabs.push(MenuTab {
+            id: *menu,
+            label,
+            x,
+        });
+        x = x.saturating_add(width + 1);
+    }
+    tabs
+}
+
+fn menu_item_line(width: usize, item: &MenuItem, selected: bool) -> Line<'static> {
+    let mut style = screen_style();
+    if selected {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    if !item.enabled {
+        style = style.add_modifier(Modifier::DIM);
+    }
+    let label_width = item.label.chars().count();
+    let detail_width = item.detail.chars().count();
+    let content = if label_width + detail_width + 1 > width {
+        truncate_to_width(&format!("{} {}", item.label, item.detail), width)
+    } else {
+        format!(
+            "{}{}{}",
+            item.label,
+            " ".repeat(width - label_width - detail_width),
+            item.detail
+        )
+    };
+    Line::from(Span::styled(content, style))
+}
+
 fn weekday_label(day: chrono::Weekday) -> &'static str {
     match day {
         chrono::Weekday::Sun => "Su",
@@ -883,6 +1073,7 @@ fn overlay_title(overlay: &Overlay) -> &'static str {
         Overlay::Search(_) => " Search ",
         Overlay::ReplacePrompt(_) => " Replace ",
         Overlay::ReplaceConfirm(_) => " Replace ",
+        Overlay::SettingPrompt(_) => " Setup ",
         Overlay::Index(_) => " Index ",
         Overlay::SyncStatus(_) => " Sync ",
         Overlay::RecoverDraft { .. } => " Recovery ",
@@ -933,6 +1124,14 @@ fn slice_by_chars(input: &str, start: usize, end: usize) -> String {
         .skip(start)
         .take(end.saturating_sub(start))
         .collect()
+}
+
+fn canonical_screen_rect(area: Rect) -> Rect {
+    let width = DOS_WIDTH.min(area.width);
+    let height = DOS_HEIGHT.min(area.height);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    Rect::new(x, y, width, height)
 }
 
 fn popup_rect(area: Rect, width: u16, height: u16) -> Rect {
@@ -1063,7 +1262,7 @@ fn color_palette() -> &'static ColorPalette {
 
 #[cfg(test)]
 mod tests {
-    use super::{centered_line, popup_rect};
+    use super::{canonical_screen_rect, centered_line, popup_rect};
     use ratatui::layout::Rect;
 
     #[test]
@@ -1078,5 +1277,20 @@ mod tests {
     fn centered_line_adds_left_padding() {
         let line = centered_line(10, "TEST");
         assert_eq!(line.width(), 7);
+    }
+
+    #[test]
+    fn canonical_screen_rect_caps_large_terminal_to_dos_size() {
+        let screen = canonical_screen_rect(Rect::new(0, 0, 120, 40));
+        assert_eq!(screen.width, 80);
+        assert_eq!(screen.height, 25);
+        assert_eq!(screen.x, 20);
+        assert_eq!(screen.y, 7);
+    }
+
+    #[test]
+    fn canonical_screen_rect_uses_full_area_when_exactly_dos_size() {
+        let screen = canonical_screen_rect(Rect::new(0, 0, 80, 25));
+        assert_eq!(screen, Rect::new(0, 0, 80, 25));
     }
 }

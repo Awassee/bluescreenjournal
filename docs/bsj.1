@@ -11,8 +11,8 @@
 .Sh DESCRIPTION
 .Nm
 is a full-screen terminal journal for macOS with encrypted local storage,
-append-only revisions, encrypted drafts, encrypted backups, and encrypted sync
-targets.
+append-only revisions, encrypted drafts, encrypted backups, encrypted sync
+targets, and a menu-driven nostalgic blue-screen editor.
 .Pp
 Without a subcommand,
 .Nm
@@ -47,8 +47,8 @@ Create or replace the local config file.
 Read one supported setting value.
 .It Cm "settings set" Ar key Ar value
 Update one editable setting value.
-.It Cm guide Op Ar setup|settings|distribution
-Print setup, settings, or distribution guidance.
+.It Cm guide Op Ar setup|product|datasheet|settings|distribution
+Print setup, product, datasheet, settings, or distribution guidance.
 .It Cm doctor Op Fl -unlock Op Fl -json
 Run install, config, sync, and vault diagnostics.
 .It Cm completions Ar bash|zsh|fish
@@ -70,6 +70,11 @@ Application configuration file.
 Application log file.
 .El
 .Sh INSTALLATION
+Turnkey public install:
+.Bd -literal -offset indent
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
+.Ed
+.Pp
 Source install:
 .Bd -literal -offset indent
 ./install.sh --source
@@ -81,6 +86,12 @@ Prebuilt release bundle install:
 .Ed
 .Pp
 The installer also installs shell completions for Bash, Zsh, and Fish.
+.Pp
+Stable GitHub Release asset names used by the bootstrap installer:
+.Bd -literal -offset indent
+bsj-universal-apple-darwin.tar.gz
+bsj-universal-apple-darwin.tar.gz.sha256
+.Ed
 .Pp
 Universal release bundle build:
 .Bd -literal -offset indent
@@ -114,6 +125,8 @@ Reveal Codes
 Lock
 .El
 .Sh SEE ALSO
+.Pa docs/PRODUCT_GUIDE.md ,
+.Pa docs/DATASHEET.md ,
 .Pa docs/SETUP_GUIDE.md ,
 .Pa docs/SETTINGS_GUIDE.md ,
 .Pa docs/DISTRIBUTION.md

@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+if [[ -n "$SCRIPT_PATH" && -e "$SCRIPT_PATH" ]]; then
+  ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+else
+  ROOT_DIR=""
+fi
+
 MODE="auto"
 PREFIX="${BSJ_INSTALL_PREFIX:-}"
 BIN_DIR="${BSJ_INSTALL_BIN_DIR:-}"
@@ -10,6 +16,10 @@ MAN_DIR="${BSJ_INSTALL_MAN_DIR:-}"
 BASH_COMPLETION_DIR="${BSJ_INSTALL_BASH_COMPLETION_DIR:-}"
 ZSH_COMPLETION_DIR="${BSJ_INSTALL_ZSH_COMPLETION_DIR:-}"
 FISH_COMPLETION_DIR="${BSJ_INSTALL_FISH_COMPLETION_DIR:-}"
+GITHUB_REPO="${BSJ_INSTALL_REPO:-Awassee/bluescreenjournal}"
+RELEASE_VERSION="${BSJ_INSTALL_VERSION:-latest}"
+ARCHIVE_SOURCE="${BSJ_INSTALL_ARCHIVE:-}"
+SKIP_CHECKSUM=0
 
 if [[ -t 1 ]]; then
   BLUE="$(printf '\033[34m')"
@@ -44,17 +54,27 @@ usage() {
   cat <<'EOF'
 bsj installer
 
+Turnkey install, including the downloader:
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
+
 Usage:
   ./install.sh [--source|--prebuilt] [--prefix PATH] [--bin-dir PATH] [--doc-dir PATH] [--man-dir PATH]
                [--bash-completion-dir PATH] [--zsh-completion-dir PATH] [--fish-completion-dir PATH]
+               [--repo OWNER/REPO] [--version TAG] [--archive PATH_OR_URL] [--skip-checksum]
   ./install.sh --help
 
 Modes:
-  --source    Build and install from the current source checkout with Cargo
-  --prebuilt  Install a bundled prebuilt binary from ./bin/bsj
-  default     Auto-detect prebuilt bundle first, then fall back to source
+  --prebuilt  Install a bundled prebuilt binary. If no local bundle exists, download one from GitHub Releases.
+  --source    Build from source. If no local checkout exists, download the source archive first.
+  default     Use a local bundle if present, else a local checkout, else download the latest release bundle.
 
-Options:
+Bootstrap options:
+  --repo OWNER/REPO   GitHub repository to download from when bootstrapping
+  --version TAG       Release tag to install, defaults to latest
+  --archive PATH_OR_URL  Install from a specific .tar.gz bundle instead of GitHub Releases
+  --skip-checksum     Skip .sha256 verification for downloaded archives
+
+Install location options:
   --prefix PATH   Install prefix for prebuilt installs or cargo --root for source installs
   --bin-dir PATH  Override the binary install directory for prebuilt installs
   --doc-dir PATH  Override the documentation install directory for prebuilt installs
@@ -71,11 +91,15 @@ Environment overrides:
   BSJ_INSTALL_BASH_COMPLETION_DIR
   BSJ_INSTALL_ZSH_COMPLETION_DIR
   BSJ_INSTALL_FISH_COMPLETION_DIR
+  BSJ_INSTALL_REPO
+  BSJ_INSTALL_VERSION
+  BSJ_INSTALL_ARCHIVE
 
-What it does:
-  - source mode checks for macOS, Xcode Command Line Tools, Rust, and Cargo
-  - prebuilt mode copies the bundled binary, docs, example config, man page, and shell completions
-  - both modes print next-step commands after install
+Examples:
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.2
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
 EOF
 }
 
@@ -128,6 +152,25 @@ while [[ $# -gt 0 ]]; do
       FISH_COMPLETION_DIR="$2"
       shift 2
       ;;
+    --repo)
+      [[ $# -ge 2 ]] || die "--repo requires a value"
+      GITHUB_REPO="$2"
+      shift 2
+      ;;
+    --version)
+      [[ $# -ge 2 ]] || die "--version requires a value"
+      RELEASE_VERSION="$2"
+      shift 2
+      ;;
+    --archive)
+      [[ $# -ge 2 ]] || die "--archive requires a value"
+      ARCHIVE_SOURCE="$2"
+      shift 2
+      ;;
+    --skip-checksum)
+      SKIP_CHECKSUM=1
+      shift
+      ;;
     *)
       die "Unknown option: $1"
       ;;
@@ -136,8 +179,12 @@ done
 
 [[ "$(uname -s)" == "Darwin" ]] || die "This installer targets macOS."
 
-has_prebuilt_bundle() {
-  [[ -x "$ROOT_DIR/bin/bsj" ]]
+local_bundle_root() {
+  [[ -n "$ROOT_DIR" && -x "$ROOT_DIR/bin/bsj" ]]
+}
+
+local_source_root() {
+  [[ -n "$ROOT_DIR" && -f "$ROOT_DIR/Cargo.toml" && -d "$ROOT_DIR/src" ]]
 }
 
 pick_mode() {
@@ -145,11 +192,17 @@ pick_mode() {
     printf "%s" "$MODE"
     return
   fi
-  if has_prebuilt_bundle; then
+  if local_bundle_root; then
     printf "prebuilt"
-  else
+  elif local_source_root; then
     printf "source"
+  else
+    printf "prebuilt"
   fi
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
 ensure_path_hint() {
@@ -158,6 +211,32 @@ ensure_path_hint() {
     warn "$path_entry is not on PATH."
     printf "Add this line to ~/.zshrc:\n  export PATH=\"%s:\$PATH\"\n" "$path_entry"
   fi
+}
+
+common_install_args() {
+  local args=()
+  if [[ -n "$PREFIX" ]]; then
+    args+=(--prefix "$PREFIX")
+  fi
+  if [[ -n "$BIN_DIR" ]]; then
+    args+=(--bin-dir "$BIN_DIR")
+  fi
+  if [[ -n "$DOC_DIR" ]]; then
+    args+=(--doc-dir "$DOC_DIR")
+  fi
+  if [[ -n "$MAN_DIR" ]]; then
+    args+=(--man-dir "$MAN_DIR")
+  fi
+  if [[ -n "$BASH_COMPLETION_DIR" ]]; then
+    args+=(--bash-completion-dir "$BASH_COMPLETION_DIR")
+  fi
+  if [[ -n "$ZSH_COMPLETION_DIR" ]]; then
+    args+=(--zsh-completion-dir "$ZSH_COMPLETION_DIR")
+  fi
+  if [[ -n "$FISH_COMPLETION_DIR" ]]; then
+    args+=(--fish-completion-dir "$FISH_COMPLETION_DIR")
+  fi
+  printf '%s\n' "${args[@]}"
 }
 
 install_completion_files() {
@@ -194,8 +273,158 @@ install_completion_files() {
   printf "  fish  %s/bsj.fish\n" "$fish_dir"
 }
 
+release_asset_name() {
+  printf 'bsj-universal-apple-darwin.tar.gz'
+}
+
+release_checksum_name() {
+  printf '%s.sha256' "$(release_asset_name)"
+}
+
+release_download_base() {
+  if [[ "$RELEASE_VERSION" == "latest" ]]; then
+    printf 'https://github.com/%s/releases/latest/download' "$GITHUB_REPO"
+  else
+    printf 'https://github.com/%s/releases/download/%s' "$GITHUB_REPO" "$RELEASE_VERSION"
+  fi
+}
+
+release_bundle_url() {
+  printf '%s/%s' "$(release_download_base)" "$(release_asset_name)"
+}
+
+release_checksum_url() {
+  printf '%s/%s' "$(release_download_base)" "$(release_checksum_name)"
+}
+
+download_to() {
+  local url="$1"
+  local output="$2"
+  require_command curl
+  info "Downloading $(basename "$output")"
+  curl --fail --location --retry 3 --retry-delay 1 --silent --show-error "$url" --output "$output"
+}
+
+copy_or_download_archive() {
+  local source="$1"
+  local output="$2"
+  if [[ "$source" =~ ^https?:// ]]; then
+    download_to "$source" "$output"
+  else
+    [[ -f "$source" ]] || die "Archive not found: $source"
+    cp "$source" "$output"
+  fi
+}
+
+maybe_download_checksum() {
+  local checksum_source="$1"
+  local output="$2"
+  if [[ "$SKIP_CHECKSUM" -eq 1 ]]; then
+    return
+  fi
+  if [[ "$checksum_source" =~ ^https?:// ]]; then
+    if ! curl --fail --location --retry 3 --retry-delay 1 --silent --show-error "$checksum_source" --output "$output"; then
+      warn "Checksum download failed; continuing without checksum verification."
+      rm -f "$output"
+    fi
+  elif [[ -f "$checksum_source" ]]; then
+    cp "$checksum_source" "$output"
+  fi
+}
+
+verify_archive_if_possible() {
+  local archive_path="$1"
+  local checksum_path="$2"
+  local expected actual
+  if [[ "$SKIP_CHECKSUM" -eq 1 ]]; then
+    warn "Skipping checksum verification by request."
+    return
+  fi
+  if [[ ! -f "$checksum_path" ]]; then
+    warn "No checksum file available; continuing without checksum verification."
+    return
+  fi
+  require_command shasum
+  info "Verifying archive checksum"
+  expected="$(awk '{print $1; exit}' "$checksum_path")"
+  [[ -n "$expected" ]] || die "Checksum file is empty: $checksum_path"
+  actual="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
+  [[ "$actual" == "$expected" ]] || die "Checksum mismatch for $(basename "$archive_path")"
+}
+
+extract_archive_bundle() {
+  local archive_path="$1"
+  local tmp_dir="$2"
+  require_command tar
+  tar -C "$tmp_dir" -xzf "$archive_path"
+  find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1
+}
+
+bootstrap_prebuilt_install() {
+  local tmp_dir archive_path checksum_path bundle_dir checksum_source
+  tmp_dir="$(mktemp -d /tmp/bsj-install.XXXXXX)"
+  archive_path="$tmp_dir/$(release_asset_name)"
+  checksum_path="$tmp_dir/$(release_checksum_name)"
+
+  if [[ -n "$ARCHIVE_SOURCE" ]]; then
+    info "Using provided archive source"
+    copy_or_download_archive "$ARCHIVE_SOURCE" "$archive_path"
+    checksum_source="${ARCHIVE_SOURCE}.sha256"
+    maybe_download_checksum "$checksum_source" "$checksum_path"
+  else
+    info "Bootstrapping public release from GitHub"
+    download_to "$(release_bundle_url)" "$archive_path"
+    maybe_download_checksum "$(release_checksum_url)" "$checksum_path"
+  fi
+
+  verify_archive_if_possible "$archive_path" "$checksum_path"
+
+  bundle_dir="$(extract_archive_bundle "$archive_path" "$tmp_dir")"
+  [[ -n "$bundle_dir" && -d "$bundle_dir" ]] || die "Extracted bundle directory not found"
+  [[ -x "$bundle_dir/install.sh" ]] || die "Bundled installer not found in archive"
+
+  info "Launching bundled installer"
+  local delegate_args=()
+  while IFS= read -r arg; do
+    [[ -n "$arg" ]] && delegate_args+=("$arg")
+  done < <(common_install_args)
+  "$bundle_dir/install.sh" --prebuilt "${delegate_args[@]}"
+}
+
+bootstrap_source_install() {
+  require_command curl
+  require_command tar
+
+  local tmp_dir source_archive_url source_archive_path source_dir ref_label
+  tmp_dir="$(mktemp -d /tmp/bsj-source-install.XXXXXX)"
+  source_archive_path="$tmp_dir/source.tar.gz"
+  if [[ "$RELEASE_VERSION" == "latest" ]]; then
+    ref_label="main"
+    source_archive_url="https://github.com/${GITHUB_REPO}/archive/refs/heads/main.tar.gz"
+  else
+    ref_label="$RELEASE_VERSION"
+    source_archive_url="https://github.com/${GITHUB_REPO}/archive/refs/tags/${RELEASE_VERSION}.tar.gz"
+  fi
+
+  info "Downloading source archive for $GITHUB_REPO ($ref_label)"
+  download_to "$source_archive_url" "$source_archive_path"
+  tar -C "$tmp_dir" -xzf "$source_archive_path"
+  source_dir="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  [[ -n "$source_dir" && -f "$source_dir/install.sh" ]] || die "Downloaded source archive is missing install.sh"
+
+  info "Launching source installer"
+  local delegate_args=()
+  while IFS= read -r arg; do
+    [[ -n "$arg" ]] && delegate_args+=("$arg")
+  done < <(common_install_args)
+  "$source_dir/install.sh" --source "${delegate_args[@]}"
+}
+
 install_prebuilt() {
-  has_prebuilt_bundle || die "Prebuilt bundle not found. Expected $ROOT_DIR/bin/bsj"
+  if ! local_bundle_root; then
+    bootstrap_prebuilt_install
+    return
+  fi
 
   local prefix="${PREFIX:-$HOME/.local}"
   local final_bin_dir="${BIN_DIR:-$prefix/bin}"
@@ -243,16 +472,37 @@ Next steps:
 EOF
 }
 
+ensure_xcode_cli_tools() {
+  if xcode-select -p >/dev/null 2>&1; then
+    return
+  fi
+  warn "Xcode Command Line Tools are required to build bsj from source."
+  xcode-select --install >/dev/null 2>&1 || true
+  die "The Xcode Command Line Tools installer has been launched. Re-run this command after it finishes, or use the default prebuilt install path instead."
+}
+
+ensure_rust_toolchain() {
+  if command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1; then
+    return
+  fi
+  require_command curl
+  info "Installing Rust toolchain with rustup"
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+  export PATH="$HOME/.cargo/bin:$PATH"
+  command -v cargo >/dev/null 2>&1 || die "Rust install completed, but cargo is still not on PATH. Add ~/.cargo/bin to PATH and retry."
+}
+
 install_from_source() {
-  command -v cargo >/dev/null 2>&1 || die "Cargo was not found. Install Rust first: https://rustup.rs/"
-  command -v rustc >/dev/null 2>&1 || die "rustc was not found. Install Rust first: https://rustup.rs/"
+  if ! local_source_root; then
+    bootstrap_source_install
+    return
+  fi
 
   [[ -z "$DOC_DIR" ]] || die "--doc-dir is only supported for prebuilt installs"
   [[ -z "$MAN_DIR" ]] || die "--man-dir is only supported for prebuilt installs"
 
-  if ! xcode-select -p >/dev/null 2>&1; then
-    die "Xcode Command Line Tools are required. Run: xcode-select --install"
-  fi
+  ensure_xcode_cli_tools
+  ensure_rust_toolchain
 
   local cargo_root="${PREFIX:-${CARGO_HOME:-$HOME/.cargo}}"
   if [[ -n "$BIN_DIR" && "$BIN_DIR" != "$cargo_root/bin" ]]; then
