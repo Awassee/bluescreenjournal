@@ -1,5 +1,5 @@
 use crate::{
-    config::{AppConfig, default_vault_path},
+    config::{AppConfig, MacroActionConfig, MacroCommandConfig, default_vault_path},
     search::{SearchIndex, SearchQuery, SearchResult},
     tui::{
         buffer::{MatchPos, TextBuffer},
@@ -33,6 +33,9 @@ pub enum Overlay {
     FindPrompt {
         input: String,
         error: Option<String>,
+    },
+    ClosingPrompt {
+        input: String,
     },
     ConflictChoice(ConflictOverlay),
     MergeDiff(vault::ConflictState),
@@ -392,7 +395,9 @@ enum SaveKind {
 }
 
 pub struct App {
+    config: AppConfig,
     buffer: TextBuffer,
+    closing_thought: Option<String>,
     selected_date: NaiveDate,
     scroll_row: usize,
     overlay: Option<Overlay>,
@@ -410,7 +415,9 @@ pub struct App {
     search_index: Option<SearchIndex>,
     pending_search_jump: Option<SearchJump>,
     pending_conflict: Option<vault::ConflictState>,
+    pending_recovery_closing: Option<Option<String>>,
     merge_context: Option<MergeContext>,
+    reveal_codes: bool,
     last_viewport_height: usize,
     last_autosave_check: Instant,
 }
@@ -443,7 +450,9 @@ impl App {
         };
 
         Self {
+            config,
             buffer: TextBuffer::new(),
+            closing_thought: None,
             selected_date: initial_date.unwrap_or_else(|| Local::now().date_naive()),
             scroll_row: 0,
             overlay,
@@ -461,7 +470,9 @@ impl App {
             search_index: None,
             pending_search_jump: None,
             pending_conflict: None,
+            pending_recovery_closing: None,
             merge_context: None,
+            reveal_codes: false,
             last_viewport_height: 23,
             last_autosave_check: Instant::now(),
         }
@@ -469,6 +480,14 @@ impl App {
 
     pub fn buffer(&self) -> &TextBuffer {
         &self.buffer
+    }
+
+    pub fn closing_thought(&self) -> Option<&str> {
+        self.closing_thought.as_deref()
+    }
+
+    pub fn reveal_codes_enabled(&self) -> bool {
+        self.reveal_codes
     }
 
     pub fn scroll_row(&self) -> usize {
@@ -541,6 +560,21 @@ impl App {
         }
     }
 
+    pub fn editor_viewport_height(&self, body_rows: usize) -> usize {
+        let reserved_rows = 1usize + usize::from(self.reveal_codes);
+        body_rows.saturating_sub(reserved_rows).max(1)
+    }
+
+    pub fn reveal_codes_line(&self) -> String {
+        let entry_number = self.entry_number_label();
+        format_reveal_codes(
+            self.selected_date,
+            &entry_number,
+            &self.buffer.to_text(),
+            self.closing_thought.as_deref(),
+        )
+    }
+
     pub fn tick(&mut self) {
         if let Some(status) = &self.status_flash
             && Instant::now() >= status.expires_at
@@ -589,6 +623,17 @@ impl App {
                 input: self.find_query.clone().unwrap_or_default(),
                 error: None,
             });
+            return;
+        }
+        if key.code == KeyCode::F(9) {
+            self.open_closing_prompt();
+            return;
+        }
+        if key.code == KeyCode::F(11) || Self::is_ctrl_char(&key, 'r') {
+            self.toggle_reveal_codes(viewport_height);
+            return;
+        }
+        if self.try_run_macro(&key, viewport_height) {
             return;
         }
 
@@ -744,6 +789,20 @@ impl App {
                 KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
                     input.push(ch);
                     self.update_incremental_find(input, viewport_height, error);
+                }
+                _ => {}
+            },
+            Overlay::ClosingPrompt { input } => match key.code {
+                KeyCode::Esc | KeyCode::F(9) => keep_overlay = false,
+                KeyCode::Backspace => {
+                    input.pop();
+                }
+                KeyCode::Enter => {
+                    self.set_closing_thought_from_input(input);
+                    keep_overlay = false;
+                }
+                KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
+                    input.push(ch);
                 }
                 _ => {}
             },
@@ -1002,7 +1061,7 @@ impl App {
             }
         };
 
-        let mut config = AppConfig::load_or_default();
+        let mut config = self.config.clone();
         config.vault_path = vault_path.clone();
         config.local_device_id = Some(metadata.device_id.clone());
         if config.device_nickname.trim().is_empty() {
@@ -1014,6 +1073,7 @@ impl App {
                 self.vault = Some(unlocked);
                 self.search_index = None;
                 self.vault_path = vault_path.clone();
+                self.config = config.clone();
                 if let Err(error) = config.save() {
                     self.flash_status(&format!("VAULT CREATED (config warning: {error})"));
                 } else {
@@ -1037,7 +1097,7 @@ impl App {
             return false;
         }
         let secret = SecretString::new(std::mem::take(input).into_boxed_str());
-        let mut config = AppConfig::load_or_default();
+        let mut config = self.config.clone();
         let mut config_dirty = false;
         let device_id = match config.local_device_id.clone() {
             Some(device_id) => device_id,
@@ -1067,6 +1127,7 @@ impl App {
                         self.flash_status(&format!("DEVICE CONFIG WARNING: {save_error}"));
                     }
                 }
+                self.config = config;
                 self.vault = Some(unlocked);
                 self.search_index = None;
                 self.flash_status("UNLOCKED.");
@@ -1084,13 +1145,16 @@ impl App {
         self.overlay = None;
         self.draft_recovered = false;
         self.pending_conflict = None;
+        self.pending_recovery_closing = None;
         self.merge_context = None;
+        self.closing_thought = None;
         self.last_autosave_check = Instant::now();
         self.last_save_kind = None;
         self.last_save_time = None;
 
         let Some(vault) = &self.vault else {
             self.buffer = TextBuffer::new();
+            self.closing_thought = None;
             self.scroll_row = 0;
             self.dirty = false;
             return;
@@ -1099,11 +1163,13 @@ impl App {
         match vault.load_date_state(self.selected_date) {
             Ok(state) => {
                 self.buffer = TextBuffer::from_text(state.revision_text.as_deref().unwrap_or(""));
+                self.closing_thought = state.revision_closing_thought;
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.refresh_find_matches();
                 self.pending_conflict = state.conflict.clone();
                 if let Some(draft_text) = state.recovery_draft_text {
+                    self.pending_recovery_closing = Some(state.recovery_draft_closing_thought);
                     self.overlay = Some(Overlay::RecoverDraft { draft_text });
                 } else if let Some(conflict) = state.conflict {
                     self.overlay = Some(Overlay::ConflictChoice(ConflictOverlay::new(conflict)));
@@ -1111,6 +1177,7 @@ impl App {
             }
             Err(_) => {
                 self.buffer = TextBuffer::new();
+                self.closing_thought = None;
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.refresh_find_matches();
@@ -1142,6 +1209,36 @@ impl App {
     fn open_index_overlay(&mut self) {
         let items = self.load_index_entries();
         self.overlay = Some(Overlay::Index(IndexState::new(items, self.selected_date)));
+    }
+
+    fn open_closing_prompt(&mut self) {
+        self.overlay = Some(Overlay::ClosingPrompt {
+            input: self.closing_thought.clone().unwrap_or_default(),
+        });
+    }
+
+    fn set_closing_thought_from_input(&mut self, input: &str) {
+        let normalized = normalize_overlay_text(input);
+        let changed = self.closing_thought != normalized;
+        self.closing_thought = normalized;
+        if changed {
+            self.dirty = true;
+            self.flash_status(if self.closing_thought.is_some() {
+                "CLOSING SET."
+            } else {
+                "CLOSING CLEARED."
+            });
+        }
+    }
+
+    fn toggle_reveal_codes(&mut self, viewport_height: usize) {
+        self.reveal_codes = !self.reveal_codes;
+        self.ensure_cursor_visible(viewport_height);
+        self.flash_status(if self.reveal_codes {
+            "REVEAL CODES ON."
+        } else {
+            "REVEAL CODES OFF."
+        });
     }
 
     fn load_entry_dates(&mut self) -> BTreeSet<NaiveDate> {
@@ -1177,14 +1274,15 @@ impl App {
         };
         let body = self.buffer.to_text();
         let save_result = if let Some(merge_context) = &self.merge_context {
-            vault.save_merge_revision(
+            vault.save_entry_merge_revision(
                 self.selected_date,
                 &body,
+                self.closing_thought.as_deref(),
                 &merge_context.primary_hash,
                 &merge_context.merged_hashes,
             )
         } else {
-            vault.save_revision(self.selected_date, &body)
+            vault.save_entry_revision(self.selected_date, &body, self.closing_thought.as_deref())
         };
 
         match save_result {
@@ -1208,7 +1306,10 @@ impl App {
             return;
         };
         let body = self.buffer.to_text();
-        if vault.save_draft(self.selected_date, &body).is_ok() {
+        if vault
+            .save_entry_draft(self.selected_date, &body, self.closing_thought.as_deref())
+            .is_ok()
+        {
             self.last_save_kind = Some(SaveKind::Autosaved);
             self.last_save_time = Some(Local::now());
         }
@@ -1218,6 +1319,13 @@ impl App {
         let (resolved_text, recovered) =
             resolve_recovery_text(use_draft, self.buffer.to_text().as_str(), draft_text);
         self.buffer = TextBuffer::from_text(&resolved_text);
+        if use_draft {
+            if let Some(closing_thought) = self.pending_recovery_closing.take() {
+                self.closing_thought = closing_thought;
+            }
+        } else {
+            self.pending_recovery_closing = None;
+        }
         self.scroll_row = 0;
         self.refresh_find_matches();
         self.draft_recovered = recovered;
@@ -1411,6 +1519,7 @@ impl App {
         match conflict.selected {
             ConflictMode::ViewA => {
                 self.buffer = TextBuffer::from_text(&head_a.body);
+                self.closing_thought = head_a.closing_thought.clone();
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.merge_context = None;
@@ -1420,6 +1529,7 @@ impl App {
             }
             ConflictMode::ViewB => {
                 self.buffer = TextBuffer::from_text(&head_b.body);
+                self.closing_thought = head_b.closing_thought.clone();
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.merge_context = None;
@@ -1429,6 +1539,7 @@ impl App {
             }
             ConflictMode::Merge => {
                 self.buffer = TextBuffer::from_text(&head_a.body);
+                self.closing_thought = head_a.closing_thought.clone();
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.refresh_find_matches();
@@ -1528,6 +1639,48 @@ impl App {
         false
     }
 
+    fn try_run_macro(&mut self, key: &KeyEvent, viewport_height: usize) -> bool {
+        for macro_config in self.config.macros.clone() {
+            if !macro_key_matches(&macro_config.key, key) {
+                continue;
+            }
+            self.run_macro_action(macro_config.action, viewport_height);
+            return true;
+        }
+        false
+    }
+
+    fn run_macro_action(&mut self, action: MacroActionConfig, viewport_height: usize) {
+        match action {
+            MacroActionConfig::InsertTemplate { text } => {
+                self.buffer.insert_text(&text);
+                self.dirty = true;
+                self.refresh_find_matches();
+                self.ensure_cursor_visible(viewport_height);
+                self.flash_status("MACRO INSERTED.");
+            }
+            MacroActionConfig::Command { command } => match command {
+                MacroCommandConfig::InsertDateHeader => {
+                    let template = format!(
+                        "{}  ENTRY NO. {}\n\n",
+                        self.selected_date.format("%A, %B %d, %Y"),
+                        self.entry_number_label()
+                    );
+                    self.buffer.insert_text(&template);
+                    self.dirty = true;
+                    self.refresh_find_matches();
+                    self.ensure_cursor_visible(viewport_height);
+                    self.flash_status("DATE HEADER INSERTED.");
+                }
+                MacroCommandConfig::InsertClosingLine => self.open_closing_prompt(),
+                MacroCommandConfig::JumpToday => {
+                    self.open_date(Local::now().date_naive());
+                    self.flash_status("JUMPED TO TODAY.");
+                }
+            },
+        }
+    }
+
     fn refresh_find_matches(&mut self) {
         if let Some(query) = self.find_query.clone() {
             self.find_matches = self.buffer.find(&query);
@@ -1570,6 +1723,145 @@ impl App {
     }
 }
 
+fn normalize_overlay_text(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+pub fn format_reveal_codes(
+    date: NaiveDate,
+    entry_number: &str,
+    body: &str,
+    closing_thought: Option<&str>,
+) -> String {
+    let mut codes = vec![
+        format!("⟦DATE:{}⟧", date.format("%Y-%m-%d")),
+        format!("⟦ENTRY:{}⟧", entry_number),
+    ];
+
+    for tag in extract_reveal_tags(body) {
+        codes.push(format!("⟦TAG:{tag}⟧"));
+    }
+    if let Some(mood) = extract_reveal_mood(body) {
+        codes.push(format!("⟦MOOD:{mood}⟧"));
+    }
+    if let Some(closing_thought) = normalize_overlay_text(closing_thought.unwrap_or_default()) {
+        codes.push(format!("⟦CLOSE:{closing_thought}⟧"));
+    }
+
+    codes.join(" ")
+}
+
+fn extract_reveal_tags(body: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    for token in body.split_whitespace() {
+        let Some(rest) = token.strip_prefix('#') else {
+            continue;
+        };
+        let cleaned = rest
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
+            .collect::<String>()
+            .to_lowercase();
+        if cleaned.is_empty() || tags.contains(&cleaned) {
+            continue;
+        }
+        tags.push(cleaned);
+        if tags.len() == 3 {
+            break;
+        }
+    }
+    tags
+}
+
+fn extract_reveal_mood(body: &str) -> Option<u8> {
+    for token in body.split_whitespace() {
+        let normalized = token
+            .trim_matches(|ch: char| ch == ',' || ch == '.' || ch == ';' || ch == ':')
+            .to_ascii_lowercase();
+        let Some(digits) = normalized
+            .strip_prefix("mood:")
+            .or_else(|| normalized.strip_prefix("mood="))
+        else {
+            continue;
+        };
+        let mood = digits.parse::<u8>().ok()?;
+        if mood <= 9 {
+            return Some(mood);
+        }
+    }
+    None
+}
+
+fn macro_key_matches(spec: &str, key: &KeyEvent) -> bool {
+    let Some((code, modifiers)) = parse_macro_key_spec(spec) else {
+        return false;
+    };
+    if key.modifiers != modifiers {
+        return false;
+    }
+
+    match (&key.code, code) {
+        (KeyCode::Char(actual), MacroKeyCode::Char(expected)) => {
+            actual.eq_ignore_ascii_case(&expected)
+        }
+        (KeyCode::F(actual), MacroKeyCode::Function(expected)) => *actual == expected,
+        (KeyCode::Enter, MacroKeyCode::Enter) => true,
+        (KeyCode::Tab, MacroKeyCode::Tab) => true,
+        (KeyCode::BackTab, MacroKeyCode::BackTab) => true,
+        (KeyCode::Backspace, MacroKeyCode::Backspace) => true,
+        (KeyCode::Esc, MacroKeyCode::Esc) => true,
+        _ => false,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MacroKeyCode {
+    Char(char),
+    Function(u8),
+    Enter,
+    Tab,
+    BackTab,
+    Backspace,
+    Esc,
+}
+
+fn parse_macro_key_spec(spec: &str) -> Option<(MacroKeyCode, KeyModifiers)> {
+    let normalized = spec.to_ascii_lowercase().replace('+', "-");
+    let parts = normalized
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut modifiers = KeyModifiers::empty();
+    let mut code = None;
+    for part in parts {
+        match part {
+            "ctrl" | "control" => modifiers |= KeyModifiers::CONTROL,
+            "alt" | "option" => modifiers |= KeyModifiers::ALT,
+            "shift" => modifiers |= KeyModifiers::SHIFT,
+            "enter" | "return" => code = Some(MacroKeyCode::Enter),
+            "tab" => code = Some(MacroKeyCode::Tab),
+            "backtab" => code = Some(MacroKeyCode::BackTab),
+            "backspace" => code = Some(MacroKeyCode::Backspace),
+            "esc" | "escape" => code = Some(MacroKeyCode::Esc),
+            value if value.starts_with('f') => {
+                let number = value.strip_prefix('f')?.parse::<u8>().ok()?;
+                code = Some(MacroKeyCode::Function(number));
+            }
+            value if value.chars().count() == 1 => {
+                code = Some(MacroKeyCode::Char(value.chars().next()?));
+            }
+            _ => return None,
+        }
+    }
+
+    code.map(|code| (code, modifiers))
+}
+
 fn resolve_recovery_text(use_draft: bool, revision_text: &str, draft_text: &str) -> (String, bool) {
     if use_draft {
         (draft_text.to_string(), true)
@@ -1603,12 +1895,12 @@ fn parse_optional_overlay_date(label: &str, input: &str) -> Result<Option<NaiveD
 #[cfg(test)]
 mod tests {
     use super::{
-        App, IndexState, SearchField, SearchOverlay, parse_optional_overlay_date,
-        resolve_recovery_text,
+        App, IndexState, SearchField, SearchOverlay, format_reveal_codes, macro_key_matches,
+        parse_optional_overlay_date, resolve_recovery_text,
     };
     use crate::vault::IndexEntry;
     use chrono::{Duration, NaiveDate};
-    use crossterm::event::Event;
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
     fn resize_event_does_not_panic() {
@@ -1685,5 +1977,27 @@ mod tests {
             parse_optional_overlay_date("to", "2026-03-16").expect("date"),
             Some(NaiveDate::from_ymd_opt(2026, 3, 16).expect("date"))
         );
+    }
+
+    #[test]
+    fn reveal_codes_format_tags_mood_and_closing() {
+        let line = format_reveal_codes(
+            NaiveDate::from_ymd_opt(2026, 3, 16).expect("date"),
+            "0000016",
+            "Planning #work mood:7 before dusk",
+            Some("See you tomorrow."),
+        );
+        assert!(line.contains("⟦TAG:work⟧"));
+        assert!(line.contains("⟦MOOD:7⟧"));
+        assert!(line.contains("⟦CLOSE:See you tomorrow.⟧"));
+    }
+
+    #[test]
+    fn macro_key_matcher_handles_ctrl_and_function_keys() {
+        let ctrl_j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL);
+        let f11 = KeyEvent::new(KeyCode::F(11), KeyModifiers::empty());
+        assert!(macro_key_matches("ctrl-j", &ctrl_j));
+        assert!(macro_key_matches("f11", &f11));
+        assert!(!macro_key_matches("ctrl-k", &ctrl_j));
     }
 }

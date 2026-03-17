@@ -22,8 +22,10 @@ secrecy = "0.10.3"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sha2 = "0.10.8"
+tar = "0.4"
 thiserror = "2.0.12"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+zstd = "0.13"
 zeroize = { version = "1.8.1", features = ["std"] }
 
 [dev-dependencies]

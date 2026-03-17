@@ -20,6 +20,8 @@ struct Cli {
 enum Command {
     /// Open a specific journal date in the TUI
     Open { date: String },
+    /// Export a date as plain text to stdout
+    Export { date: String },
     /// Search encrypted entries without writing a plaintext index
     Search {
         query: String,
@@ -35,6 +37,8 @@ enum Command {
         #[arg(long)]
         remote: Option<String>,
     },
+    /// Create an encrypted backup snapshot under vault/backups
+    Backup,
     /// Verify revision hashchains
     Verify,
 }
@@ -63,6 +67,20 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Command::Export { date }) => {
+            let date = match parse_date_arg("date", &date) {
+                Ok(date) => date,
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(2);
+                }
+            };
+
+            if let Err(error) = run_cli_export(date) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
         Some(Command::Search { query, from, to }) => {
             let from = match parse_optional_date_arg("from", from.as_deref()) {
                 Ok(date) => date,
@@ -86,6 +104,12 @@ fn main() {
         }
         Some(Command::Sync { backend, remote }) => {
             if let Err(error) = run_cli_sync(backend, remote.as_deref()) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        Some(Command::Backup) => {
+            if let Err(error) = run_cli_backup() {
                 eprintln!("{error}");
                 std::process::exit(1);
             }
@@ -155,6 +179,19 @@ fn run_cli_search(
     Ok(())
 }
 
+fn run_cli_export(date: NaiveDate) -> Result<(), String> {
+    let config = config::AppConfig::load_or_default();
+    let vault = unlock_cli_vault(&config)?;
+    let Some(text) = vault
+        .export_entry_text(date)
+        .map_err(|error| format!("export failed: {error}"))?
+    else {
+        return Err(format!("no saved entry for {}", date.format("%Y-%m-%d")));
+    };
+    println!("{text}");
+    Ok(())
+}
+
 fn run_cli_sync(
     backend_arg: Option<SyncBackendArg>,
     remote_arg: Option<&str>,
@@ -216,6 +253,17 @@ fn run_cli_verify() -> Result<(), String> {
             }
         }
     }
+    Ok(())
+}
+
+fn run_cli_backup() -> Result<(), String> {
+    let config = config::AppConfig::load_or_default();
+    let vault = unlock_cli_vault(&config)?;
+    let summary = vault
+        .create_backup(&config.backup_retention)
+        .map_err(|error| format!("backup failed: {error}"))?;
+    println!("Backup: {}", summary.path.display());
+    println!("Pruned: {}", summary.pruned);
     Ok(())
 }
 

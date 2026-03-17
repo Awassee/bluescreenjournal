@@ -755,10 +755,7 @@ mod tests {
     use super::*;
     use crate::vault::{create_vault, register_device, unlock_vault_with_device};
     use secrecy::SecretString;
-    use std::{
-        collections::BTreeMap,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::collections::BTreeMap;
     use tempfile::tempdir;
 
     #[derive(Default)]
@@ -918,42 +915,8 @@ mod tests {
 
     #[test]
     fn webdav_constructor_normalizes_base_url() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let previous_url = env::var("BSJ_WEBDAV_URL").ok();
-        let previous_user = env::var("BSJ_WEBDAV_USERNAME").ok();
-        let previous_password = env::var("BSJ_WEBDAV_PASSWORD").ok();
-
-        unsafe {
-            env::set_var(
-                "BSJ_WEBDAV_URL",
-                format!("https://example.com/bsj-{unique}"),
-            );
-            env::remove_var("BSJ_WEBDAV_USERNAME");
-            env::remove_var("BSJ_WEBDAV_PASSWORD");
-        }
-
-        let backend = WebDavBackend::from_remote(None).expect("backend");
-        assert_eq!(
-            backend.base_url.as_str(),
-            format!("https://example.com/bsj-{unique}/")
-        );
-
-        unsafe {
-            match previous_url {
-                Some(value) => env::set_var("BSJ_WEBDAV_URL", value),
-                None => env::remove_var("BSJ_WEBDAV_URL"),
-            }
-            match previous_user {
-                Some(value) => env::set_var("BSJ_WEBDAV_USERNAME", value),
-                None => env::remove_var("BSJ_WEBDAV_USERNAME"),
-            }
-            match previous_password {
-                Some(value) => env::set_var("BSJ_WEBDAV_PASSWORD", value),
-                None => env::remove_var("BSJ_WEBDAV_PASSWORD"),
-            }
-        }
+        let backend =
+            WebDavBackend::from_remote(Some("https://example.com/bsj-test")).expect("backend");
+        assert_eq!(backend.base_url.as_str(), "https://example.com/bsj-test/");
     }
 }

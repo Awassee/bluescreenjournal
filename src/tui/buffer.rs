@@ -68,6 +68,16 @@ impl TextBuffer {
         self.cursor_col += 1;
     }
 
+    pub fn insert_text(&mut self, text: &str) {
+        for ch in text.chars() {
+            if ch == '\n' {
+                self.insert_newline();
+            } else {
+                self.insert_char(ch);
+            }
+        }
+    }
+
     pub fn insert_newline(&mut self) {
         let line = &mut self.lines[self.cursor_row];
         let idx = char_to_byte_idx(line, self.cursor_col);
@@ -350,5 +360,13 @@ mod tests {
         assert_eq!(buf.cursor(), (3, 0));
         buf.page_up(20);
         assert_eq!(buf.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn insert_text_handles_newlines() {
+        let mut buf = TextBuffer::new();
+        buf.insert_text("one\ntwo");
+        assert_eq!(buf.to_text(), "one\ntwo");
+        assert_eq!(buf.cursor(), (1, 3));
     }
 }

@@ -1,4 +1,5 @@
 use crate::{
+    config::BackupRetentionConfig,
     search::SearchDocument,
     sync::{self, FolderBackend, SyncBackend},
 };
@@ -16,7 +17,7 @@ use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashSet},
     fs,
-    io::Write,
+    io::{Cursor, Write},
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -101,6 +102,7 @@ pub struct ConflictHead {
     pub seq: u64,
     pub saved_at: DateTime<Utc>,
     pub body: String,
+    pub closing_thought: Option<String>,
     pub preview: String,
 }
 
@@ -113,7 +115,9 @@ pub struct ConflictState {
 #[derive(Clone, Debug)]
 pub struct LoadedDateState {
     pub revision_text: Option<String>,
+    pub revision_closing_thought: Option<String>,
     pub recovery_draft_text: Option<String>,
+    pub recovery_draft_closing_thought: Option<String>,
     pub conflict: Option<ConflictState>,
 }
 
@@ -133,6 +137,12 @@ pub struct SyncReport {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackupSummary {
+    pub path: PathBuf,
+    pub pruned: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IntegrityIssue {
     pub date: Option<NaiveDate>,
     pub message: String,
@@ -147,6 +157,7 @@ pub struct IntegrityReport {
 #[derive(Clone, Debug)]
 struct DraftInfo {
     body: String,
+    closing_thought: Option<String>,
     saved_at: DateTime<Utc>,
 }
 
@@ -167,6 +178,7 @@ struct RevisionRecord {
     prev_hash: Option<String>,
     merged_hashes: Vec<String>,
     body: String,
+    closing_thought: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -226,6 +238,8 @@ struct RevisionPayload {
     prev_hash: Option<String>,
     #[serde(rename = "mergedHashes", default)]
     merged_hashes: Vec<String>,
+    #[serde(rename = "closingThought", default)]
+    closing_thought: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -237,6 +251,8 @@ struct DraftPayload {
     body: String,
     #[serde(rename = "deviceId")]
     device_id: String,
+    #[serde(rename = "closingThought", default)]
+    closing_thought: Option<String>,
 }
 
 pub struct UnlockedVault {
@@ -251,13 +267,24 @@ impl UnlockedVault {
         &self.metadata
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn save_revision(&self, date: NaiveDate, body: &str) -> VaultResult<()> {
+        self.save_entry_revision(date, body, None)
+    }
+
+    pub fn save_entry_revision(
+        &self,
+        date: NaiveDate,
+        body: &str,
+        closing_thought: Option<&str>,
+    ) -> VaultResult<()> {
         let records = self.scan_date_revisions(date)?;
         let heads = head_records(&records);
         let prev_hash = heads.first().map(|record| record.revision_hash.clone());
-        self.save_revision_internal(date, body, prev_hash, Vec::new(), &records)
+        self.save_revision_internal(date, body, closing_thought, prev_hash, Vec::new(), &records)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn save_merge_revision(
         &self,
         date: NaiveDate,
@@ -265,17 +292,39 @@ impl UnlockedVault {
         primary_hash: &str,
         merged_hashes: &[String],
     ) -> VaultResult<()> {
+        self.save_entry_merge_revision(date, body, None, primary_hash, merged_hashes)
+    }
+
+    pub fn save_entry_merge_revision(
+        &self,
+        date: NaiveDate,
+        body: &str,
+        closing_thought: Option<&str>,
+        primary_hash: &str,
+        merged_hashes: &[String],
+    ) -> VaultResult<()> {
         let records = self.scan_date_revisions(date)?;
         self.save_revision_internal(
             date,
             body,
+            closing_thought,
             Some(primary_hash.to_string()),
             merged_hashes.to_vec(),
             &records,
         )
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn save_draft(&self, date: NaiveDate, body: &str) -> VaultResult<()> {
+        self.save_entry_draft(date, body, None)
+    }
+
+    pub fn save_entry_draft(
+        &self,
+        date: NaiveDate,
+        body: &str,
+        closing_thought: Option<&str>,
+    ) -> VaultResult<()> {
         let date_directory = date_dir(&self.root, date);
         fs::create_dir_all(&date_directory)?;
         let payload = DraftPayload {
@@ -284,6 +333,7 @@ impl UnlockedVault {
             date: date.format("%Y-%m-%d").to_string(),
             body: body.to_string(),
             device_id: self.device_id.clone(),
+            closing_thought: normalize_optional_text(closing_thought),
         };
         let plaintext = serde_json::to_vec(&payload)?;
         let aad = aad_string("draft", date, &self.device_id, 0);
@@ -292,11 +342,54 @@ impl UnlockedVault {
         atomic_write(&path, &encrypted.to_bytes())
     }
 
+    pub fn export_entry_text(&self, date: NaiveDate) -> VaultResult<Option<String>> {
+        let records = self.scan_date_revisions(date)?;
+        let heads = head_records(&records);
+        let primary = heads.first().or_else(|| records.first());
+        Ok(primary
+            .map(|record| format_export_text(&record.body, record.closing_thought.as_deref())))
+    }
+
+    pub fn create_backup(&self, retention: &BackupRetentionConfig) -> VaultResult<BackupSummary> {
+        let created_at = Utc::now();
+        let archive_bytes = build_backup_archive(&self.root)?;
+        let compressed = zstd::stream::encode_all(Cursor::new(archive_bytes), 3)?;
+        let encrypted = encrypt_payload(
+            &self.key,
+            &compressed,
+            backup_aad_string(created_at).as_bytes(),
+        )?;
+
+        let backup_dir = self.root.join("backups");
+        fs::create_dir_all(&backup_dir)?;
+        let path = backup_dir.join(backup_file_name(created_at));
+        atomic_write(&path, &encrypted.to_bytes())?;
+        let pruned = prune_backups(&backup_dir, retention)?;
+        Ok(BackupSummary { path, pruned })
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn restore_backup_into(&self, backup_path: &Path, target_root: &Path) -> VaultResult<()> {
+        let timestamp = parse_backup_timestamp(backup_path)?;
+        let encrypted = RevisionFile::parse(&fs::read(backup_path)?)?;
+        let compressed = decrypt_payload(
+            &self.key,
+            &encrypted,
+            backup_aad_string(timestamp).as_bytes(),
+        )?;
+        let archive_bytes = zstd::stream::decode_all(Cursor::new(compressed))?;
+        fs::create_dir_all(target_root)?;
+        let mut archive = tar::Archive::new(Cursor::new(archive_bytes));
+        archive.unpack(target_root)?;
+        Ok(())
+    }
+
     pub fn load_date_state(&self, date: NaiveDate) -> VaultResult<LoadedDateState> {
         let records = self.scan_date_revisions(date)?;
         let heads = head_records(&records);
         let primary = heads.first().or_else(|| records.first());
         let revision_text = primary.map(|record| record.body.clone());
+        let revision_closing_thought = primary.and_then(|record| record.closing_thought.clone());
 
         let conflict = if heads.len() > 1 {
             Some(ConflictState {
@@ -309,7 +402,8 @@ impl UnlockedVault {
                         seq: record.seq,
                         saved_at: record.saved_at,
                         body: record.body.clone(),
-                        preview: first_line_preview(&record.body, 54),
+                        closing_thought: record.closing_thought.clone(),
+                        preview: entry_preview(&record.body, record.closing_thought.as_deref(), 54),
                     })
                     .collect(),
             })
@@ -318,15 +412,19 @@ impl UnlockedVault {
         };
 
         let draft = self.read_draft(date)?;
-        let recovery_draft_text = match (draft, primary) {
-            (Some(draft), Some(revision)) if draft.saved_at > revision.saved_at => Some(draft.body),
-            (Some(draft), None) => Some(draft.body),
-            _ => None,
+        let (recovery_draft_text, recovery_draft_closing_thought) = match (draft, primary) {
+            (Some(draft), Some(revision)) if draft.saved_at > revision.saved_at => {
+                (Some(draft.body), draft.closing_thought)
+            }
+            (Some(draft), None) => (Some(draft.body), draft.closing_thought),
+            _ => (None, None),
         };
 
         Ok(LoadedDateState {
             revision_text,
+            revision_closing_thought,
             recovery_draft_text,
+            recovery_draft_closing_thought,
             conflict,
         })
     }
@@ -386,7 +484,11 @@ impl UnlockedVault {
                 entries.push(IndexEntry {
                     date,
                     entry_number: compute_entry_number(epoch, date),
-                    preview: first_line_preview(&record.body, preview_chars),
+                    preview: entry_preview(
+                        record.body.as_str(),
+                        record.closing_thought.as_deref(),
+                        preview_chars,
+                    ),
                     has_conflict: heads.len() > 1,
                 });
             }
@@ -453,6 +555,7 @@ impl UnlockedVault {
         &self,
         date: NaiveDate,
         body: &str,
+        closing_thought: Option<&str>,
         prev_hash: Option<String>,
         mut merged_hashes: Vec<String>,
         existing_records: &[RevisionRecord],
@@ -496,6 +599,7 @@ impl UnlockedVault {
             device_id: self.device_id.clone(),
             prev_hash,
             merged_hashes,
+            closing_thought: normalize_optional_text(closing_thought),
         };
         let plaintext = serde_json::to_vec(&payload)?;
         let aad = aad_string("revision", date, &self.device_id, seq);
@@ -520,6 +624,7 @@ impl UnlockedVault {
         let payload: DraftPayload = serde_json::from_slice(&plaintext)?;
         Ok(Some(DraftInfo {
             body: payload.body,
+            closing_thought: payload.closing_thought,
             saved_at: parse_saved_at(&payload.saved_at)?,
         }))
     }
@@ -751,6 +856,7 @@ fn scan_date_revisions(
             prev_hash: payload.prev_hash,
             merged_hashes: payload.merged_hashes,
             body: payload.body,
+            closing_thought: payload.closing_thought,
         });
     }
     records.sort_by(|left, right| compare_revision_record(right, left));
@@ -852,6 +958,30 @@ fn hash_bytes_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
+pub fn format_export_text(body: &str, closing_thought: Option<&str>) -> String {
+    match normalize_optional_text(closing_thought) {
+        Some(closing_thought) if body.trim_end().is_empty() => closing_thought,
+        Some(closing_thought) => format!("{}\n\n{closing_thought}", body.trim_end()),
+        None => body.to_string(),
+    }
+}
+
+fn normalize_optional_text(input: Option<&str>) -> Option<String> {
+    input
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+}
+
+fn entry_preview(body: &str, closing_thought: Option<&str>, max_chars: usize) -> String {
+    let preview_source = if body.trim().is_empty() {
+        closing_thought.unwrap_or_default()
+    } else {
+        body
+    };
+    first_line_preview(preview_source, max_chars)
+}
+
 fn first_line_preview(body: &str, max_chars: usize) -> String {
     let first_line = body.lines().next().unwrap_or_default().replace('\t', " ");
     truncate_chars(first_line.trim_end(), max_chars)
@@ -866,6 +996,164 @@ fn truncate_chars(input: &str, max_chars: usize) -> String {
         truncated.push_str("...");
     }
     truncated
+}
+
+fn build_backup_archive(root: &Path) -> VaultResult<Vec<u8>> {
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut tar_bytes);
+        for relative in backup_source_paths(root)? {
+            builder.append_path_with_name(root.join(&relative), &relative)?;
+        }
+        builder.finish()?;
+    }
+    Ok(tar_bytes)
+}
+
+fn backup_source_paths(root: &Path) -> VaultResult<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    collect_backup_source_paths(root, root, &mut paths)?;
+    paths.sort();
+    Ok(paths)
+}
+
+fn collect_backup_source_paths(
+    root: &Path,
+    current: &Path,
+    out: &mut Vec<PathBuf>,
+) -> VaultResult<()> {
+    if !current.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| VaultError::InvalidFormat("invalid backup source path".to_string()))?;
+
+        if entry.file_type()?.is_dir() {
+            if relative == Path::new("backups") {
+                continue;
+            }
+            collect_backup_source_paths(root, &path, out)?;
+            continue;
+        }
+
+        let relative = relative.to_path_buf();
+        if should_include_in_backup(&relative) {
+            out.push(relative);
+        }
+    }
+
+    Ok(())
+}
+
+fn should_include_in_backup(relative: &Path) -> bool {
+    let relative_text = relative.to_string_lossy();
+    if relative_text == "vault.json" {
+        return true;
+    }
+    if relative_text.starts_with("devices/") && relative_text.ends_with(".json") {
+        return true;
+    }
+    if relative_text.starts_with("entries/") && relative_text.ends_with(".bsj.enc") {
+        return true;
+    }
+    false
+}
+
+fn backup_file_name(created_at: DateTime<Utc>) -> String {
+    format!("backup-{}.bsjbak.enc", created_at.format("%Y%m%dT%H%M%SZ"))
+}
+
+fn backup_aad_string(created_at: DateTime<Utc>) -> String {
+    format!("bsj:v1:backup:{}", created_at.format("%Y%m%dT%H%M%SZ"))
+}
+
+fn parse_backup_timestamp(path: &Path) -> VaultResult<DateTime<Utc>> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| VaultError::InvalidFormat("invalid backup filename".to_string()))?;
+    let timestamp = file_name
+        .strip_prefix("backup-")
+        .and_then(|value| value.strip_suffix(".bsjbak.enc"))
+        .ok_or_else(|| VaultError::InvalidFormat("invalid backup filename".to_string()))?;
+    chrono::NaiveDateTime::parse_from_str(timestamp, "%Y%m%dT%H%M%SZ")
+        .map(|value| value.and_utc())
+        .map_err(|_| VaultError::InvalidFormat("invalid backup timestamp".to_string()))
+}
+
+#[derive(Clone, Debug)]
+struct BackupArtifact {
+    path: PathBuf,
+    created_at: DateTime<Utc>,
+}
+
+fn list_backup_artifacts(backup_dir: &Path) -> VaultResult<Vec<BackupArtifact>> {
+    if !backup_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut artifacts = Vec::new();
+    for entry in fs::read_dir(backup_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(created_at) = parse_backup_timestamp(&path) else {
+            continue;
+        };
+        artifacts.push(BackupArtifact { path, created_at });
+    }
+    artifacts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    Ok(artifacts)
+}
+
+fn prune_backups(backup_dir: &Path, retention: &BackupRetentionConfig) -> VaultResult<usize> {
+    let artifacts = list_backup_artifacts(backup_dir)?;
+    if artifacts.is_empty() {
+        return Ok(0);
+    }
+
+    let mut keep = HashSet::new();
+    if let Some(latest) = artifacts.first() {
+        keep.insert(latest.path.clone());
+    }
+
+    let mut seen_days = HashSet::new();
+    let mut seen_weeks = HashSet::new();
+    let mut seen_months = HashSet::new();
+
+    for artifact in &artifacts {
+        if seen_days.len() < retention.daily && seen_days.insert(artifact.created_at.date_naive()) {
+            keep.insert(artifact.path.clone());
+        }
+
+        let iso_week = artifact.created_at.iso_week();
+        if seen_weeks.len() < retention.weekly
+            && seen_weeks.insert((iso_week.year(), iso_week.week()))
+        {
+            keep.insert(artifact.path.clone());
+        }
+
+        let month_key = (artifact.created_at.year(), artifact.created_at.month());
+        if seen_months.len() < retention.monthly && seen_months.insert(month_key) {
+            keep.insert(artifact.path.clone());
+        }
+    }
+
+    let mut pruned = 0usize;
+    for artifact in artifacts {
+        if keep.contains(&artifact.path) {
+            continue;
+        }
+        fs::remove_file(artifact.path)?;
+        pruned += 1;
+    }
+    Ok(pruned)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> VaultResult<()> {
@@ -897,6 +1185,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> VaultResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::BackupRetentionConfig;
     use std::{thread::sleep, time::Duration};
     use tempfile::tempdir;
 
@@ -1258,6 +1547,79 @@ mod tests {
                 .issues
                 .iter()
                 .any(|issue| issue.message.contains("decryption failed"))
+        );
+    }
+
+    #[test]
+    fn closing_thought_persists_and_exports_as_final_line() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+
+        vault
+            .save_entry_revision(date, "Body text", Some("Good night."))
+            .expect("save");
+
+        let state = vault.load_date_state(date).expect("load");
+        assert_eq!(
+            state.revision_closing_thought.as_deref(),
+            Some("Good night.")
+        );
+        assert_eq!(
+            vault.export_entry_text(date).expect("export"),
+            Some("Body text\n\nGood night.".to_string())
+        );
+    }
+
+    #[test]
+    fn backup_roundtrip_restores_encrypted_snapshot() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let restore_root = dir.path().join("restored");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+
+        vault
+            .save_entry_revision(date, "secret backup body", Some("Lights out."))
+            .expect("save revision");
+        vault
+            .save_entry_draft(date, "secret draft body", Some("Draft closing."))
+            .expect("save draft");
+
+        let backup = vault
+            .create_backup(&BackupRetentionConfig::default())
+            .expect("backup");
+        let backup_bytes = fs::read(&backup.path).expect("read backup");
+        let backup_blob = String::from_utf8_lossy(&backup_bytes);
+        assert!(!backup_blob.contains("secret backup body"));
+        assert!(!backup_blob.contains("secret draft body"));
+
+        vault
+            .restore_backup_into(&backup.path, &restore_root)
+            .expect("restore");
+
+        let restored = unlock_vault(&restore_root, &passphrase).expect("unlock restored");
+        let restored_state = restored.load_date_state(date).expect("load restored");
+        assert_eq!(
+            restored_state.revision_text.as_deref(),
+            Some("secret backup body")
+        );
+        assert_eq!(
+            restored_state.revision_closing_thought.as_deref(),
+            Some("Lights out.")
+        );
+        assert_eq!(
+            restored_state.recovery_draft_text.as_deref(),
+            Some("secret draft body")
+        );
+        assert_eq!(
+            restored_state.recovery_draft_closing_thought.as_deref(),
+            Some("Draft closing.")
         );
     }
 

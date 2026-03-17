@@ -61,7 +61,7 @@ fn run_loop(
     while !app.should_quit() {
         terminal.draw(|frame| draw(frame, &app))?;
         let area = terminal.size()?;
-        let viewport_height = area.height.saturating_sub(2) as usize;
+        let viewport_height = app.editor_viewport_height(area.height.saturating_sub(2) as usize);
 
         if event::poll(poll_timeout)? {
             let ev = event::read()?;
@@ -136,8 +136,37 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
         return None;
     }
 
+    let show_reveal = app.reveal_codes_enabled() && area.height > 1;
+    let mut constraints = Vec::new();
+    if show_reveal {
+        constraints.push(Constraint::Length(1));
+    }
+    let show_closing = area.height > u16::from(show_reveal) + 1;
+    constraints.push(Constraint::Min(1));
+    if show_closing {
+        constraints.push(Constraint::Length(1));
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area);
+
+    let mut chunk_index = 0usize;
+    if show_reveal {
+        frame.render_widget(
+            Paragraph::new(Line::from(truncate_to_width(
+                &app.reveal_codes_line(),
+                chunks[0].width as usize,
+            )))
+            .style(screen_style().add_modifier(Modifier::BOLD)),
+            chunks[0],
+        );
+        chunk_index += 1;
+    }
+
+    let editor_area = chunks[chunk_index];
     let start = app.scroll_row();
-    let end = (start + area.height as usize).min(app.buffer().line_count());
+    let end = (start + editor_area.height as usize).min(app.buffer().line_count());
     let mut lines = Vec::new();
     for row in start..end {
         lines.push(line_with_matches(
@@ -150,7 +179,21 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
     if lines.is_empty() {
         lines.push(Line::from(String::new()));
     }
-    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), editor_area);
+
+    if show_closing {
+        let closing_text = app.closing_thought().unwrap_or("[none]");
+        let closing_line = join_left_right(
+            chunks[chunk_index + 1].width as usize,
+            &format!("CLOSING THOUGHT: {}", truncate_to_width(closing_text, 48)),
+            "F9 EDIT",
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(closing_line))
+                .style(screen_style().add_modifier(Modifier::UNDERLINED)),
+            chunks[chunk_index + 1],
+        );
+    }
 
     if app.overlay().is_some() {
         return None;
@@ -159,8 +202,8 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
     if row < start || row >= end {
         return None;
     }
-    let x = (area.x + col as u16).min(area.right().saturating_sub(1));
-    let y = (area.y + (row - start) as u16).min(area.bottom().saturating_sub(1));
+    let x = (editor_area.x + col as u16).min(editor_area.right().saturating_sub(1));
+    let y = (editor_area.y + (row - start) as u16).min(editor_area.bottom().saturating_sub(1));
     Some((x, y))
 }
 
@@ -169,12 +212,10 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     }
     let status = app.status_text().unwrap_or("");
-    let sep = if status.is_empty() { "" } else { " | " };
-    let strip = format!(
-        "{status}{sep}F1 Help  F2 Save  F3 Dates  F4 Find  F5 Search  F6 Replace  F7 Index  F10 Quit"
-    );
+    let strip = "F1Help F2Save F3Date F4Find F5Srch F6Repl F7Idx F9Close F10Quit F11Reveal";
+    let content = join_left_right(area.width as usize, status, strip);
     frame.render_widget(
-        Paragraph::new(Line::from(strip)).style(
+        Paragraph::new(Line::from(content)).style(
             screen_style()
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::REVERSED),
@@ -191,6 +232,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::Help => popup_rect(body_area, 72, 15),
         Overlay::DatePicker(_) => popup_rect(body_area, 38, 12),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
+        Overlay::ClosingPrompt { .. } => popup_rect(body_area, 58, 5),
         Overlay::ConflictChoice(_) => popup_rect(body_area, 72, 9),
         Overlay::MergeDiff(_) => popup_rect(body_area, 92, 18),
         Overlay::Search(_) => popup_rect(body_area, 84, 16),
@@ -251,6 +293,18 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
                 Line::from(format!("> {input}")),
                 Line::from("Up/Down move matches  Enter closes"),
                 Line::from(error.clone().unwrap_or_default()),
+            ];
+            frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
+            Some((
+                (inner.x + 2 + input.chars().count() as u16).min(inner.right().saturating_sub(1)),
+                (inner.y + 1).min(inner.bottom().saturating_sub(1)),
+            ))
+        }
+        Overlay::ClosingPrompt { input } => {
+            let lines = vec![
+                Line::from("Closing Thought:"),
+                Line::from(format!("> {input}")),
+                Line::from("Enter save  Esc close"),
             ];
             frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
             Some((
@@ -333,17 +387,17 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("+----------------------------------------------------+"),
         Line::from("| F1 Help         F2 Save        F3 Dates            |"),
         Line::from("| F4 Find         F5 Search      F6 Replace          |"),
-        Line::from("| F7 Index        F10 Quit       Ctrl+S Save         |"),
-        Line::from("| Ctrl+F Find                                      |"),
+        Line::from("| F7 Index        F9 Closing     F10 Quit           |"),
+        Line::from("| F11 Reveal      Ctrl+S Save    Ctrl+F Find        |"),
         Line::from("|                                                    |"),
         Line::from("| Arrows move cursor | PgUp/PgDn scroll              |"),
         Line::from("| Find updates as you type | Search runs on Enter    |"),
         Line::from("| Calendar: Arrows move | PgUp/PgDn month            |"),
         Line::from("| Index: Up/Down/PgUp/PgDn | Enter opens date        |"),
         Line::from("| Search: Tab fields | Enter search/open result      |"),
+        Line::from("| Closing Thought lives above footer | F9 edits it   |"),
+        Line::from("| Reveal Codes shows DATE / ENTRY / TAG / MOOD / CLOSE |"),
         Line::from("| Conflict: 1/2 view heads | 3 merge | F2 save merge |"),
-        Line::from("| Save appends revision | Autosave keeps draft       |"),
-        Line::from("| Recovery prompt appears when draft is newer        |"),
         Line::from("+----------------------------------------------------+"),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
@@ -711,6 +765,7 @@ fn overlay_title(overlay: &Overlay) -> &'static str {
         Overlay::ConflictChoice(_) => " Conflict ",
         Overlay::MergeDiff(_) => " Merge ",
         Overlay::FindPrompt { .. } => " Find ",
+        Overlay::ClosingPrompt { .. } => " Closing ",
         Overlay::Search(_) => " Search ",
         Overlay::ReplacePrompt(_) => " Replace ",
         Overlay::ReplaceConfirm(_) => " Replace ",

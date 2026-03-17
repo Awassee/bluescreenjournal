@@ -17,6 +17,90 @@ just test
 just run
 ```
 
+Useful CLI commands:
+
+```bash
+cargo run -- export 2026-03-16
+cargo run -- backup
+```
+
+## Vibe Features
+
+- `F9` edits the dedicated `Closing Thought` field
+- `F11` toggles `Reveal Codes`
+- Reveal mode shows a retro metadata strip such as:
+  - `⟦DATE:2026-03-16⟧ ⟦ENTRY:0000016⟧ ⟦TAG:work⟧ ⟦MOOD:7⟧ ⟦CLOSE:See you tomorrow.⟧`
+- Closing thoughts are encrypted inside revisions and drafts, and `bsj export YYYY-MM-DD` prints them as the final line
+
+## Backups
+
+`bsj backup` creates an encrypted snapshot under `vault/backups/`.
+
+- Snapshot contents are tar+zstd in memory, then encrypted before writing
+- Included data:
+  - `vault.json`
+  - `devices/*.json`
+  - encrypted entry revisions
+  - encrypted drafts
+- Backups exclude the `backups/` directory itself
+- Backup retention uses the app config:
+  - `daily`
+  - `weekly`
+  - `monthly`
+
+Example config file: `~/Library/Application Support/bsj/config.json`
+
+```json
+{
+  "backup_retention": {
+    "daily": 7,
+    "weekly": 4,
+    "monthly": 6
+  }
+}
+```
+
+Roundtrip restore is implemented in code and covered by tests. There is no public `bsj restore` CLI yet.
+
+## Macros
+
+Macros live in the same config file and map a key binding to either inserted text or an internal command.
+
+Example:
+
+```json
+{
+  "macros": [
+    {
+      "key": "ctrl-j",
+      "type": "insert_template",
+      "text": "TODAY I NOTICED:\n\n"
+    },
+    {
+      "key": "f12",
+      "type": "command",
+      "command": "insert_date_header"
+    },
+    {
+      "key": "ctrl-g",
+      "type": "command",
+      "command": "jump_today"
+    },
+    {
+      "key": "ctrl-o",
+      "type": "command",
+      "command": "insert_closing_line"
+    }
+  ]
+}
+```
+
+Supported internal commands:
+
+- `insert_date_header`
+- `insert_closing_line`
+- `jump_today`
+
 ## Sync Backends
 
 `bsj sync` moves only encrypted revision blobs plus plaintext vault metadata:
@@ -88,7 +172,9 @@ cargo run -- sync --backend webdav --remote https://dav.example.com/BlueScreenJo
 ## Security Notes
 
 - Journal bodies are encrypted at rest with Argon2id + XChaCha20-Poly1305.
+- Closing thoughts are encrypted inside the same revision and draft payloads.
 - Sync transports move encrypted revision blobs only.
+- Backup snapshots are encrypted before they hit disk.
 - `vault.json` contains vault metadata and KDF parameters, not journal plaintext.
 - Credentials are expected from environment variables. Local secret storage is not written into the vault format.
 
