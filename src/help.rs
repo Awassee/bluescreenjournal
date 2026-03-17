@@ -9,10 +9,14 @@ use std::{
 };
 
 const SETUP_GUIDE_BODY: &str = include_str!("../docs/SETUP_GUIDE.md");
+const DOCS_HUB_BODY: &str = include_str!("../docs/START_HERE.md");
+const QUICKSTART_GUIDE_BODY: &str = include_str!("../docs/QUICKSTART.md");
 const PRODUCT_GUIDE_BODY: &str = include_str!("../docs/PRODUCT_GUIDE.md");
 const DATASHEET_BODY: &str = include_str!("../docs/DATASHEET.md");
+const FAQ_BODY: &str = include_str!("../docs/FAQ.md");
 const SETTINGS_GUIDE_BODY: &str = include_str!("../docs/SETTINGS_GUIDE.md");
 const DISTRIBUTION_GUIDE_BODY: &str = include_str!("../docs/DISTRIBUTION.md");
+const SUPPORT_BODY: &str = include_str!("../SUPPORT.md");
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EnvironmentSettings {
@@ -62,6 +66,20 @@ Actual paths on this Mac\n\
     )
 }
 
+pub fn render_docs_hub() -> String {
+    format!(
+        "BlueScreen Journal Docs Hub\n\n{}\n",
+        DOCS_HUB_BODY.trim_end()
+    )
+}
+
+pub fn render_quickstart_guide() -> String {
+    format!(
+        "BlueScreen Journal Quickstart\n\n{}\n",
+        QUICKSTART_GUIDE_BODY.trim_end()
+    )
+}
+
 pub fn render_settings_guide(
     config_path: &Path,
     default_vault_path: &Path,
@@ -97,10 +115,21 @@ pub fn render_datasheet() -> String {
     )
 }
 
+pub fn render_faq() -> String {
+    format!("BlueScreen Journal FAQ\n\n{}\n", FAQ_BODY.trim_end())
+}
+
 pub fn render_distribution_guide() -> String {
     format!(
         "BlueScreen Journal Distribution Guide\n\n{}\n",
         DISTRIBUTION_GUIDE_BODY.trim_end()
+    )
+}
+
+pub fn render_support() -> String {
+    format!(
+        "BlueScreen Journal Support\n\n{}\n",
+        SUPPORT_BODY.trim_end()
     )
 }
 
@@ -263,6 +292,7 @@ pub fn render_settings_report(
         config::editable_setting_keys().join(", "),
     );
     push_row(&mut output, "guide_setup", "bsj guide setup".to_string());
+    push_row(&mut output, "guide_docs", "bsj guide docs".to_string());
     push_row(
         &mut output,
         "guide_product",
@@ -270,8 +300,19 @@ pub fn render_settings_report(
     );
     push_row(
         &mut output,
+        "guide_quickstart",
+        "bsj guide quickstart".to_string(),
+    );
+    push_row(
+        &mut output,
         "guide_datasheet",
         "bsj guide datasheet".to_string(),
+    );
+    push_row(&mut output, "guide_faq", "bsj guide faq".to_string());
+    push_row(
+        &mut output,
+        "guide_support",
+        "bsj guide support".to_string(),
     );
     push_row(
         &mut output,
@@ -371,8 +412,9 @@ fn macro_command_name(command: &MacroCommandConfig) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        EnvironmentSettings, render_datasheet, render_product_guide, render_settings_guide,
-        render_settings_report, render_setup_guide,
+        EnvironmentSettings, render_datasheet, render_docs_hub, render_faq, render_product_guide,
+        render_quickstart_guide, render_settings_guide, render_settings_report, render_setup_guide,
+        render_support,
     };
     use crate::config::{AppConfig, BackupRetentionConfig, MacroActionConfig, MacroConfig};
     use crate::vault::{KdfParams, VaultMetadata, VaultOptions};
@@ -388,6 +430,20 @@ mod tests {
         assert!(text.contains("./install.sh"));
         assert!(text.contains("bsj guide settings"));
         assert!(text.contains("/tmp/config.json"));
+    }
+
+    #[test]
+    fn docs_hub_points_people_to_quickstart_and_guides() {
+        let text = render_docs_hub();
+        assert!(text.contains("docs/QUICKSTART.md"));
+        assert!(text.contains("bsj guide quickstart"));
+    }
+
+    #[test]
+    fn quickstart_mentions_backup_and_doctor_commands() {
+        let text = render_quickstart_guide();
+        assert!(text.contains("bsj backup"));
+        assert!(text.contains("bsj doctor"));
     }
 
     #[test]
@@ -416,6 +472,20 @@ mod tests {
         assert!(text.contains("curl -fsSL"));
         assert!(text.contains("bsj guide product"));
         assert!(text.contains("BlueScreen Journal (`bsj`)"));
+    }
+
+    #[test]
+    fn faq_mentions_plaintext_and_search_index_guards() {
+        let text = render_faq();
+        assert!(text.contains("plaintext"));
+        assert!(text.contains("search index"));
+    }
+
+    #[test]
+    fn support_mentions_doctor_and_issue_intake() {
+        let text = render_support();
+        assert!(text.contains("bsj doctor"));
+        assert!(text.contains("GitHub issue"));
     }
 
     #[test]

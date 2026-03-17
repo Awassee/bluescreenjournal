@@ -84,9 +84,13 @@ Default prebuilt install target:
 
 ## Built-in guides
 
+- `bsj guide docs`
+- `bsj guide quickstart`
 - `bsj guide setup`
 - `bsj guide product`
 - `bsj guide datasheet`
+- `bsj guide faq`
+- `bsj guide support`
 - `bsj guide settings`
 - `bsj guide distribution`
 

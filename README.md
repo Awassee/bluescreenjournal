@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.3
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.4
 ```
 
 Install from source instead of the prebuilt release:
@@ -227,8 +227,12 @@ bsj settings
 bsj settings --json
 bsj doctor
 bsj doctor --unlock
+bsj guide docs
+bsj guide quickstart
 bsj guide product
 bsj guide datasheet
+bsj guide faq
+bsj guide support
 bsj guide setup
 bsj guide settings
 bsj guide distribution
@@ -255,14 +259,28 @@ bsj verify
 
 Start here on GitHub:
 
+- [Start Here](docs/START_HERE.md)
+- [Quickstart](docs/QUICKSTART.md)
 - [Product Guide](docs/PRODUCT_GUIDE.md)
 - [Datasheet](docs/DATASHEET.md)
-- [Release Notes](docs/releases/v0.1.3.md)
+- [FAQ](docs/FAQ.md)
+- [Compare bsj](docs/COMPARE.md)
+- [Release Notes](docs/releases/v0.1.4.md)
 - [Setup Guide](docs/SETUP_GUIDE.md)
 - [Settings Guide](docs/SETTINGS_GUIDE.md)
 - [Distribution Guide](docs/DISTRIBUTION.md)
 - [Man Page](docs/bsj.1)
 - [Example Config](docs/config.example.json)
+- [Changelog](CHANGELOG.md)
+- [Support](SUPPORT.md)
+- [Security Policy](SECURITY.md)
+
+## Support and trust
+
+- Need help getting unstuck: [SUPPORT.md](SUPPORT.md)
+- Need common answers first: [docs/FAQ.md](docs/FAQ.md)
+- Need to evaluate fit: [docs/COMPARE.md](docs/COMPARE.md)
+- Need security disclosure guidance: [SECURITY.md](SECURITY.md)
 
 ## Packaging and release surface
 

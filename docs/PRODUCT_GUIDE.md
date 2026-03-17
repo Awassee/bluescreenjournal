@@ -222,8 +222,12 @@ It is not:
 
 ## Recommended repo docs
 
+- `docs/START_HERE.md` for the doc map
+- `docs/QUICKSTART.md` for the fastest onboarding path
 - `README.md` for install and quick orientation
 - `docs/SETUP_GUIDE.md` for onboarding
+- `docs/FAQ.md` for common product and security questions
+- `docs/COMPARE.md` for product-fit decisions
 - `docs/SETTINGS_GUIDE.md` for config and environment details
 - `docs/DATASHEET.md` for the concise capability sheet
 - `docs/DISTRIBUTION.md` for release packaging and installer behavior

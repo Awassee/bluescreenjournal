@@ -21,7 +21,7 @@ use std::{
     name = "bsj",
     about = "BlueScreen Journal",
     long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, a menu-driven TUI, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.",
-    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj completions zsh\n\nGuides:\n  bsj guide product\n  bsj guide datasheet\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
 )]
 struct Cli {
     #[arg(
@@ -81,7 +81,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<SettingsCommand>,
     },
-    /// Print the setup, product, datasheet, settings, or distribution guide
+    /// Print the docs hub, quickstart, product, datasheet, FAQ, support, settings, or distribution guide
     Guide {
         #[arg(value_enum, default_value_t = GuideTopicArg::Setup)]
         topic: GuideTopicArg,
@@ -133,9 +133,13 @@ enum SyncBackendArg {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum GuideTopicArg {
+    Docs,
+    Quickstart,
     Setup,
     Product,
     Datasheet,
+    Faq,
+    Support,
     Settings,
     Distribution,
 }
@@ -664,11 +668,15 @@ fn run_cli_guide(topic: GuideTopicArg) -> Result<(), String> {
     let log_path = logging::log_file_path();
 
     let output = match topic {
+        GuideTopicArg::Docs => help::render_docs_hub(),
+        GuideTopicArg::Quickstart => help::render_quickstart_guide(),
         GuideTopicArg::Setup => {
             help::render_setup_guide(&config_path, &default_vault_path, &log_path)
         }
         GuideTopicArg::Product => help::render_product_guide(),
         GuideTopicArg::Datasheet => help::render_datasheet(),
+        GuideTopicArg::Faq => help::render_faq(),
+        GuideTopicArg::Support => help::render_support(),
         GuideTopicArg::Settings => {
             help::render_settings_guide(&config_path, &default_vault_path, &log_path)
         }

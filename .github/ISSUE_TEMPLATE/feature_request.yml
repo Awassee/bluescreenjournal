@@ -1,0 +1,41 @@
+name: Feature request
+description: Propose a product improvement for bsj
+labels:
+  - enhancement
+body:
+  - type: input
+    id: summary
+    attributes:
+      label: Short summary
+      placeholder: What should improve?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What is hard, missing, or awkward today?
+    validations:
+      required: true
+  - type: textarea
+    id: current_workaround
+    attributes:
+      label: Current workaround
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: Why this matters
+      description: Explain the value to the product, not just a preference.
+    validations:
+      required: true
+  - type: textarea
+    id: fit
+    attributes:
+      label: Why this fits bsj
+      description: Explain how it fits the current product direction.

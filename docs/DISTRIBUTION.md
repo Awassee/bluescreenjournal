@@ -32,7 +32,7 @@ That bootstrap installer:
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.3
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.4
 ```
 
 ## Release Bundle Layout
@@ -44,6 +44,9 @@ dist/
   bsj-<version>-<target>/
     README.md
     LICENSE
+    CHANGELOG.md
+    SUPPORT.md
+    SECURITY.md
     VERSION
     TARGETS
     install.sh
@@ -56,10 +59,14 @@ dist/
         bsj-search.png
         ...
       releases/
-        v0.1.3.md
+        v0.1.4.md
       SETUP_GUIDE.md
       PRODUCT_GUIDE.md
       DATASHEET.md
+      START_HERE.md
+      QUICKSTART.md
+      FAQ.md
+      COMPARE.md
       SETTINGS_GUIDE.md
       DISTRIBUTION.md
       bsj.1
@@ -160,6 +167,7 @@ Default prebuilt install target:
 The bundled installer also installs:
 
 - docs under `~/.local/share/doc/bsj`
+- packaged root docs such as `README.md`, `CHANGELOG.md`, `SUPPORT.md`, and `SECURITY.md`
 - example config under `~/.local/share/bsj/examples`
 - man page under `~/.local/share/man/man1`
 - Bash completions under `~/.local/share/bash-completion/completions`
@@ -250,7 +258,7 @@ Release workflow:
 Release automation flow:
 
 ```bash
-git tag v0.1.3
+git tag v0.1.4
 git push origin main --tags
 ```
 

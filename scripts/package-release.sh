@@ -171,6 +171,11 @@ install -m 755 "$BINARY_PATH" "$BUNDLE_DIR/bin/$NAME"
 install -m 755 "$ROOT_DIR/install.sh" "$BUNDLE_DIR/install.sh"
 install -m 644 "$ROOT_DIR/README.md" "$BUNDLE_DIR/README.md"
 install -m 644 "$ROOT_DIR/LICENSE" "$BUNDLE_DIR/LICENSE"
+for root_doc in CHANGELOG.md SUPPORT.md SECURITY.md; do
+  if [[ -f "$ROOT_DIR/$root_doc" ]]; then
+    install -m 644 "$ROOT_DIR/$root_doc" "$BUNDLE_DIR/$root_doc"
+  fi
+done
 cp -R "$ROOT_DIR/docs/." "$BUNDLE_DIR/docs/"
 find "$BUNDLE_DIR/docs" -type d -exec chmod 755 {} \;
 find "$BUNDLE_DIR/docs" -type f -exec chmod 644 {} \;

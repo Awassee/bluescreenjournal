@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Quickstart
+    url: https://github.com/Awassee/bluescreenjournal/blob/main/docs/QUICKSTART.md
+    about: Start here if you are getting set up.
+  - name: FAQ
+    url: https://github.com/Awassee/bluescreenjournal/blob/main/docs/FAQ.md
+    about: Read common answers before filing an issue.
+  - name: Support and diagnostics
+    url: https://github.com/Awassee/bluescreenjournal/blob/main/SUPPORT.md
+    about: What to include and which commands to run before opening an issue.
+  - name: Security policy
+    url: https://github.com/Awassee/bluescreenjournal/blob/main/SECURITY.md
+    about: Use this path for security-sensitive reports.
