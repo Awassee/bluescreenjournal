@@ -246,7 +246,10 @@ fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
             area.width as usize,
             "Resize the window, then continue typing.",
         ),
-        centered_line(area.width as usize, "F10 quits when the screen is cramped."),
+        centered_line(
+            area.width as usize,
+            "Resize to restore prompts and editing.",
+        ),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }

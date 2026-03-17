@@ -114,6 +114,14 @@ impl SetupWizard {
             SetupStep::EpochDate => self.epoch_input.clone(),
         }
     }
+
+    fn wipe(&mut self) {
+        self.path_input.zeroize();
+        self.passphrase_input.zeroize();
+        self.confirm_input.zeroize();
+        self.epoch_input.zeroize();
+        zeroize_optional_string(&mut self.error);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -185,6 +193,12 @@ impl ReplacePrompt {
             ReplaceStage::Replace => &mut self.replace_input,
         }
     }
+
+    fn wipe(&mut self) {
+        self.find_input.zeroize();
+        self.replace_input.zeroize();
+        zeroize_optional_string(&mut self.error);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,6 +236,10 @@ impl ConflictOverlay {
             ConflictMode::ViewB => ConflictMode::Merge,
             ConflictMode::Merge => ConflictMode::ViewA,
         };
+    }
+
+    fn wipe(&mut self) {
+        wipe_conflict_state(&mut self.conflict);
     }
 }
 
@@ -281,7 +299,7 @@ impl SearchOverlay {
     }
 
     fn clear_results(&mut self) {
-        self.results.clear();
+        wipe_search_results(&mut self.results);
         self.selected = 0;
         if self.active_field == SearchField::Results {
             self.active_field = SearchField::Query;
@@ -316,6 +334,14 @@ impl SearchOverlay {
 
     fn selected_result(&self) -> Option<&SearchResult> {
         self.results.get(self.selected)
+    }
+
+    fn wipe(&mut self) {
+        self.query_input.zeroize();
+        self.from_input.zeroize();
+        self.to_input.zeroize();
+        self.clear_results();
+        zeroize_optional_string(&mut self.error);
     }
 }
 
@@ -367,6 +393,15 @@ impl IndexState {
     fn selected_date(&self) -> Option<NaiveDate> {
         self.items.get(self.selected).map(|entry| entry.date)
     }
+
+    fn wipe(&mut self) {
+        for item in &mut self.items {
+            item.entry_number.zeroize();
+            item.preview.zeroize();
+        }
+        self.items.clear();
+        self.selected = 0;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -386,6 +421,31 @@ struct SearchJump {
 struct MergeContext {
     primary_hash: String,
     merged_hashes: Vec<String>,
+}
+
+impl ReplaceConfirm {
+    fn wipe(&mut self) {
+        self.find_text.zeroize();
+        self.replace_text.zeroize();
+        self.matches.clear();
+        self.current_idx = 0;
+    }
+}
+
+impl SearchJump {
+    fn wipe(&mut self) {
+        self.match_text.zeroize();
+    }
+}
+
+impl MergeContext {
+    fn wipe(&mut self) {
+        self.primary_hash.zeroize();
+        for hash in &mut self.merged_hashes {
+            hash.zeroize();
+        }
+        self.merged_hashes.clear();
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -915,14 +975,17 @@ impl App {
                                         || (matched.row == row && matched.start_col >= col)
                                 })
                                 .unwrap_or(0);
+                            let find_text = prompt.find_input.trim().to_string();
+                            let replace_text = prompt.replace_input.clone();
+                            prompt.wipe();
                             self.buffer.set_cursor(
                                 matches[current_idx].row,
                                 matches[current_idx].start_col,
                             );
                             self.ensure_cursor_visible(viewport_height);
                             overlay = Overlay::ReplaceConfirm(ReplaceConfirm {
-                                find_text: prompt.find_input.trim().to_string(),
-                                replace_text: prompt.replace_input.clone(),
+                                find_text,
+                                replace_text,
                                 matches,
                                 current_idx,
                             });
@@ -1009,6 +1072,8 @@ impl App {
 
         if keep_overlay {
             self.overlay = Some(overlay);
+        } else {
+            wipe_overlay(&mut overlay);
         }
     }
 
@@ -1156,21 +1221,16 @@ impl App {
     }
 
     fn load_selected_date(&mut self) {
-        self.overlay = None;
+        self.wipe_overlay_state();
+        self.wipe_entry_buffer();
+        self.wipe_pending_state();
         self.draft_recovered = false;
-        self.pending_conflict = None;
-        self.pending_recovery_closing = None;
-        self.merge_context = None;
-        self.closing_thought = None;
         self.last_autosave_check = Instant::now();
         self.last_save_kind = None;
         self.last_save_time = None;
 
         let Some(vault) = &self.vault else {
             self.buffer = TextBuffer::new();
-            self.closing_thought = None;
-            self.scroll_row = 0;
-            self.dirty = false;
             return;
         };
 
@@ -1273,29 +1333,14 @@ impl App {
     }
 
     fn clear_sensitive_state(&mut self) {
-        self.buffer.wipe();
-        if let Some(mut closing_thought) = self.closing_thought.take() {
-            closing_thought.zeroize();
-        }
-        if let Some(mut find_query) = self.find_query.take() {
-            find_query.zeroize();
-        }
-        self.find_matches.clear();
-        self.current_match_idx = 0;
+        self.wipe_overlay_state();
+        self.wipe_entry_buffer();
+        self.wipe_pending_state();
         if let Some(index) = &mut self.search_index {
             index.wipe();
         }
         self.search_index = None;
-        self.pending_search_jump = None;
-        self.pending_conflict = None;
-        self.pending_recovery_closing = None;
-        self.merge_context = None;
         self.reveal_codes = false;
-        self.dirty = false;
-        self.draft_recovered = false;
-        self.last_save_kind = None;
-        self.last_save_time = None;
-        self.scroll_row = 0;
     }
 
     fn load_entry_dates(&mut self) -> BTreeSet<NaiveDate> {
@@ -1581,31 +1626,29 @@ impl App {
 
         match conflict.selected {
             ConflictMode::ViewA => {
-                self.buffer = TextBuffer::from_text(&head_a.body);
-                self.closing_thought = head_a.closing_thought.clone();
+                self.replace_editor_contents(&head_a.body, head_a.closing_thought.clone());
                 self.scroll_row = 0;
                 self.dirty = false;
-                self.merge_context = None;
+                self.wipe_merge_context();
                 self.refresh_find_matches();
                 self.apply_pending_search_jump(Some(viewport_height));
                 self.flash_status("VIEW A.");
             }
             ConflictMode::ViewB => {
-                self.buffer = TextBuffer::from_text(&head_b.body);
-                self.closing_thought = head_b.closing_thought.clone();
+                self.replace_editor_contents(&head_b.body, head_b.closing_thought.clone());
                 self.scroll_row = 0;
                 self.dirty = false;
-                self.merge_context = None;
+                self.wipe_merge_context();
                 self.refresh_find_matches();
                 self.apply_pending_search_jump(Some(viewport_height));
                 self.flash_status("VIEW B.");
             }
             ConflictMode::Merge => {
-                self.buffer = TextBuffer::from_text(&head_a.body);
-                self.closing_thought = head_a.closing_thought.clone();
+                self.replace_editor_contents(&head_a.body, head_a.closing_thought.clone());
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.refresh_find_matches();
+                self.wipe_merge_context();
                 self.merge_context = Some(MergeContext {
                     primary_hash: head_a.revision_hash.clone(),
                     merged_hashes: conflict
@@ -1651,6 +1694,49 @@ impl App {
             self.buffer.set_cursor(matched.row, matched.start_col);
             self.ensure_cursor_visible(viewport_height.unwrap_or(self.last_viewport_height));
         }
+    }
+
+    fn wipe_overlay_state(&mut self) {
+        if let Some(mut overlay) = self.overlay.take() {
+            wipe_overlay(&mut overlay);
+        }
+    }
+
+    fn wipe_entry_buffer(&mut self) {
+        self.buffer.wipe();
+        zeroize_optional_string(&mut self.closing_thought);
+        self.scroll_row = 0;
+        self.dirty = false;
+    }
+
+    fn wipe_pending_state(&mut self) {
+        zeroize_optional_string(&mut self.find_query);
+        self.find_matches.clear();
+        self.current_match_idx = 0;
+        if let Some(mut jump) = self.pending_search_jump.take() {
+            jump.wipe();
+        }
+        if let Some(mut conflict) = self.pending_conflict.take() {
+            wipe_conflict_state(&mut conflict);
+        }
+        if let Some(mut pending_recovery_closing) = self.pending_recovery_closing.take()
+            && let Some(closing_thought) = &mut pending_recovery_closing
+        {
+            closing_thought.zeroize();
+        }
+        self.wipe_merge_context();
+    }
+
+    fn wipe_merge_context(&mut self) {
+        if let Some(mut merge_context) = self.merge_context.take() {
+            merge_context.wipe();
+        }
+    }
+
+    fn replace_editor_contents(&mut self, text: &str, closing_thought: Option<String>) {
+        self.wipe_entry_buffer();
+        self.buffer = TextBuffer::from_text(text);
+        self.closing_thought = closing_thought;
     }
 
     fn replace_confirm_yes(
@@ -1789,6 +1875,55 @@ impl App {
 fn normalize_overlay_text(input: &str) -> Option<String> {
     let trimmed = input.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn zeroize_optional_string(value: &mut Option<String>) {
+    if let Some(mut string) = value.take() {
+        string.zeroize();
+    }
+}
+
+fn wipe_search_results(results: &mut Vec<SearchResult>) {
+    for result in results.iter_mut() {
+        result.entry_number.zeroize();
+        result.snippet.text.zeroize();
+        result.matched_text.zeroize();
+    }
+    results.clear();
+}
+
+fn wipe_conflict_state(conflict: &mut vault::ConflictState) {
+    for head in &mut conflict.heads {
+        head.revision_hash.zeroize();
+        head.device_id.zeroize();
+        head.body.zeroize();
+        zeroize_optional_string(&mut head.closing_thought);
+        head.preview.zeroize();
+    }
+    conflict.heads.clear();
+}
+
+fn wipe_overlay(overlay: &mut Overlay) {
+    match overlay {
+        Overlay::SetupWizard(wizard) => wizard.wipe(),
+        Overlay::UnlockPrompt { input, error } => {
+            input.zeroize();
+            zeroize_optional_string(error);
+        }
+        Overlay::Help | Overlay::DatePicker(_) | Overlay::QuitConfirm => {}
+        Overlay::FindPrompt { input, error } => {
+            input.zeroize();
+            zeroize_optional_string(error);
+        }
+        Overlay::ClosingPrompt { input } => input.zeroize(),
+        Overlay::ConflictChoice(conflict) => conflict.wipe(),
+        Overlay::MergeDiff(conflict) => wipe_conflict_state(conflict),
+        Overlay::Search(search) => search.wipe(),
+        Overlay::ReplacePrompt(prompt) => prompt.wipe(),
+        Overlay::ReplaceConfirm(confirm) => confirm.wipe(),
+        Overlay::Index(index) => index.wipe(),
+        Overlay::RecoverDraft { draft_text } => draft_text.zeroize(),
+    }
 }
 
 pub fn format_reveal_codes(
@@ -1958,12 +2093,18 @@ fn parse_optional_overlay_date(label: &str, input: &str) -> Result<Option<NaiveD
 #[cfg(test)]
 mod tests {
     use super::{
-        App, IndexState, SearchField, SearchOverlay, format_reveal_codes, macro_key_matches,
-        parse_optional_overlay_date, resolve_recovery_text,
+        App, IndexState, Overlay, SearchField, SearchJump, SearchOverlay, format_reveal_codes,
+        macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
     };
-    use crate::vault::IndexEntry;
+    use crate::{
+        search::{SearchDocument, SearchIndex, SearchResult, Snippet},
+        tui::buffer::TextBuffer,
+        vault::{self, IndexEntry},
+    };
     use chrono::{Duration, NaiveDate};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use secrecy::SecretString;
+    use tempfile::tempdir;
 
     #[test]
     fn resize_event_does_not_panic() {
@@ -2062,5 +2203,61 @@ mod tests {
         assert!(macro_key_matches("ctrl-j", &ctrl_j));
         assert!(macro_key_matches("f11", &f11));
         assert!(!macro_key_matches("ctrl-k", &ctrl_j));
+    }
+
+    #[test]
+    fn lock_vault_clears_editor_and_search_state() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+        let metadata = vault::create_vault(&root, &passphrase, None, "Test").expect("create");
+        let unlocked = vault::unlock_vault_with_device(&root, &passphrase, metadata.device_id)
+            .expect("unlock");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+
+        let mut app = App::with_initial_date(Some(date));
+        app.vault_path = root;
+        app.vault = Some(unlocked);
+        app.buffer = TextBuffer::from_text("secret body");
+        app.closing_thought = Some("secret closing".to_string());
+        app.find_query = Some("secret".to_string());
+        app.pending_search_jump = Some(SearchJump {
+            match_text: "secret".to_string(),
+            row: 0,
+            start_col: 0,
+        });
+        app.search_index = Some(SearchIndex::build(vec![SearchDocument {
+            date,
+            entry_number: "0000001".to_string(),
+            body: "secret body".to_string(),
+        }]));
+        let mut overlay = SearchOverlay::new(Some("secret".to_string()));
+        overlay.results.push(SearchResult {
+            date,
+            entry_number: "0000001".to_string(),
+            snippet: Snippet {
+                text: "secret body".to_string(),
+                highlight_start: 0,
+                highlight_end: 6,
+            },
+            row: 0,
+            start_col: 0,
+            end_col: 6,
+            matched_text: "secret".to_string(),
+        });
+        app.overlay = Some(Overlay::Search(overlay));
+        app.dirty = true;
+
+        app.lock_vault();
+
+        assert!(app.vault.is_none());
+        assert!(app.search_index.is_none());
+        assert_eq!(app.buffer.to_text(), "");
+        assert!(app.closing_thought.is_none());
+        assert!(app.find_query.is_none());
+        assert!(app.pending_search_jump.is_none());
+        assert!(matches!(app.overlay, Some(Overlay::UnlockPrompt { .. })));
+        assert_eq!(app.lock_status_label(), "LOCKED");
     }
 }

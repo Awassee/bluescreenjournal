@@ -93,7 +93,7 @@ Example:
       "text": "TODAY I NOTICED:\n\n"
     },
     {
-      "key": "f12",
+      "key": "ctrl-d",
       "type": "command",
       "command": "insert_date_header"
     },
@@ -116,6 +116,8 @@ Supported internal commands:
 - `insert_date_header`
 - `insert_closing_line`
 - `jump_today`
+
+Avoid binding macros to reserved controls such as `F1`-`F12`, which are used by the core UI.
 
 ## Packaging
 
