@@ -32,7 +32,7 @@ That bootstrap installer:
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.2
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.3
 ```
 
 ## Release Bundle Layout
@@ -50,7 +50,16 @@ dist/
     bin/
       bsj
     docs/
+      assets/
+        bsj-hero.gif
+        bsj-editor.png
+        bsj-search.png
+        ...
+      releases/
+        v0.1.3.md
       SETUP_GUIDE.md
+      PRODUCT_GUIDE.md
+      DATASHEET.md
       SETTINGS_GUIDE.md
       DISTRIBUTION.md
       bsj.1
@@ -182,6 +191,22 @@ From a checkout:
 
 The source installer uses `cargo install --path . --locked --force` and also generates shell completions under the selected prefix.
 
+## Marketing Assets
+
+Product screenshots and the README hero GIF are generated from:
+
+```text
+scripts/render_marketing_assets.py
+```
+
+The generated files live under:
+
+```text
+docs/assets/
+```
+
+Release bundles and prebuilt installs preserve that doc asset tree so the packaged README keeps its screenshots intact.
+
 ## Homebrew Formula
 
 The packaging script renders a formula stub at:
@@ -225,7 +250,7 @@ Release workflow:
 Release automation flow:
 
 ```bash
-git tag v0.1.2
+git tag v0.1.3
 git push origin main --tags
 ```
 

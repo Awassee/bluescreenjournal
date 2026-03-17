@@ -1,9 +1,24 @@
 # bsj
 
+[![Release](https://img.shields.io/github/v/release/Awassee/bluescreenjournal?display_name=tag&color=1450d2)](https://github.com/Awassee/bluescreenjournal/releases/latest)
+[![License](https://img.shields.io/github/license/Awassee/bluescreenjournal?color=0f172a)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS-0b1021)](docs/DATASHEET.md)
+[![Terminal](https://img.shields.io/badge/interface-Terminal.app%20%2B%20iTerm2-1d4ed8)](docs/PRODUCT_GUIDE.md)
+
 BlueScreen Journal is an encrypted, local-first journaling app for macOS terminals.
 It is built for people who want the focused feel of an old DOS word processor, but with modern safety features: encrypted storage, append-only history, encrypted drafts, encrypted backups, and encrypted sync.
 
 The product goal is narrow on purpose: launch, unlock once, and start writing immediately in a blue-screen full-screen editor that feels like a dedicated writing appliance.
+
+![BlueScreen Journal hero](docs/assets/bsj-hero.gif)
+
+Representative product renders of the current UI surface:
+
+| Editor | Search |
+| --- | --- |
+| ![Editor view](docs/assets/bsj-editor.png) | ![Search view](docs/assets/bsj-search.png) |
+| Calendar | Index |
+| ![Calendar view](docs/assets/bsj-calendar.png) | ![Index view](docs/assets/bsj-index.png) |
 
 ## Why bsj exists
 
@@ -42,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.2
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.3
 ```
 
 Install from source instead of the prebuilt release:
@@ -242,6 +257,7 @@ Start here on GitHub:
 
 - [Product Guide](docs/PRODUCT_GUIDE.md)
 - [Datasheet](docs/DATASHEET.md)
+- [Release Notes](docs/releases/v0.1.3.md)
 - [Setup Guide](docs/SETUP_GUIDE.md)
 - [Settings Guide](docs/SETTINGS_GUIDE.md)
 - [Distribution Guide](docs/DISTRIBUTION.md)

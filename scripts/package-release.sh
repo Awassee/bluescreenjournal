@@ -171,7 +171,9 @@ install -m 755 "$BINARY_PATH" "$BUNDLE_DIR/bin/$NAME"
 install -m 755 "$ROOT_DIR/install.sh" "$BUNDLE_DIR/install.sh"
 install -m 644 "$ROOT_DIR/README.md" "$BUNDLE_DIR/README.md"
 install -m 644 "$ROOT_DIR/LICENSE" "$BUNDLE_DIR/LICENSE"
-find "$ROOT_DIR/docs" -maxdepth 1 -type f -exec install -m 644 {} "$BUNDLE_DIR/docs" \;
+cp -R "$ROOT_DIR/docs/." "$BUNDLE_DIR/docs/"
+find "$BUNDLE_DIR/docs" -type d -exec chmod 755 {} \;
+find "$BUNDLE_DIR/docs" -type f -exec chmod 644 {} \;
 install -m 644 "$FORMULA_TEMPLATE" "$BUNDLE_DIR/packaging/homebrew/${NAME}.rb.template"
 printf '%s\n' "$VERSION" > "$BUNDLE_DIR/VERSION"
 printf '%s\n' "${BUNDLE_TARGETS[@]}" > "$BUNDLE_DIR/TARGETS"

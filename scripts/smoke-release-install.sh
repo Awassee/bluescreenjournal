@@ -55,6 +55,8 @@ BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 "$INSTALL_PREFIX/bin/bsj" settings >/dev/null
 test -f "$INSTALL_PREFIX/share/doc/bsj/README.md"
 test -f "$INSTALL_PREFIX/share/doc/bsj/LICENSE"
+test -f "$INSTALL_PREFIX/share/doc/bsj/docs/PRODUCT_GUIDE.md"
+test -f "$INSTALL_PREFIX/share/doc/bsj/docs/assets/bsj-hero.gif"
 test -f "$INSTALL_PREFIX/share/man/man1/bsj.1"
 test -f "$INSTALL_PREFIX/share/bsj/examples/config.example.json"
 test -f "$INSTALL_PREFIX/share/bash-completion/completions/bsj"
@@ -65,6 +67,7 @@ test -f "$INSTALL_PREFIX/share/fish/vendor_completions.d/bsj.fish"
 cat "$ROOT_DIR/install.sh" | bash -s -- --prebuilt --archive "$ARCHIVE" --prefix "$BOOTSTRAP_PREFIX"
 "$BOOTSTRAP_PREFIX/bin/bsj" --help >/dev/null
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/README.md"
+test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/docs/assets/bsj-hero.gif"
 test -f "$BOOTSTRAP_PREFIX/share/man/man1/bsj.1"
 
 cat <<EOF

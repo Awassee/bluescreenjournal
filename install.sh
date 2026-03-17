@@ -98,7 +98,7 @@ Environment overrides:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
-  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.2
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.3
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
 EOF
 }
@@ -444,7 +444,10 @@ install_prebuilt() {
     install -m 644 "$ROOT_DIR/LICENSE" "$final_doc_dir/LICENSE"
   fi
   if [[ -d "$ROOT_DIR/docs" ]]; then
-    find "$ROOT_DIR/docs" -maxdepth 1 -type f -name '*.md' ! -name 'bsj.1' -exec install -m 644 {} "$final_doc_dir" \;
+    mkdir -p "$final_doc_dir/docs"
+    cp -R "$ROOT_DIR/docs/." "$final_doc_dir/docs/"
+    find "$final_doc_dir/docs" -type d -exec chmod 755 {} \;
+    find "$final_doc_dir/docs" -type f -exec chmod 644 {} \;
     if [[ -f "$ROOT_DIR/docs/config.example.json" ]]; then
       install -m 644 "$ROOT_DIR/docs/config.example.json" "$final_example_dir/config.example.json"
     fi
