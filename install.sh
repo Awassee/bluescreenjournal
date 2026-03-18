@@ -587,10 +587,10 @@ install_prebuilt() {
   cat <<EOF
 
 Next steps:
-  1. $final_bin_dir/bsj guide setup
-  2. $final_bin_dir/bsj
-  3. $final_bin_dir/bsj settings
-  4. man $final_man_dir/bsj.1
+  1. $final_bin_dir/bsj
+  2. First launch opens the in-app setup wizard automatically (no parameters needed)
+  3. Use the top menu bar in the app for Setup, Settings, Help, and Sync
+  4. Optional CLI reference: man $final_man_dir/bsj.1
 EOF
 }
 
@@ -648,9 +648,9 @@ install_from_source() {
   cat <<EOF
 
 Next steps:
-  1. $bsj_bin guide setup
-  2. $bsj_bin
-  3. $bsj_bin settings
+  1. $bsj_bin
+  2. First launch opens the in-app setup wizard automatically (no parameters needed)
+  3. Use the top menu bar in the app for Setup, Settings, Help, and Sync
 EOF
 }
 
