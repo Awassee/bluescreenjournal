@@ -2657,6 +2657,11 @@ impl App {
             return;
         }
 
+        if Self::is_ctrl_char(&key, 'q') {
+            self.should_quit = true;
+            return;
+        }
+
         if key.code == KeyCode::F(12) {
             self.lock_vault();
             return;
@@ -2669,6 +2674,11 @@ impl App {
 
         if self.overlay.is_some() {
             self.handle_overlay_key(key, viewport_height);
+            return;
+        }
+
+        if let Some(menu) = Self::menu_ctrl_hotkey(&key) {
+            self.open_menu(menu);
             return;
         }
 
@@ -2844,8 +2854,7 @@ impl App {
         match &mut overlay {
             Overlay::SetupWizard(wizard) => match key.code {
                 KeyCode::Esc => {
-                    self.should_quit = true;
-                    keep_overlay = false;
+                    self.flash_status("SETUP ACTIVE. CTRL+Q QUITS.");
                 }
                 KeyCode::Backspace => {
                     wizard.current_input_mut().pop();
@@ -2864,8 +2873,7 @@ impl App {
             },
             Overlay::UnlockPrompt { input, error } => match key.code {
                 KeyCode::Esc => {
-                    self.should_quit = true;
-                    keep_overlay = false;
+                    self.flash_status("UNLOCK PROMPT ACTIVE. CTRL+Q QUITS.");
                 }
                 KeyCode::Backspace => {
                     input.pop();
@@ -6640,6 +6648,25 @@ impl App {
         MenuId::from_hotkey(ch)
     }
 
+    fn menu_ctrl_hotkey(key: &KeyEvent) -> Option<MenuId> {
+        if !key.modifiers.contains(KeyModifiers::CONTROL) {
+            return None;
+        }
+        let KeyCode::Char(ch) = key.code else {
+            return None;
+        };
+        match ch.to_ascii_lowercase() {
+            'o' | 'g' => Some(MenuId::File),
+            'e' => Some(MenuId::Edit),
+            'w' => Some(MenuId::Search),
+            'y' => Some(MenuId::Go),
+            't' => Some(MenuId::Tools),
+            'u' => Some(MenuId::Setup),
+            'l' => Some(MenuId::Help),
+            _ => None,
+        }
+    }
+
     fn is_text_input_key(key: &KeyEvent) -> bool {
         key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT
     }
@@ -7182,9 +7209,9 @@ mod tests {
     use super::{
         App, ConflictOverlay, DatePicker, ExportFormatUi, ExportPrompt, IndexState, MenuAction,
         MenuId, Overlay, PickerAction, PickerItem, PickerOverlay, RestorePrompt, SearchField,
-        SearchJump, SearchOverlay, SettingField, SettingPrompt, SyncPhase, SyncRequest,
-        SyncStatusOverlay, default_export_path, format_reveal_codes, macro_key_matches,
-        parse_optional_overlay_date, resolve_recovery_text,
+        SearchJump, SearchOverlay, SettingField, SettingPrompt, SetupWizard, SyncPhase,
+        SyncRequest, SyncStatusOverlay, default_export_path, format_reveal_codes,
+        macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
     };
     use crate::{
         config::RecentExportInfo,
@@ -7196,7 +7223,7 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
     use secrecy::SecretString;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
     fn render_app(app: &App, width: u16, height: u16) -> String {
@@ -7293,6 +7320,75 @@ mod tests {
             app.menu(),
             Some(menu) if menu.selected_menu == MenuId::Search
         ));
+    }
+
+    #[test]
+    fn ctrl_o_opens_file_menu_when_editor_is_active() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL)),
+            20,
+        );
+
+        assert!(matches!(
+            app.menu(),
+            Some(menu) if menu.selected_menu == MenuId::File
+        ));
+    }
+
+    #[test]
+    fn esc_in_setup_wizard_does_not_quit_app() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::SetupWizard(SetupWizard::new(Path::new(
+            "/tmp/bsj-vault",
+        ))));
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+            20,
+        );
+
+        assert!(!app.should_quit());
+        assert!(matches!(app.overlay(), Some(Overlay::SetupWizard(_))));
+        assert_eq!(app.status_text(), Some("SETUP ACTIVE. CTRL+Q QUITS."));
+    }
+
+    #[test]
+    fn esc_in_unlock_prompt_does_not_quit_app() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::UnlockPrompt {
+            input: String::new(),
+            error: None,
+        });
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+            20,
+        );
+
+        assert!(!app.should_quit());
+        assert!(matches!(app.overlay(), Some(Overlay::UnlockPrompt { .. })));
+        assert_eq!(
+            app.status_text(),
+            Some("UNLOCK PROMPT ACTIVE. CTRL+Q QUITS.")
+        );
+    }
+
+    #[test]
+    fn ctrl_q_quits_even_when_overlay_is_open() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::SetupWizard(SetupWizard::new(Path::new(
+            "/tmp/bsj-vault",
+        ))));
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
+            20,
+        );
+
+        assert!(app.should_quit());
     }
 
     #[test]
@@ -8209,7 +8305,7 @@ mod tests {
         assert!(rendered.contains("BlueScreen Journal"));
         assert!(rendered.contains(env!("CARGO_PKG_VERSION")));
         assert!(rendered.contains("Enter/Esc/F1 closes."));
-        assert!(rendered.contains("Ctrl+K = commands."));
+        assert!(rendered.contains("Ctrl+O/E/W/Y/T/U/L menus."));
     }
 
     #[test]

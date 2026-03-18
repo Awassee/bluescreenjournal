@@ -662,7 +662,7 @@ fn draw_setup_overlay(
             SetupStep::EpochDate => "Step 4/4",
         }),
         Line::from(step_hint),
-        Line::from("Enter = Next, Esc = Quit setup"),
+        Line::from("Enter = Next, Ctrl+Q = Quit setup"),
         Line::from(wizard.error.clone().unwrap_or_default()),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
@@ -692,7 +692,7 @@ fn draw_unlock_overlay(
         Line::from(format!("Vault: {vault_label}")),
         Line::from(format!("> {masked}")),
         Line::from(keychain_hint),
-        Line::from("Enter unlock  Esc keep locked"),
+        Line::from("Enter unlock  Ctrl+Q quit"),
         Line::from(error.clone().unwrap_or_default()),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
@@ -709,7 +709,7 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     );
     let lines = vec![
         Line::from(version_line),
-        Line::from("Esc menus. Alt+F/E/S/G/T/U/H menu. Ctrl+K = commands."),
+        Line::from("Esc menus. Alt+F/E/S/G/T/U/H menu. Ctrl+O/E/W/Y/T/U/L menus."),
         Line::from("Alt+Right next day. Alt+N next blank new entry."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
