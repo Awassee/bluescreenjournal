@@ -104,6 +104,7 @@ pub struct ConflictHead {
     pub saved_at: DateTime<Utc>,
     pub body: String,
     pub closing_thought: Option<String>,
+    pub entry_metadata: EntryMetadata,
     pub preview: String,
 }
 
@@ -113,12 +114,26 @@ pub struct ConflictState {
     pub heads: Vec<ConflictHead>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntryMetadata {
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub people: Vec<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub mood: Option<u8>,
+}
+
 #[derive(Clone, Debug)]
 pub struct LoadedDateState {
     pub revision_text: Option<String>,
     pub revision_closing_thought: Option<String>,
+    pub revision_entry_metadata: EntryMetadata,
     pub recovery_draft_text: Option<String>,
     pub recovery_draft_closing_thought: Option<String>,
+    pub recovery_draft_entry_metadata: Option<EntryMetadata>,
     pub conflict: Option<ConflictState>,
 }
 
@@ -156,6 +171,7 @@ pub struct ExportedEntry {
     pub entry_number: String,
     pub body: String,
     pub closing_thought: Option<String>,
+    pub metadata: EntryMetadata,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,10 +186,30 @@ pub struct IntegrityReport {
     pub issues: Vec<IntegrityIssue>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewSummary {
+    pub total_entries: usize,
+    pub streak_days: usize,
+    pub entries_this_week: usize,
+    pub entries_this_month: usize,
+    pub on_this_day: Vec<ReviewHit>,
+    pub top_tags: Vec<(String, usize)>,
+    pub top_people: Vec<(String, usize)>,
+    pub top_projects: Vec<(String, usize)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewHit {
+    pub date: NaiveDate,
+    pub entry_number: String,
+    pub preview: String,
+}
+
 #[derive(Clone, Debug)]
 struct DraftInfo {
     body: String,
     closing_thought: Option<String>,
+    entry_metadata: EntryMetadata,
     saved_at: DateTime<Utc>,
 }
 
@@ -195,6 +231,25 @@ struct RevisionRecord {
     merged_hashes: Vec<String>,
     body: String,
     closing_thought: Option<String>,
+    entry_metadata: EntryMetadata,
+}
+
+#[derive(Clone, Debug)]
+struct CatalogEntry {
+    date: NaiveDate,
+    entry_number: String,
+    preview: String,
+    has_conflict: bool,
+    search_text: String,
+    metadata: EntryMetadata,
+}
+
+struct SaveRevisionSpec<'a> {
+    body: &'a str,
+    closing_thought: Option<&'a str>,
+    entry_metadata: &'a EntryMetadata,
+    prev_hash: Option<String>,
+    merged_hashes: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -256,6 +311,8 @@ struct RevisionPayload {
     merged_hashes: Vec<String>,
     #[serde(rename = "closingThought", default)]
     closing_thought: Option<String>,
+    #[serde(rename = "entryMetadata", default)]
+    entry_metadata: EntryMetadata,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -269,6 +326,34 @@ struct DraftPayload {
     device_id: String,
     #[serde(rename = "closingThought", default)]
     closing_thought: Option<String>,
+    #[serde(rename = "entryMetadata", default)]
+    entry_metadata: EntryMetadata,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SearchCachePayload {
+    kind: String,
+    #[serde(rename = "fingerprint")]
+    fingerprint: Vec<CacheFingerprintEntry>,
+    entries: Vec<SearchCacheEntry>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SearchCacheEntry {
+    date: String,
+    entry_number: String,
+    preview: String,
+    has_conflict: bool,
+    search_text: String,
+    #[serde(default)]
+    metadata: EntryMetadata,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct CacheFingerprintEntry {
+    path: String,
+    size: u64,
+    modified_unix_secs: u64,
 }
 
 pub struct UnlockedVault {
@@ -285,7 +370,7 @@ impl UnlockedVault {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn save_revision(&self, date: NaiveDate, body: &str) -> VaultResult<()> {
-        self.save_entry_revision(date, body, None)
+        self.save_entry_revision(date, body, None, &EntryMetadata::default())
     }
 
     pub fn save_entry_revision(
@@ -293,11 +378,22 @@ impl UnlockedVault {
         date: NaiveDate,
         body: &str,
         closing_thought: Option<&str>,
+        entry_metadata: &EntryMetadata,
     ) -> VaultResult<()> {
         let records = self.scan_date_revisions(date)?;
         let heads = head_records(&records);
         let prev_hash = heads.first().map(|record| record.revision_hash.clone());
-        self.save_revision_internal(date, body, closing_thought, prev_hash, Vec::new(), &records)
+        self.save_revision_internal(
+            date,
+            SaveRevisionSpec {
+                body,
+                closing_thought,
+                entry_metadata,
+                prev_hash,
+                merged_hashes: Vec::new(),
+            },
+            &records,
+        )
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -308,7 +404,14 @@ impl UnlockedVault {
         primary_hash: &str,
         merged_hashes: &[String],
     ) -> VaultResult<()> {
-        self.save_entry_merge_revision(date, body, None, primary_hash, merged_hashes)
+        self.save_entry_merge_revision(
+            date,
+            body,
+            None,
+            &EntryMetadata::default(),
+            primary_hash,
+            merged_hashes,
+        )
     }
 
     pub fn save_entry_merge_revision(
@@ -316,23 +419,27 @@ impl UnlockedVault {
         date: NaiveDate,
         body: &str,
         closing_thought: Option<&str>,
+        entry_metadata: &EntryMetadata,
         primary_hash: &str,
         merged_hashes: &[String],
     ) -> VaultResult<()> {
         let records = self.scan_date_revisions(date)?;
         self.save_revision_internal(
             date,
-            body,
-            closing_thought,
-            Some(primary_hash.to_string()),
-            merged_hashes.to_vec(),
+            SaveRevisionSpec {
+                body,
+                closing_thought,
+                entry_metadata,
+                prev_hash: Some(primary_hash.to_string()),
+                merged_hashes: merged_hashes.to_vec(),
+            },
             &records,
         )
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn save_draft(&self, date: NaiveDate, body: &str) -> VaultResult<()> {
-        self.save_entry_draft(date, body, None)
+        self.save_entry_draft(date, body, None, &EntryMetadata::default())
     }
 
     pub fn save_entry_draft(
@@ -340,6 +447,7 @@ impl UnlockedVault {
         date: NaiveDate,
         body: &str,
         closing_thought: Option<&str>,
+        entry_metadata: &EntryMetadata,
     ) -> VaultResult<()> {
         let date_directory = date_dir(&self.root, date);
         let year_directory = date_directory
@@ -354,6 +462,7 @@ impl UnlockedVault {
             body: body.to_string(),
             device_id: self.device_id.clone(),
             closing_thought: normalize_optional_text(closing_thought),
+            entry_metadata: sanitize_entry_metadata(entry_metadata),
         };
         let plaintext = serde_json::to_vec(&payload)?;
         let aad = aad_string("draft", date, &self.device_id, 0);
@@ -382,6 +491,7 @@ impl UnlockedVault {
             entry_number: compute_entry_number(epoch, date),
             body: record.body.clone(),
             closing_thought: record.closing_thought.clone(),
+            metadata: record.entry_metadata.clone(),
         }))
     }
 
@@ -424,6 +534,9 @@ impl UnlockedVault {
         let primary = heads.first().or_else(|| records.first());
         let revision_text = primary.map(|record| record.body.clone());
         let revision_closing_thought = primary.and_then(|record| record.closing_thought.clone());
+        let revision_entry_metadata = primary
+            .map(|record| record.entry_metadata.clone())
+            .unwrap_or_default();
 
         let conflict = if heads.len() > 1 {
             Some(ConflictState {
@@ -437,6 +550,7 @@ impl UnlockedVault {
                         saved_at: record.saved_at,
                         body: record.body.clone(),
                         closing_thought: record.closing_thought.clone(),
+                        entry_metadata: record.entry_metadata.clone(),
                         preview: entry_preview(&record.body, record.closing_thought.as_deref(), 54),
                     })
                     .collect(),
@@ -446,19 +560,28 @@ impl UnlockedVault {
         };
 
         let draft = self.read_draft(date)?;
-        let (recovery_draft_text, recovery_draft_closing_thought) = match (draft, primary) {
-            (Some(draft), Some(revision)) if draft.saved_at > revision.saved_at => {
-                (Some(draft.body), draft.closing_thought)
-            }
-            (Some(draft), None) => (Some(draft.body), draft.closing_thought),
-            _ => (None, None),
-        };
+        let (recovery_draft_text, recovery_draft_closing_thought, recovery_draft_entry_metadata) =
+            match (draft, primary) {
+                (Some(draft), Some(revision)) if draft.saved_at > revision.saved_at => (
+                    Some(draft.body),
+                    draft.closing_thought,
+                    Some(draft.entry_metadata),
+                ),
+                (Some(draft), None) => (
+                    Some(draft.body),
+                    draft.closing_thought,
+                    Some(draft.entry_metadata),
+                ),
+                _ => (None, None, None),
+            };
 
         Ok(LoadedDateState {
             revision_text,
             revision_closing_thought,
+            revision_entry_metadata,
             recovery_draft_text,
             recovery_draft_closing_thought,
+            recovery_draft_entry_metadata,
             conflict,
         })
     }
@@ -505,6 +628,36 @@ impl UnlockedVault {
     }
 
     pub fn list_index_entries(&self, preview_chars: usize) -> VaultResult<Vec<IndexEntry>> {
+        let entries = self.load_catalog_entries()?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| IndexEntry {
+                date: entry.date,
+                entry_number: entry.entry_number,
+                preview: truncate_chars(&entry.preview, preview_chars),
+                has_conflict: entry.has_conflict,
+            })
+            .collect())
+    }
+
+    pub fn load_search_documents(&self) -> VaultResult<Vec<SearchDocument>> {
+        Ok(self
+            .load_catalog_entries()?
+            .into_iter()
+            .map(|entry| SearchDocument {
+                date: entry.date,
+                entry_number: entry.entry_number,
+                body: entry.search_text,
+            })
+            .collect())
+    }
+
+    fn load_catalog_entries(&self) -> VaultResult<Vec<CatalogEntry>> {
+        let fingerprint = build_catalog_fingerprint(&self.root)?;
+        if let Some(entries) = self.read_catalog_cache(&fingerprint)? {
+            return Ok(entries);
+        }
+
         let epoch = self.metadata.epoch_date()?;
         let mut dates = self.list_entry_dates()?;
         dates.sort_unstable_by(|left, right| right.cmp(left));
@@ -515,42 +668,149 @@ impl UnlockedVault {
             let heads = head_records(&records);
             let primary = heads.first().or_else(|| records.first());
             if let Some(record) = primary {
-                entries.push(IndexEntry {
+                let metadata = sanitize_entry_metadata(&record.entry_metadata);
+                entries.push(CatalogEntry {
                     date,
                     entry_number: compute_entry_number(epoch, date),
                     preview: entry_preview(
                         record.body.as_str(),
                         record.closing_thought.as_deref(),
-                        preview_chars,
+                        120,
                     ),
                     has_conflict: heads.len() > 1,
+                    search_text: metadata_search_text(
+                        &record.body,
+                        record.closing_thought.as_deref(),
+                        &metadata,
+                    ),
+                    metadata,
                 });
             }
         }
 
+        self.write_catalog_cache(&fingerprint, &entries)?;
         Ok(entries)
     }
 
-    pub fn load_search_documents(&self) -> VaultResult<Vec<SearchDocument>> {
-        let epoch = self.metadata.epoch_date()?;
-        let mut dates = self.list_entry_dates()?;
-        dates.sort_unstable_by(|left, right| right.cmp(left));
-
-        let mut documents = Vec::with_capacity(dates.len());
-        for date in dates {
-            let records = self.scan_date_revisions(date)?;
-            let heads = head_records(&records);
-            let primary = heads.first().or_else(|| records.first());
-            if let Some(record) = primary {
-                documents.push(SearchDocument {
-                    date,
-                    entry_number: compute_entry_number(epoch, date),
-                    body: record.body.clone(),
-                });
-            }
+    fn read_catalog_cache(
+        &self,
+        fingerprint: &[CacheFingerprintEntry],
+    ) -> VaultResult<Option<Vec<CatalogEntry>>> {
+        let path = search_cache_path(&self.root);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let encrypted = RevisionFile::parse(&fs::read(&path)?)?;
+        let plaintext = decrypt_payload(&self.key, &encrypted, cache_aad_string().as_bytes())?;
+        let payload: SearchCachePayload = serde_json::from_slice(&plaintext)?;
+        if payload.kind != "search-cache" || payload.fingerprint != fingerprint {
+            return Ok(None);
         }
 
-        Ok(documents)
+        let mut entries = Vec::with_capacity(payload.entries.len());
+        for entry in payload.entries {
+            let date = NaiveDate::parse_from_str(&entry.date, "%Y-%m-%d")
+                .map_err(|_| VaultError::InvalidDate(entry.date.clone()))?;
+            entries.push(CatalogEntry {
+                date,
+                entry_number: entry.entry_number,
+                preview: entry.preview,
+                has_conflict: entry.has_conflict,
+                search_text: entry.search_text,
+                metadata: sanitize_entry_metadata(&entry.metadata),
+            });
+        }
+        Ok(Some(entries))
+    }
+
+    fn write_catalog_cache(
+        &self,
+        fingerprint: &[CacheFingerprintEntry],
+        entries: &[CatalogEntry],
+    ) -> VaultResult<()> {
+        let cache_path = search_cache_path(&self.root);
+        let cache_dir = cache_path
+            .parent()
+            .ok_or_else(|| VaultError::InvalidFormat("missing cache directory".to_string()))?;
+        secure_fs::ensure_private_dir(cache_dir)?;
+        let payload = SearchCachePayload {
+            kind: "search-cache".to_string(),
+            fingerprint: fingerprint.to_vec(),
+            entries: entries
+                .iter()
+                .map(|entry| SearchCacheEntry {
+                    date: entry.date.format("%Y-%m-%d").to_string(),
+                    entry_number: entry.entry_number.clone(),
+                    preview: entry.preview.clone(),
+                    has_conflict: entry.has_conflict,
+                    search_text: entry.search_text.clone(),
+                    metadata: entry.metadata.clone(),
+                })
+                .collect(),
+        };
+        let plaintext = serde_json::to_vec(&payload)?;
+        let encrypted = encrypt_payload(&self.key, &plaintext, cache_aad_string().as_bytes())?;
+        atomic_write(&cache_path, &encrypted.to_bytes())
+    }
+
+    pub fn review_summary(&self, today: NaiveDate) -> VaultResult<ReviewSummary> {
+        let entries = self.load_catalog_entries()?;
+        let total_entries = entries.len();
+        let entries_this_week = entries
+            .iter()
+            .filter(|entry| (today - entry.date).num_days().abs() < 7 && entry.date <= today)
+            .count();
+        let entries_this_month = entries
+            .iter()
+            .filter(|entry| {
+                entry.date.year() == today.year() && entry.date.month() == today.month()
+            })
+            .count();
+
+        let mut streak_days = 0usize;
+        let mut cursor = today;
+        let entry_dates = entries
+            .iter()
+            .map(|entry| entry.date)
+            .collect::<HashSet<_>>();
+        while entry_dates.contains(&cursor) {
+            streak_days += 1;
+            cursor -= chrono::Duration::days(1);
+        }
+
+        let mut on_this_day = entries
+            .iter()
+            .filter(|entry| {
+                entry.date.month() == today.month()
+                    && entry.date.day() == today.day()
+                    && entry.date.year() != today.year()
+            })
+            .map(|entry| ReviewHit {
+                date: entry.date,
+                entry_number: entry.entry_number.clone(),
+                preview: entry.preview.clone(),
+            })
+            .collect::<Vec<_>>();
+        on_this_day.sort_by(|left, right| right.date.cmp(&left.date));
+
+        Ok(ReviewSummary {
+            total_entries,
+            streak_days,
+            entries_this_week,
+            entries_this_month,
+            on_this_day,
+            top_tags: top_counts(entries.iter().flat_map(|entry| entry.metadata.tags.iter())),
+            top_people: top_counts(
+                entries
+                    .iter()
+                    .flat_map(|entry| entry.metadata.people.iter()),
+            ),
+            top_projects: top_counts(
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.metadata.project.as_ref()),
+            ),
+        })
     }
 
     pub fn verify_integrity(&self) -> VaultResult<IntegrityReport> {
@@ -622,12 +882,16 @@ impl UnlockedVault {
     fn save_revision_internal(
         &self,
         date: NaiveDate,
-        body: &str,
-        closing_thought: Option<&str>,
-        prev_hash: Option<String>,
-        mut merged_hashes: Vec<String>,
+        spec: SaveRevisionSpec<'_>,
         existing_records: &[RevisionRecord],
     ) -> VaultResult<()> {
+        let SaveRevisionSpec {
+            body,
+            closing_thought,
+            entry_metadata,
+            prev_hash,
+            mut merged_hashes,
+        } = spec;
         let date_directory = date_dir(&self.root, date);
         let year_directory = date_directory
             .parent()
@@ -672,6 +936,7 @@ impl UnlockedVault {
             prev_hash,
             merged_hashes,
             closing_thought: normalize_optional_text(closing_thought),
+            entry_metadata: sanitize_entry_metadata(entry_metadata),
         };
         let plaintext = serde_json::to_vec(&payload)?;
         let aad = aad_string("revision", date, &self.device_id, seq);
@@ -697,6 +962,7 @@ impl UnlockedVault {
         Ok(Some(DraftInfo {
             body: payload.body,
             closing_thought: payload.closing_thought,
+            entry_metadata: payload.entry_metadata,
             saved_at: parse_saved_at(&payload.saved_at)?,
         }))
     }
@@ -788,6 +1054,108 @@ pub fn compute_entry_number(epoch: NaiveDate, entry_date: NaiveDate) -> String {
     let value = if days < 1 { 0 } else { days as u64 };
     let width = 7usize.max(value.to_string().len());
     format!("{value:0width$}")
+}
+
+fn sanitize_entry_metadata(metadata: &EntryMetadata) -> EntryMetadata {
+    fn normalize_list(values: &[String]) -> Vec<String> {
+        let mut out = Vec::new();
+        for value in values {
+            let normalized = value.trim().to_string();
+            if normalized.is_empty() || out.contains(&normalized) {
+                continue;
+            }
+            out.push(normalized);
+        }
+        out
+    }
+
+    EntryMetadata {
+        tags: normalize_list(&metadata.tags),
+        people: normalize_list(&metadata.people),
+        project: normalize_optional_text(metadata.project.as_deref()),
+        mood: metadata.mood.filter(|mood| *mood <= 9),
+    }
+}
+
+fn metadata_search_text(
+    body: &str,
+    closing_thought: Option<&str>,
+    metadata: &EntryMetadata,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(body.to_string());
+    if let Some(closing) = normalize_optional_text(closing_thought) {
+        lines.push(format!("Closing Thought: {closing}"));
+    }
+    if !metadata.tags.is_empty() {
+        lines.push(format!("Tags: {}", metadata.tags.join(", ")));
+    }
+    if !metadata.people.is_empty() {
+        lines.push(format!("People: {}", metadata.people.join(", ")));
+    }
+    if let Some(project) = metadata.project.as_deref() {
+        lines.push(format!("Project: {project}"));
+    }
+    if let Some(mood) = metadata.mood {
+        lines.push(format!("Mood: {mood}"));
+    }
+    lines.join("\n")
+}
+
+fn search_cache_path(root: &Path) -> PathBuf {
+    root.join(".cache").join("search-index.bsj.enc")
+}
+
+fn cache_aad_string() -> &'static str {
+    "bsj:v1:search-cache"
+}
+
+fn build_catalog_fingerprint(root: &Path) -> VaultResult<Vec<CacheFingerprintEntry>> {
+    let mut fingerprint = Vec::new();
+    for relative in backup_source_paths(root)? {
+        let relative_text = relative.to_string_lossy();
+        if relative_text != "vault.json" && !relative_text.starts_with("entries/") {
+            continue;
+        }
+        if relative_text != "vault.json" {
+            let file_name = relative
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            if !file_name.starts_with("rev-") || !file_name.ends_with(".bsj.enc") {
+                continue;
+            }
+        }
+        let full_path = root.join(&relative);
+        let metadata = fs::metadata(&full_path)?;
+        let modified_unix_secs = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        fingerprint.push(CacheFingerprintEntry {
+            path: relative_text.to_string(),
+            size: metadata.len(),
+            modified_unix_secs,
+        });
+    }
+    fingerprint.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(fingerprint)
+}
+
+fn top_counts<'a, I>(values: I) -> Vec<(String, usize)>
+where
+    I: Iterator<Item = &'a String>,
+{
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for value in values {
+        *counts.entry(value.to_ascii_lowercase()).or_insert(0) += 1;
+    }
+    let mut items = counts.into_iter().collect::<Vec<_>>();
+    items.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    items.truncate(5);
+    items
 }
 
 fn derive_key(passphrase: &SecretString, params: &KdfParams) -> VaultResult<Zeroizing<Vec<u8>>> {
@@ -934,6 +1302,7 @@ fn scan_date_revisions(
             merged_hashes: payload.merged_hashes,
             body: payload.body,
             closing_thought: payload.closing_thought,
+            entry_metadata: payload.entry_metadata,
         });
     }
     records.sort_by(|left, right| compare_revision_record(right, left));
@@ -1833,7 +2202,12 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
 
         vault
-            .save_entry_revision(date, "Body text", Some("Good night."))
+            .save_entry_revision(
+                date,
+                "Body text",
+                Some("Good night."),
+                &EntryMetadata::default(),
+            )
             .expect("save");
 
         let state = vault.load_date_state(date).expect("load");
@@ -1858,10 +2232,20 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
 
         vault
-            .save_entry_revision(date, "secret backup body", Some("Lights out."))
+            .save_entry_revision(
+                date,
+                "secret backup body",
+                Some("Lights out."),
+                &EntryMetadata::default(),
+            )
             .expect("save revision");
         vault
-            .save_entry_draft(date, "secret draft body", Some("Draft closing."))
+            .save_entry_draft(
+                date,
+                "secret draft body",
+                Some("Draft closing."),
+                &EntryMetadata::default(),
+            )
             .expect("save draft");
 
         let backup = vault
@@ -1980,7 +2364,12 @@ mod tests {
         let vault = unlock_vault(&root, &passphrase).expect("unlock");
         let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
         vault
-            .save_entry_revision(date, "secret backup body", Some("Lights out."))
+            .save_entry_revision(
+                date,
+                "secret backup body",
+                Some("Lights out."),
+                &EntryMetadata::default(),
+            )
             .expect("save revision");
 
         let created = vault
@@ -2027,7 +2416,12 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
 
         vault
-            .save_entry_revision(date, "body text", Some("Good night."))
+            .save_entry_revision(
+                date,
+                "body text",
+                Some("Good night."),
+                &EntryMetadata::default(),
+            )
             .expect("save revision");
 
         let exported = vault.export_entry(date).expect("export").expect("entry");

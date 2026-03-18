@@ -24,6 +24,15 @@ pub struct BackendSyncReport {
     pub pushed: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncPreviewReport {
+    pub local_revisions: usize,
+    pub remote_revisions: usize,
+    pub local_only_revisions: usize,
+    pub remote_only_revisions: usize,
+    pub shared_revisions: usize,
+}
+
 pub trait SyncBackend {
     fn list_keys(&mut self) -> VaultResult<BTreeSet<String>>;
     fn read(&mut self, key: &str) -> VaultResult<Vec<u8>>;
@@ -608,6 +617,49 @@ pub fn sync_root<B: SyncBackend>(
     ensure_shared_revision_bytes_match(local_root, backend, &local_inventory, &remote_keys)?;
 
     Ok(BackendSyncReport { pulled, pushed })
+}
+
+pub fn preview_root<B: SyncBackend>(
+    _metadata: &VaultMetadata,
+    local_root: &Path,
+    backend: &mut B,
+) -> VaultResult<SyncPreviewReport> {
+    let local_inventory = list_local_inventory(local_root)?;
+    let remote_keys = backend.list_keys()?;
+    let local_revisions = local_inventory.revision_keys.len();
+    let remote_revisions = remote_keys
+        .iter()
+        .filter(|key| classify_sync_key(key) == Some(SyncObjectKind::Revision))
+        .count();
+    let local_only_revisions = local_inventory
+        .revision_keys
+        .iter()
+        .filter(|key| !remote_keys.contains(*key))
+        .count();
+    let remote_only_revisions = remote_keys
+        .iter()
+        .filter(|key| {
+            classify_sync_key(key) == Some(SyncObjectKind::Revision)
+                && !local_inventory.revision_keys.contains(*key)
+        })
+        .count();
+    let shared_revisions = local_inventory
+        .revision_keys
+        .intersection(
+            &remote_keys
+                .iter()
+                .filter(|key| classify_sync_key(key) == Some(SyncObjectKind::Revision))
+                .cloned()
+                .collect(),
+        )
+        .count();
+    Ok(SyncPreviewReport {
+        local_revisions,
+        remote_revisions,
+        local_only_revisions,
+        remote_only_revisions,
+        shared_revisions,
+    })
 }
 
 pub fn looks_like_s3_remote(remote: &str) -> bool {

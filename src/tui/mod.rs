@@ -5,8 +5,9 @@ pub mod calendar;
 use crate::tui::{
     app::{
         App, ConflictMode, ConflictOverlay, DatePicker, ExportPrompt, IndexState, InfoOverlay,
-        MenuId, MenuItem, Overlay, ReplacePrompt, ReplaceStage, SearchField, SearchOverlay,
-        SettingPrompt, SetupStep, SetupWizard, SyncPhase, SyncStatusOverlay,
+        MenuId, MenuItem, MetadataField, MetadataPrompt, Overlay, PickerOverlay, ReplacePrompt,
+        ReplaceStage, RestorePrompt, RestoreStage, SearchField, SearchOverlay, SettingPrompt,
+        SetupStep, SetupWizard, SyncPhase, SyncStatusOverlay,
     },
     buffer::MatchPos,
 };
@@ -124,13 +125,20 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     }
     let left = format!(
-        "PERSONAL JOURNAL  {}  ENTRY NO. {}",
+        "PERSONAL JOURNAL{}  {}  ENTRY NO. {}",
+        if app.favorite_marker().is_empty() {
+            ""
+        } else {
+            " *"
+        },
         app.header_date_time_label(),
         app.entry_number_label()
     );
     let mut right_parts = vec![
         app.lock_status_label().to_string(),
         app.integrity_status_label(),
+        app.word_goal_status_label(),
+        app.session_status_label(),
         app.save_status_label(),
         app.draft_recovered_label().to_string(),
     ];
@@ -181,7 +189,7 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let hint = if app.menu().is_some() {
         "ARROWS MOVE  ENTER OPEN  ESC CLOSE"
     } else {
-        "ESC MENUS"
+        "ESC MENUS  CTRL+K COMMANDS"
     };
     let left_width = spans
         .iter()
@@ -451,9 +459,12 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
         Overlay::ExportPrompt(_) => popup_rect(body_area, 72, 8),
         Overlay::SettingPrompt(_) => popup_rect(body_area, 70, 7),
+        Overlay::MetadataPrompt(_) => popup_rect(body_area, 72, 9),
         Overlay::Index(_) => popup_rect(body_area, 78, 14),
         Overlay::SyncStatus(_) => popup_rect(body_area, 76, 10),
         Overlay::Info(_) => popup_rect(body_area, 76, 16),
+        Overlay::Picker(_) => popup_rect(body_area, 76, 14),
+        Overlay::RestorePrompt(_) => popup_rect(body_area, 76, 12),
         Overlay::RecoverDraft { .. } => popup_rect(body_area, 44, 5),
         Overlay::QuitConfirm => popup_rect(body_area, 44, 5),
     };
@@ -549,6 +560,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         }
         Overlay::ExportPrompt(prompt) => draw_export_prompt_overlay(frame, inner, prompt),
         Overlay::SettingPrompt(prompt) => draw_setting_prompt_overlay(frame, inner, prompt),
+        Overlay::MetadataPrompt(prompt) => draw_metadata_prompt_overlay(frame, inner, prompt),
         Overlay::Index(index) => {
             draw_index_overlay(frame, inner, index);
             None
@@ -561,6 +573,11 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
             draw_info_overlay(frame, inner, info);
             None
         }
+        Overlay::Picker(picker) => {
+            draw_picker_overlay(frame, inner, picker);
+            None
+        }
+        Overlay::RestorePrompt(prompt) => draw_restore_prompt_overlay(frame, inner, prompt),
         Overlay::RecoverDraft { .. } => {
             let lines = vec![
                 Line::from("RECOVER UNSAVED DRAFT? (Y/N)"),
@@ -617,18 +634,20 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("| F4 Find         F5 Search      F6 Replace          |"),
         Line::from("| F7 Index        F8 Sync        F9 Closing          |"),
         Line::from("| F10 Quit        F11 Reveal     F12 Lock            |"),
-        Line::from("| Ctrl+S Save     Ctrl+F Find                         |"),
+        Line::from("| Ctrl+S Save     Ctrl+F Find     Ctrl+K Commands    |"),
         Line::from("|                                                    |"),
         Line::from("| Editor shows a ruler and live L/W/C document stats |"),
+        Line::from("| Daily word goal and session timer live in header   |"),
         Line::from("| Arrows move cursor | PgUp/PgDn scroll              |"),
         Line::from("| Find updates as you type | Search runs on Enter    |"),
         Line::from("| Calendar: type YYYY-MM-DD for direct jump          |"),
         Line::from("| Index: type to filter, S toggles newest/oldest     |"),
         Line::from("| Search: Tab fields | Enter search/open result      |"),
-        Line::from("| Sync: F8 runs encrypted sync and shows results     |"),
-        Line::from("| FILE menu also exports current entry + backups     |"),
-        Line::from("| TOOLS menu includes Dashboard, Doctor, Verify      |"),
-        Line::from("| SETUP menu includes a live settings summary        |"),
+        Line::from("| Sync: F8 runs encrypted sync and logs sync history |"),
+        Line::from("| GO menu includes recent entries and favorites      |"),
+        Line::from("| SEARCH menu includes recent queries                |"),
+        Line::from("| TOOLS includes Dashboard, Prompts, Sync History    |"),
+        Line::from("| SETUP includes live settings summary + word goal   |"),
         Line::from("| Closing Thought lives above footer | F9 edits it   |"),
         Line::from("| Reveal shows DATE / ENTRY / TAG / MOOD / CLOSE     |"),
         Line::from("| Header shows VERIFY OK / BROKEN after unlock/save  |"),
@@ -825,7 +844,11 @@ fn draw_conflict_choice_overlay(frame: &mut Frame<'_>, area: Rect, conflict: &Co
                 .map(|head| format!("{} {} {}", head.device_id, head.seq, head.preview))
                 .unwrap_or_else(|| "Unavailable".to_string())
         )),
-        conflict_option_line("3) Merge", conflict.selected == ConflictMode::Merge),
+        conflict_option_line("3) Accept A", conflict.selected == ConflictMode::AcceptA),
+        Line::from("Accept A writes a merged head using A as the primary view."),
+        conflict_option_line("4) Accept B", conflict.selected == ConflictMode::AcceptB),
+        Line::from("Accept B writes a merged head using B as the primary view."),
+        conflict_option_line("5) Merge", conflict.selected == ConflictMode::Merge),
         Line::from(format!(
             "Merge keeps all heads and writes a new revision.{}",
             if more_heads > 0 {
@@ -943,6 +966,124 @@ fn draw_setting_prompt_overlay(
         (area.x + 2 + prompt.input.chars().count() as u16).min(area.right().saturating_sub(1)),
         (area.y + 2).min(area.bottom().saturating_sub(1)),
     ))
+}
+
+fn draw_metadata_prompt_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    prompt: &MetadataPrompt,
+) -> Option<(u16, u16)> {
+    let lines = vec![
+        metadata_input_line(
+            "Tags   ",
+            &prompt.tags_input,
+            prompt.active_field == MetadataField::Tags,
+        ),
+        metadata_input_line(
+            "People ",
+            &prompt.people_input,
+            prompt.active_field == MetadataField::People,
+        ),
+        metadata_input_line(
+            "Project",
+            &prompt.project_input,
+            prompt.active_field == MetadataField::Project,
+        ),
+        metadata_input_line(
+            "Mood   ",
+            &prompt.mood_input,
+            prompt.active_field == MetadataField::Mood,
+        ),
+        Line::from("Comma-separate tags and people. Mood accepts 0-9."),
+        Line::from("Tab next field  Enter save  Esc cancel"),
+        Line::from(prompt.error.clone().unwrap_or_default()),
+    ];
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+
+    let (input, row_offset) = match prompt.active_field {
+        MetadataField::Tags => (&prompt.tags_input, 0),
+        MetadataField::People => (&prompt.people_input, 1),
+        MetadataField::Project => (&prompt.project_input, 2),
+        MetadataField::Mood => (&prompt.mood_input, 3),
+    };
+    Some((
+        (area.x + 10 + input.chars().count() as u16).min(area.right().saturating_sub(1)),
+        (area.y + row_offset).min(area.bottom().saturating_sub(1)),
+    ))
+}
+
+fn draw_restore_prompt_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    prompt: &RestorePrompt,
+) -> Option<(u16, u16)> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+
+    let mut lines = vec![
+        Line::from("Restore an encrypted backup into a separate folder."),
+        Line::from(if prompt.stage == RestoreStage::SelectBackup {
+            "Stage 1/2: choose backup"
+        } else {
+            "Stage 2/2: set target path"
+        }),
+        Line::from(""),
+    ];
+
+    if prompt.backups.is_empty() {
+        lines.push(Line::from("No backups available."));
+    } else {
+        let visible_rows = area.height.saturating_sub(7) as usize;
+        let (start, end) = prompt.window(visible_rows.max(1));
+        for (offset, backup) in prompt.backups[start..end].iter().enumerate() {
+            let absolute_idx = start + offset;
+            let style =
+                if absolute_idx == prompt.selected && prompt.stage == RestoreStage::SelectBackup {
+                    screen_style().add_modifier(Modifier::REVERSED)
+                } else {
+                    screen_style()
+                };
+            let file_name = backup
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("backup");
+            let row = format!(
+                "{}  {:>8}  {}",
+                backup.created_at.format("%Y-%m-%d %H:%M"),
+                human_bytes(backup.size_bytes),
+                truncate_to_width(file_name, area.width.saturating_sub(29) as usize)
+            );
+            lines.push(Line::from(Span::styled(row, style)));
+        }
+    }
+
+    lines.push(Line::from(""));
+    let target_style = if prompt.stage == RestoreStage::TargetPath {
+        screen_style().add_modifier(Modifier::REVERSED)
+    } else {
+        screen_style()
+    };
+    lines.push(Line::from(Span::styled(
+        format!("> Target: {}", prompt.target_input),
+        target_style,
+    )));
+    lines.push(Line::from(
+        "Tab switch stage  Enter next/restore  Esc cancel",
+    ));
+    lines.push(Line::from(prompt.error.clone().unwrap_or_default()));
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+
+    if prompt.stage == RestoreStage::TargetPath {
+        Some((
+            (area.x + 10 + prompt.target_input.chars().count() as u16)
+                .min(area.right().saturating_sub(1)),
+            area.bottom().saturating_sub(3),
+        ))
+    } else {
+        None
+    }
 }
 
 fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
@@ -1101,6 +1242,52 @@ fn draw_info_overlay(frame: &mut Frame<'_>, area: Rect, info: &InfoOverlay) {
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
+fn draw_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &PickerOverlay) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let mut lines = vec![
+        Line::from(format!(
+            "Filter: {}",
+            if picker.filter_input.trim().is_empty() {
+                "[all]".to_string()
+            } else {
+                picker.filter_input.clone()
+            }
+        )),
+        Line::from(""),
+    ];
+
+    let visible_rows = area.height.saturating_sub(5) as usize;
+    let (filtered, start, end) = picker.window(visible_rows.max(1));
+    if filtered.is_empty() {
+        lines.push(Line::from(picker.empty_message.clone()));
+    } else {
+        for (offset, item_index) in filtered[start..end].iter().enumerate() {
+            let absolute_idx = start + offset;
+            if let Some(item) = picker.items.get(*item_index) {
+                let style = if absolute_idx == picker.selected {
+                    screen_style().add_modifier(Modifier::REVERSED)
+                } else {
+                    screen_style()
+                };
+                let row = join_left_right(
+                    area.width as usize,
+                    &item.title,
+                    &truncate_to_width(&item.detail, area.width.saturating_sub(20) as usize),
+                );
+                lines.push(Line::from(Span::styled(row, style)));
+            }
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from("Type to filter  Up/Down move  Enter open"));
+    lines.push(Line::from("PgUp/PgDn page  Backspace clear  Esc close"));
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+}
+
 fn input_line(label: &str, value: &str, active: bool) -> Line<'static> {
     let marker = if active { '>' } else { ' ' };
     let style = if active {
@@ -1109,6 +1296,28 @@ fn input_line(label: &str, value: &str, active: bool) -> Line<'static> {
         screen_style()
     };
     Line::from(Span::styled(format!("{marker} {label}: {value}"), style))
+}
+
+fn metadata_input_line(label: &str, value: &str, active: bool) -> Line<'static> {
+    let style = if active {
+        screen_style().add_modifier(Modifier::REVERSED)
+    } else {
+        screen_style()
+    };
+    Line::from(Span::styled(format!("{label}: {value}"), style))
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes_f >= MIB {
+        format!("{:.1} MiB", bytes_f / MIB)
+    } else if bytes_f >= KIB {
+        format!("{:.1} KiB", bytes_f / KIB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn conflict_option_line(label: &str, active: bool) -> Line<'static> {
@@ -1264,9 +1473,12 @@ fn overlay_title(overlay: &Overlay) -> String {
         Overlay::ReplaceConfirm(_) => " Replace ".to_string(),
         Overlay::ExportPrompt(prompt) => format!(" Export {} ", prompt.format.label()),
         Overlay::SettingPrompt(_) => " Setup ".to_string(),
+        Overlay::MetadataPrompt(_) => " Metadata ".to_string(),
         Overlay::Index(_) => " Index ".to_string(),
         Overlay::SyncStatus(_) => " Sync ".to_string(),
         Overlay::Info(info) => format!(" {} ", info.title),
+        Overlay::Picker(picker) => format!(" {} ", picker.title),
+        Overlay::RestorePrompt(_) => " Restore ".to_string(),
         Overlay::RecoverDraft { .. } => " Recovery ".to_string(),
         Overlay::QuitConfirm => " Quit ".to_string(),
     }

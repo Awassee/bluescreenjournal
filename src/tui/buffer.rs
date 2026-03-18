@@ -169,6 +169,49 @@ impl TextBuffer {
             .min(line_len_chars(&self.lines[self.cursor_row]));
     }
 
+    pub fn move_paragraph_up(&mut self) {
+        if self.cursor_row == 0 {
+            return;
+        }
+
+        let mut row = self.cursor_row - 1;
+        while row > 0 && self.lines[row].trim().is_empty() {
+            row -= 1;
+        }
+        while row > 0 && !self.lines[row - 1].trim().is_empty() {
+            row -= 1;
+        }
+
+        self.cursor_row = row;
+        self.cursor_col = self
+            .cursor_col
+            .min(line_len_chars(&self.lines[self.cursor_row]));
+    }
+
+    pub fn move_paragraph_down(&mut self) {
+        if self.cursor_row + 1 >= self.lines.len() {
+            return;
+        }
+
+        let mut row = self.cursor_row;
+        if !self.lines[row].trim().is_empty() {
+            while row + 1 < self.lines.len() && !self.lines[row + 1].trim().is_empty() {
+                row += 1;
+            }
+        }
+        while row + 1 < self.lines.len() && self.lines[row + 1].trim().is_empty() {
+            row += 1;
+        }
+        if row + 1 < self.lines.len() {
+            row += 1;
+        }
+
+        self.cursor_row = row;
+        self.cursor_col = self
+            .cursor_col
+            .min(line_len_chars(&self.lines[self.cursor_row]));
+    }
+
     pub fn move_to_line_start(&mut self) {
         self.cursor_col = 0;
     }
@@ -380,5 +423,25 @@ mod tests {
         buf.insert_text("one\ntwo");
         assert_eq!(buf.to_text(), "one\ntwo");
         assert_eq!(buf.cursor(), (1, 3));
+    }
+
+    #[test]
+    fn paragraph_up_jumps_to_previous_block() {
+        let mut buf = TextBuffer::from_text("one\ntwo\n\nthree\nfour\n\nfive");
+        buf.set_cursor(6, 2);
+        buf.move_paragraph_up();
+        assert_eq!(buf.cursor(), (3, 2));
+        buf.move_paragraph_up();
+        assert_eq!(buf.cursor(), (0, 2));
+    }
+
+    #[test]
+    fn paragraph_down_jumps_to_next_block() {
+        let mut buf = TextBuffer::from_text("one\ntwo\n\nthree\nfour\n\nfive");
+        buf.set_cursor(0, 1);
+        buf.move_paragraph_down();
+        assert_eq!(buf.cursor(), (3, 1));
+        buf.move_paragraph_down();
+        assert_eq!(buf.cursor(), (6, 1));
     }
 }

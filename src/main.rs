@@ -2,6 +2,7 @@ mod config;
 mod doctor;
 mod help;
 mod logging;
+mod platform;
 mod search;
 mod secure_fs;
 mod sync;
@@ -931,7 +932,7 @@ fn write_plaintext_output(path: &Path, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::render_markdown_export;
-    use crate::vault::ExportedEntry;
+    use crate::vault::{EntryMetadata, ExportedEntry};
     use chrono::NaiveDate;
 
     #[test]
@@ -939,6 +940,12 @@ mod tests {
         let entry = ExportedEntry {
             date: NaiveDate::from_ymd_opt(2026, 3, 17).expect("date"),
             entry_number: "0000017".to_string(),
+            metadata: EntryMetadata {
+                tags: vec!["work".to_string()],
+                people: vec!["Alex".to_string()],
+                project: Some("BlueScreen".to_string()),
+                mood: Some(7),
+            },
             body: "Body text".to_string(),
             closing_thought: Some("Lights out.".to_string()),
         };

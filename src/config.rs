@@ -7,6 +7,9 @@ const READABLE_SETTING_KEYS: &[&str] = &[
     "vault_path",
     "sync_target_path",
     "device_nickname",
+    "typewriter_mode",
+    "daily_word_goal",
+    "remember_passphrase_in_keychain",
     "backup_retention.daily",
     "backup_retention.weekly",
     "backup_retention.monthly",
@@ -17,6 +20,9 @@ const EDITABLE_SETTING_KEYS: &[&str] = &[
     "vault_path",
     "sync_target_path",
     "device_nickname",
+    "typewriter_mode",
+    "daily_word_goal",
+    "remember_passphrase_in_keychain",
     "backup_retention.daily",
     "backup_retention.weekly",
     "backup_retention.monthly",
@@ -43,9 +49,36 @@ pub struct AppConfig {
     #[serde(default = "default_device_nickname")]
     pub device_nickname: String,
     #[serde(default)]
+    pub typewriter_mode: bool,
+    #[serde(default)]
+    pub daily_word_goal: Option<usize>,
+    #[serde(default)]
+    pub remember_passphrase_in_keychain: bool,
+    #[serde(default)]
+    pub first_run_coach_completed: bool,
+    #[serde(default)]
+    pub last_sync: Option<LastSyncInfo>,
+    #[serde(default)]
+    pub sync_history: Vec<LastSyncInfo>,
+    #[serde(default)]
+    pub favorite_dates: Vec<String>,
+    #[serde(default)]
     pub backup_retention: BackupRetentionConfig,
     #[serde(default)]
     pub macros: Vec<MacroConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LastSyncInfo {
+    pub timestamp: String,
+    pub backend: String,
+    pub target: String,
+    pub pulled: usize,
+    pub pushed: usize,
+    pub conflicts: usize,
+    pub integrity_ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -109,6 +142,13 @@ impl AppConfig {
                 sync_target_path: None,
                 local_device_id: None,
                 device_nickname: default_device_nickname(),
+                typewriter_mode: false,
+                daily_word_goal: None,
+                remember_passphrase_in_keychain: false,
+                first_run_coach_completed: false,
+                last_sync: None,
+                sync_history: Vec::new(),
+                favorite_dates: Vec::new(),
                 backup_retention: BackupRetentionConfig::default(),
                 macros: Vec::new(),
             },
@@ -154,6 +194,12 @@ pub fn get_setting_value(config: &AppConfig, key: &str) -> Result<String, String
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "null".to_string())),
         "device_nickname" => Ok(config.device_nickname.clone()),
+        "typewriter_mode" => Ok(config.typewriter_mode.to_string()),
+        "daily_word_goal" => Ok(config
+            .daily_word_goal
+            .map(|goal| goal.to_string())
+            .unwrap_or_else(|| "null".to_string())),
+        "remember_passphrase_in_keychain" => Ok(config.remember_passphrase_in_keychain.to_string()),
         "backup_retention.daily" => Ok(config.backup_retention.daily.to_string()),
         "backup_retention.weekly" => Ok(config.backup_retention.weekly.to_string()),
         "backup_retention.monthly" => Ok(config.backup_retention.monthly.to_string()),
@@ -189,6 +235,21 @@ pub fn set_setting_value(config: &mut AppConfig, key: &str, value: &str) -> Resu
             }
             config.device_nickname = trimmed.to_string();
             Ok(config.device_nickname.clone())
+        }
+        "typewriter_mode" => {
+            config.typewriter_mode = parse_bool_value(value, key)?;
+            Ok(config.typewriter_mode.to_string())
+        }
+        "daily_word_goal" => {
+            config.daily_word_goal = parse_optional_usize(value, key)?;
+            Ok(config
+                .daily_word_goal
+                .map(|goal| goal.to_string())
+                .unwrap_or_else(|| "null".to_string()))
+        }
+        "remember_passphrase_in_keychain" => {
+            config.remember_passphrase_in_keychain = parse_bool_value(value, key)?;
+            Ok(config.remember_passphrase_in_keychain.to_string())
         }
         "backup_retention.daily" => {
             config.backup_retention.daily = parse_retention_value(value, key)?;
@@ -243,6 +304,29 @@ fn parse_retention_value(value: &str, key: &str) -> Result<usize, String> {
         .map_err(|_| format!("{key} must be a non-negative integer"))
 }
 
+fn parse_bool_value(value: &str, key: &str) -> Result<bool, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(format!("{key} must be true or false")),
+    }
+}
+
+fn parse_optional_usize(value: &str, key: &str) -> Result<Option<usize>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("null")
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("unset")
+    {
+        return Ok(None);
+    }
+    trimmed
+        .parse::<usize>()
+        .map(Some)
+        .map_err(|_| format!("{key} must be blank or a non-negative integer"))
+}
+
 fn default_daily_backups() -> usize {
     7
 }
@@ -286,6 +370,13 @@ mod tests {
             sync_target_path: Some(PathBuf::from("/tmp/remote")),
             local_device_id: Some("device".to_string()),
             device_nickname: "QA Mac".to_string(),
+            typewriter_mode: true,
+            daily_word_goal: Some(750),
+            remember_passphrase_in_keychain: true,
+            first_run_coach_completed: true,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: vec!["2026-03-17".to_string()],
             backup_retention: BackupRetentionConfig {
                 daily: 5,
                 weekly: 4,
@@ -302,6 +393,14 @@ mod tests {
             get_setting_value(&config, "local_device_id").expect("device id"),
             "device"
         );
+        assert_eq!(
+            get_setting_value(&config, "typewriter_mode").expect("typewriter"),
+            "true"
+        );
+        assert_eq!(
+            get_setting_value(&config, "daily_word_goal").expect("word goal"),
+            "750"
+        );
     }
 
     #[test]
@@ -311,15 +410,26 @@ mod tests {
             sync_target_path: None,
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
+            typewriter_mode: false,
+            daily_word_goal: None,
+            remember_passphrase_in_keychain: false,
+            first_run_coach_completed: false,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };
 
         set_setting_value(&mut config, "sync_target_path", "/tmp/remote").expect("sync target");
         set_setting_value(&mut config, "backup_retention.weekly", "9").expect("weekly");
+        set_setting_value(&mut config, "typewriter_mode", "true").expect("typewriter");
+        set_setting_value(&mut config, "daily_word_goal", "500").expect("word goal");
 
         assert_eq!(config.sync_target_path, Some(PathBuf::from("/tmp/remote")));
         assert_eq!(config.backup_retention.weekly, 9);
+        assert!(config.typewriter_mode);
+        assert_eq!(config.daily_word_goal, Some(500));
     }
 
     #[test]
@@ -329,6 +439,13 @@ mod tests {
             sync_target_path: Some(PathBuf::from("/tmp/remote")),
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
+            typewriter_mode: false,
+            daily_word_goal: None,
+            remember_passphrase_in_keychain: false,
+            first_run_coach_completed: false,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };

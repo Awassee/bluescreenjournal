@@ -224,6 +224,24 @@ pub fn render_settings_report(
     );
     push_row(
         &mut output,
+        "typewriter_mode",
+        config.typewriter_mode.to_string(),
+    );
+    push_row(
+        &mut output,
+        "daily_word_goal",
+        config
+            .daily_word_goal
+            .map(|goal| goal.to_string())
+            .unwrap_or_else(|| "off".to_string()),
+    );
+    push_row(
+        &mut output,
+        "remember_passphrase_in_keychain",
+        config.remember_passphrase_in_keychain.to_string(),
+    );
+    push_row(
+        &mut output,
         "backup_retention",
         format!(
             "daily={} weekly={} monthly={}",
@@ -255,6 +273,16 @@ pub fn render_settings_report(
         &mut output,
         "local_device_id",
         option_string(&config.local_device_id),
+    );
+    push_row(
+        &mut output,
+        "favorite_dates",
+        config.favorite_dates.len().to_string(),
+    );
+    push_row(
+        &mut output,
+        "sync_history",
+        config.sync_history.len().to_string(),
     );
     writeln!(&mut output).unwrap();
 
@@ -604,6 +632,13 @@ mod tests {
             sync_target_path: Some(PathBuf::from("/tmp/remote")),
             local_device_id: Some("abc123".to_string()),
             device_nickname: "QA Mac".to_string(),
+            typewriter_mode: true,
+            daily_word_goal: Some(600),
+            remember_passphrase_in_keychain: true,
+            first_run_coach_completed: true,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: vec!["2026-03-17".to_string()],
             backup_retention: BackupRetentionConfig {
                 daily: 7,
                 weekly: 4,
