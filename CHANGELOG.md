@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.14
+
+- fixed installer `set -u` failures when no install override arguments are forwarded to the bundled installer
+- hardened bootstrap delegation for both prebuilt and source install modes to handle empty argument lists safely
+- added a smoke-test regression path that exercises bootstrap install with no forwarded install arguments
+
 ## v0.1.13
 
 - polished the global search overlay so live typing no longer steals focus into results

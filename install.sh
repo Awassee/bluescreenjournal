@@ -98,7 +98,7 @@ Environment overrides:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
-  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.13
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.14
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
 EOF
 }
@@ -203,6 +203,13 @@ pick_mode() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+make_temp_dir() {
+  local label="$1"
+  local temp_root="${TMPDIR:-/tmp}"
+  mkdir -p "$temp_root"
+  mktemp -d "$temp_root/${label}.XXXXXX"
 }
 
 ensure_path_hint() {
@@ -322,7 +329,10 @@ copy_or_download_archive() {
     download_to "$source" "$output"
   else
     [[ -f "$source" ]] || die "Archive not found: $source"
-    cp "$source" "$output"
+    if [[ "$source" == "$output" ]]; then
+      return
+    fi
+    ln "$source" "$output" 2>/dev/null || cp "$source" "$output"
   fi
 }
 
@@ -337,7 +347,10 @@ maybe_download_checksum() {
     curl --proto '=https' --tlsv1.2 --fail --location --retry 3 --retry-delay 1 --silent --show-error "$checksum_source" --output "$output"
     return 0
   elif [[ -f "$checksum_source" ]]; then
-    cp "$checksum_source" "$output"
+    if [[ "$checksum_source" == "$output" ]]; then
+      return 0
+    fi
+    ln "$checksum_source" "$output" 2>/dev/null || cp "$checksum_source" "$output"
     return 0
   fi
   return 1
@@ -375,7 +388,7 @@ extract_archive_bundle() {
 
 bootstrap_prebuilt_install() {
   local tmp_dir archive_path checksum_path bundle_dir checksum_source require_checksum archive_name
-  tmp_dir="$(mktemp -d /tmp/bsj-install.XXXXXX)"
+  tmp_dir="$(make_temp_dir bsj-install)"
   require_checksum=0
 
   if [[ -n "$ARCHIVE_SOURCE" ]]; then
@@ -427,7 +440,7 @@ bootstrap_source_install() {
   require_command tar
 
   local tmp_dir source_archive_url source_archive_path source_dir ref_label
-  tmp_dir="$(mktemp -d /tmp/bsj-source-install.XXXXXX)"
+  tmp_dir="$(make_temp_dir bsj-source-install)"
   source_archive_path="$tmp_dir/source.tar.gz"
   if [[ "$RELEASE_VERSION" == "latest" ]]; then
     ref_label="main"

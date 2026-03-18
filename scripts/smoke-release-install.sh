@@ -40,7 +40,9 @@ fi
 
 [[ -f "$ARCHIVE" ]] || { echo "Archive not found: $ARCHIVE" >&2; exit 1; }
 
-TMP_DIR="$(mktemp -d /tmp/bsj-dist-smoke.XXXXXX)"
+TMP_ROOT="${TMPDIR:-/tmp}"
+mkdir -p "$TMP_ROOT"
+TMP_DIR="$(mktemp -d "$TMP_ROOT/bsj-dist-smoke.XXXXXX")"
 INSTALL_PREFIX="$TMP_DIR/install-root"
 BOOTSTRAP_PREFIX="$TMP_DIR/bootstrap-root"
 BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"

@@ -212,7 +212,9 @@ printf '%s\n' "${BUNDLE_TARGETS[@]}" > "$BUNDLE_DIR/TARGETS"
 
 "$SCRUB_SCRIPT" "$BUNDLE_DIR/bin/$NAME"
 if [[ "$(uname -s)" == "Darwin" ]] && command -v codesign >/dev/null 2>&1; then
-  codesign --force --sign - "$BUNDLE_DIR/bin/$NAME"
+  if ! codesign --force --sign - "$BUNDLE_DIR/bin/$NAME"; then
+    echo "warning: codesign failed; continuing with unsigned bundle binary" >&2
+  fi
 fi
 
 if [[ "$AUDIT" -eq 1 ]]; then
