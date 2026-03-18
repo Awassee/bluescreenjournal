@@ -236,7 +236,9 @@ common_install_args() {
   if [[ -n "$FISH_COMPLETION_DIR" ]]; then
     args+=(--fish-completion-dir "$FISH_COMPLETION_DIR")
   fi
-  printf '%s\n' "${args[@]}"
+  if [[ "${#args[@]}" -gt 0 ]]; then
+    printf '%s\n' "${args[@]}"
+  fi
 }
 
 install_completion_files() {
@@ -413,7 +415,11 @@ bootstrap_prebuilt_install() {
   while IFS= read -r arg; do
     [[ -n "$arg" ]] && delegate_args+=("$arg")
   done < <(common_install_args)
-  "$bundle_dir/install.sh" --prebuilt "${delegate_args[@]}"
+  if [[ "${#delegate_args[@]}" -gt 0 ]]; then
+    "$bundle_dir/install.sh" --prebuilt "${delegate_args[@]}"
+  else
+    "$bundle_dir/install.sh" --prebuilt
+  fi
 }
 
 bootstrap_source_install() {
@@ -442,7 +448,11 @@ bootstrap_source_install() {
   while IFS= read -r arg; do
     [[ -n "$arg" ]] && delegate_args+=("$arg")
   done < <(common_install_args)
-  "$source_dir/install.sh" --source "${delegate_args[@]}"
+  if [[ "${#delegate_args[@]}" -gt 0 ]]; then
+    "$source_dir/install.sh" --source "${delegate_args[@]}"
+  else
+    "$source_dir/install.sh" --source
+  fi
 }
 
 install_prebuilt() {

@@ -43,6 +43,7 @@ fi
 TMP_DIR="$(mktemp -d /tmp/bsj-dist-smoke.XXXXXX)"
 INSTALL_PREFIX="$TMP_DIR/install-root"
 BOOTSTRAP_PREFIX="$TMP_DIR/bootstrap-root"
+BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -91,6 +92,13 @@ test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/docs/TERMINAL_GUIDE.md"
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/docs/PRIVACY.md"
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/docs/assets/bsj-hero.gif"
 test -f "$BOOTSTRAP_PREFIX/share/man/man1/bsj.1"
+
+# Regression guard: exercise bootstrap install with no forwarded install args.
+mkdir -p "$BOOTSTRAP_NOARGS_HOME"
+cat "$ROOT_DIR/install.sh" | HOME="$BOOTSTRAP_NOARGS_HOME" bash -s -- --prebuilt --archive "$ARCHIVE"
+"$BOOTSTRAP_NOARGS_HOME/.local/bin/bsj" --help >/dev/null
+test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/doc/bsj/README.md"
+test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/man/man1/bsj.1"
 
 cat <<EOF
 Smoke test passed:
