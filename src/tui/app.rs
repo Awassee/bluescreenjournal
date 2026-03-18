@@ -323,6 +323,22 @@ impl SearchOverlay {
         self.error = None;
     }
 
+    fn apply_week_scope(&mut self, today: NaiveDate) {
+        let week_start = today
+            .checked_sub_signed(ChronoDuration::days(6))
+            .unwrap_or(today);
+        self.from_input = week_start.format("%Y-%m-%d").to_string();
+        self.to_input = today.format("%Y-%m-%d").to_string();
+        self.error = None;
+    }
+
+    fn apply_year_scope(&mut self, today: NaiveDate) {
+        let year_start = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap_or(today);
+        self.from_input = year_start.format("%Y-%m-%d").to_string();
+        self.to_input = today.format("%Y-%m-%d").to_string();
+        self.error = None;
+    }
+
     fn clear_filters(&mut self) {
         self.from_input.clear();
         self.to_input.clear();
@@ -1351,7 +1367,9 @@ pub enum MenuAction {
     GlobalSearch,
     SearchHistory,
     SearchScopeToday,
+    SearchScopeWeek,
     SearchScopeMonth,
+    SearchScopeYear,
     SearchScopeAll,
     SearchClearFilters,
     FindNext,
@@ -1615,6 +1633,8 @@ pub struct App {
     session_started_at: Instant,
     recent_dates: Vec<NaiveDate>,
     search_history: Vec<String>,
+    search_scope_from: String,
+    search_scope_to: String,
     document_stats: DocumentStats,
 }
 
@@ -1680,6 +1700,8 @@ impl App {
             session_started_at: Instant::now(),
             recent_dates: Vec::new(),
             search_history: Vec::new(),
+            search_scope_from: String::new(),
+            search_scope_to: String::new(),
             document_stats: DocumentStats::from(BufferStats {
                 lines: 1,
                 words: 0,
@@ -2232,9 +2254,21 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Search Last 7 Days".to_string(),
+                    detail: "RANGE".to_string(),
+                    action: MenuAction::SearchScopeWeek,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
                     label: "Search This Month".to_string(),
                     detail: "RANGE".to_string(),
                     action: MenuAction::SearchScopeMonth,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Search This Year".to_string(),
+                    detail: "RANGE".to_string(),
+                    action: MenuAction::SearchScopeYear,
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
@@ -2871,6 +2905,37 @@ impl App {
             },
             Overlay::Search(search) => match key.code {
                 KeyCode::Esc | KeyCode::F(5) => keep_overlay = false,
+                KeyCode::Char('n') if Self::is_ctrl_char(&key, 'n') => {
+                    if !search.results.is_empty() {
+                        search.active_field = SearchField::Results;
+                        search.move_selection(1);
+                    }
+                }
+                KeyCode::Char('p') if Self::is_ctrl_char(&key, 'p') => {
+                    if !search.results.is_empty() {
+                        search.active_field = SearchField::Results;
+                        search.move_selection(-1);
+                    }
+                }
+                KeyCode::Char('r') if Self::is_ctrl_char(&key, 'r') => {
+                    if let Some(query) = self.search_history.first().cloned() {
+                        search.query_input = query;
+                        search.error = None;
+                        self.maybe_live_run_global_search(search);
+                        self.flash_status("QUERY RECALLED.");
+                    } else {
+                        self.flash_status("NO QUERY HISTORY.");
+                    }
+                }
+                KeyCode::Char('l') if Self::is_ctrl_char(&key, 'l') => {
+                    search.query_input.clear();
+                    search.clear_filters();
+                    search.clear_results();
+                    search.error = None;
+                    search.active_field = SearchField::Query;
+                    self.remember_search_scope(search);
+                    self.flash_status("SEARCH CLEARED.");
+                }
                 KeyCode::Tab => {
                     search.cycle_field();
                     search.error = None;
@@ -2878,18 +2943,32 @@ impl App {
                 KeyCode::Char('T') => {
                     search.apply_today_scope(self.selected_date);
                     self.maybe_live_run_global_search(search);
+                    self.remember_search_scope(search);
+                }
+                KeyCode::Char('W') => {
+                    search.apply_week_scope(self.selected_date);
+                    self.maybe_live_run_global_search(search);
+                    self.remember_search_scope(search);
                 }
                 KeyCode::Char('M') => {
                     search.apply_month_scope(self.selected_date);
                     self.maybe_live_run_global_search(search);
+                    self.remember_search_scope(search);
+                }
+                KeyCode::Char('Y') => {
+                    search.apply_year_scope(self.selected_date);
+                    self.maybe_live_run_global_search(search);
+                    self.remember_search_scope(search);
                 }
                 KeyCode::Char('A') => {
                     search.clear_filters();
                     self.maybe_live_run_global_search(search);
+                    self.remember_search_scope(search);
                 }
                 KeyCode::Char('C') => {
                     search.clear_filters();
                     search.clear_results();
+                    self.remember_search_scope(search);
                 }
                 KeyCode::Backspace => {
                     if let Some(input) = search.active_input_mut() {
@@ -2897,6 +2976,7 @@ impl App {
                         search.clear_results();
                         search.error = None;
                         self.maybe_live_run_global_search(search);
+                        self.remember_search_scope(search);
                     }
                 }
                 KeyCode::Up => {
@@ -2939,7 +3019,7 @@ impl App {
                         keep_overlay = false;
                     } else {
                         self.remember_search_query(&search.query_input);
-                        self.run_global_search(search);
+                        self.run_global_search(search, true);
                     }
                 }
                 KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
@@ -2953,6 +3033,7 @@ impl App {
                         search.clear_results();
                         search.error = None;
                         self.maybe_live_run_global_search(search);
+                        self.remember_search_scope(search);
                     }
                 }
                 _ => {}
@@ -3503,7 +3584,11 @@ impl App {
 
     fn open_search_overlay_with_query(&mut self, query: Option<String>) {
         self.menu = None;
-        self.overlay = Some(Overlay::Search(SearchOverlay::new(query)));
+        let initial_query = query.or_else(|| self.search_history.first().cloned());
+        let mut overlay = SearchOverlay::new(initial_query);
+        overlay.from_input = self.search_scope_from.clone();
+        overlay.to_input = self.search_scope_to.clone();
+        self.overlay = Some(Overlay::Search(overlay));
     }
 
     fn open_export_prompt(&mut self) {
@@ -3613,6 +3698,13 @@ impl App {
         self.search_history.retain(|existing| existing != trimmed);
         self.search_history.insert(0, trimmed.to_string());
         self.search_history.truncate(12);
+    }
+
+    fn remember_search_scope(&mut self, search: &SearchOverlay) {
+        self.search_scope_from.zeroize();
+        self.search_scope_to.zeroize();
+        self.search_scope_from = search.from_input.clone();
+        self.search_scope_to = search.to_input.clone();
     }
 
     fn record_export_history(&mut self, format: ExportFormatUi, path: &Path) {
@@ -4957,6 +5049,15 @@ impl App {
             MenuAction::SearchScopeToday => {
                 let mut search = SearchOverlay::new(self.find_query.clone());
                 search.apply_today_scope(self.selected_date);
+                self.remember_search_scope(&search);
+                self.maybe_live_run_global_search(&mut search);
+                self.menu = None;
+                self.overlay = Some(Overlay::Search(search));
+            }
+            MenuAction::SearchScopeWeek => {
+                let mut search = SearchOverlay::new(self.find_query.clone());
+                search.apply_week_scope(self.selected_date);
+                self.remember_search_scope(&search);
                 self.maybe_live_run_global_search(&mut search);
                 self.menu = None;
                 self.overlay = Some(Overlay::Search(search));
@@ -4964,6 +5065,15 @@ impl App {
             MenuAction::SearchScopeMonth => {
                 let mut search = SearchOverlay::new(self.find_query.clone());
                 search.apply_month_scope(self.selected_date);
+                self.remember_search_scope(&search);
+                self.maybe_live_run_global_search(&mut search);
+                self.menu = None;
+                self.overlay = Some(Overlay::Search(search));
+            }
+            MenuAction::SearchScopeYear => {
+                let mut search = SearchOverlay::new(self.find_query.clone());
+                search.apply_year_scope(self.selected_date);
+                self.remember_search_scope(&search);
                 self.maybe_live_run_global_search(&mut search);
                 self.menu = None;
                 self.overlay = Some(Overlay::Search(search));
@@ -4971,15 +5081,24 @@ impl App {
             MenuAction::SearchScopeAll => {
                 let mut search = SearchOverlay::new(self.find_query.clone());
                 search.clear_filters();
+                self.remember_search_scope(&search);
                 self.maybe_live_run_global_search(&mut search);
                 self.menu = None;
                 self.overlay = Some(Overlay::Search(search));
             }
             MenuAction::SearchClearFilters => {
+                let mut remembered_scope: Option<(String, String)> = None;
                 self.open_search_overlay();
                 if let Some(Overlay::Search(search)) = &mut self.overlay {
                     search.clear_filters();
+                    remembered_scope = Some((search.from_input.clone(), search.to_input.clone()));
                     self.flash_status("SEARCH FILTERS CLEARED.");
+                }
+                if let Some((from, to)) = remembered_scope {
+                    self.search_scope_from.zeroize();
+                    self.search_scope_to.zeroize();
+                    self.search_scope_from = from;
+                    self.search_scope_to = to;
                 }
             }
             MenuAction::FindNext => {
@@ -5188,6 +5307,8 @@ impl App {
             query.zeroize();
         }
         self.search_history.clear();
+        self.search_scope_from.zeroize();
+        self.search_scope_to.zeroize();
         self.recent_dates.clear();
         self.pending_sync_request = None;
         self.reveal_codes = false;
@@ -5430,7 +5551,7 @@ impl App {
                 self.remember_search_query(&query);
                 let mut overlay = SearchOverlay::new(Some(query));
                 if self.vault.is_some() {
-                    self.run_global_search(&mut overlay);
+                    self.run_global_search(&mut overlay, true);
                 }
                 self.menu = None;
                 self.overlay = Some(Overlay::Search(overlay));
@@ -5882,7 +6003,7 @@ impl App {
         }
     }
 
-    fn run_global_search(&mut self, search: &mut SearchOverlay) {
+    fn run_global_search(&mut self, search: &mut SearchOverlay, focus_results: bool) {
         let query = search.query_input.trim().to_string();
         if query.is_empty() {
             search.error = Some("Query cannot be empty.".to_string());
@@ -5910,10 +6031,16 @@ impl App {
             return;
         }
 
+        self.remember_search_scope(search);
+
         if let Err(error) = self.ensure_search_index() {
             search.error = Some(error);
             return;
         }
+
+        let previous_selected = search
+            .selected_result()
+            .map(|result| (result.date, result.row, result.start_col, result.end_col));
 
         let results = self
             .search_index
@@ -5926,17 +6053,23 @@ impl App {
             });
 
         search.results = results;
-        search.selected = 0;
+        search.selected = previous_selected
+            .and_then(|selected| {
+                search.results.iter().position(|result| {
+                    (result.date, result.row, result.start_col, result.end_col) == selected
+                })
+            })
+            .unwrap_or(0);
         search.error = if search.results.is_empty() {
             Some("No matches.".to_string())
         } else {
             None
         };
-        search.active_field = if search.results.is_empty() {
-            SearchField::Query
-        } else {
-            SearchField::Results
-        };
+        if focus_results && !search.results.is_empty() {
+            search.active_field = SearchField::Results;
+        } else if search.results.is_empty() {
+            search.active_field = SearchField::Query;
+        }
     }
 
     fn maybe_live_run_global_search(&mut self, search: &mut SearchOverlay) {
@@ -5946,7 +6079,7 @@ impl App {
             search.active_field = SearchField::Query;
             return;
         }
-        self.run_global_search(search);
+        self.run_global_search(search, false);
     }
 
     fn ensure_search_index(&mut self) -> Result<(), String> {
@@ -7009,8 +7142,16 @@ mod tests {
         assert_eq!(overlay.from_input, "2026-03-16");
         assert_eq!(overlay.to_input, "2026-03-16");
 
+        overlay.apply_week_scope(today);
+        assert_eq!(overlay.from_input, "2026-03-10");
+        assert_eq!(overlay.to_input, "2026-03-16");
+
         overlay.apply_month_scope(today);
         assert_eq!(overlay.from_input, "2026-03-01");
+        assert_eq!(overlay.to_input, "2026-03-16");
+
+        overlay.apply_year_scope(today);
+        assert_eq!(overlay.from_input, "2026-01-01");
         assert_eq!(overlay.to_input, "2026-03-16");
 
         overlay.clear_filters();
@@ -7225,7 +7366,122 @@ mod tests {
         app.maybe_live_run_global_search(&mut overlay);
 
         assert_eq!(overlay.results.len(), 1);
+        assert_eq!(overlay.active_field, SearchField::Query);
+    }
+
+    #[test]
+    fn manual_search_enter_focuses_results() {
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.search_index = Some(SearchIndex::build(vec![SearchDocument {
+            date,
+            entry_number: "0000001".to_string(),
+            body: "quiet morning notes".to_string(),
+        }]));
+        let mut overlay = SearchOverlay::new(Some("quiet".to_string()));
+
+        app.run_global_search(&mut overlay, true);
+
+        assert_eq!(overlay.results.len(), 1);
         assert_eq!(overlay.active_field, SearchField::Results);
+    }
+
+    #[test]
+    fn run_global_search_keeps_selected_result_when_still_present() {
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.search_index = Some(SearchIndex::build(vec![
+            SearchDocument {
+                date,
+                entry_number: "0000001".to_string(),
+                body: "quiet morning notes".to_string(),
+            },
+            SearchDocument {
+                date: date + Duration::days(1),
+                entry_number: "0000002".to_string(),
+                body: "quiet evening notes".to_string(),
+            },
+        ]));
+        let mut overlay = SearchOverlay::new(Some("quiet".to_string()));
+        app.run_global_search(&mut overlay, true);
+        overlay.selected = 1;
+        overlay.active_field = SearchField::Results;
+
+        app.run_global_search(&mut overlay, true);
+
+        assert_eq!(overlay.results.len(), 2);
+        assert_eq!(overlay.selected, 1);
+        assert_eq!(overlay.active_field, SearchField::Results);
+    }
+
+    #[test]
+    fn search_overlay_ctrl_clear_resets_query_filters_and_results() {
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::Search(SearchOverlay {
+            query_input: "quiet".to_string(),
+            from_input: "2026-03-01".to_string(),
+            to_input: "2026-03-16".to_string(),
+            active_field: SearchField::Query,
+            results: vec![SearchResult {
+                date,
+                entry_number: "0000001".to_string(),
+                snippet: Snippet {
+                    text: "quiet morning notes".to_string(),
+                    highlight_start: 0,
+                    highlight_end: 5,
+                },
+                row: 0,
+                start_col: 0,
+                end_col: 5,
+                matched_text: "quiet".to_string(),
+            }],
+            selected: 0,
+            error: Some("No matches.".to_string()),
+        }));
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+            23,
+        );
+
+        match app.overlay() {
+            Some(Overlay::Search(search)) => {
+                assert!(search.query_input.is_empty());
+                assert!(search.from_input.is_empty());
+                assert!(search.to_input.is_empty());
+                assert!(search.results.is_empty());
+                assert_eq!(search.active_field, SearchField::Query);
+            }
+            other => panic!("expected search overlay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_overlay_ctrl_recall_uses_recent_query() {
+        let mut app = App::with_initial_date(None);
+        app.search_history = vec!["stormy".to_string(), "quiet".to_string()];
+        app.search_index = Some(SearchIndex::build(vec![SearchDocument {
+            date: NaiveDate::from_ymd_opt(2026, 3, 16).expect("date"),
+            entry_number: "0000001".to_string(),
+            body: "stormy evening".to_string(),
+        }]));
+        app.overlay = Some(Overlay::Search(SearchOverlay::new(None)));
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            23,
+        );
+
+        match app.overlay() {
+            Some(Overlay::Search(search)) => {
+                assert_eq!(search.query_input, "stormy");
+                assert_eq!(search.results.len(), 1);
+            }
+            other => panic!("expected search overlay, got {other:?}"),
+        }
     }
 
     #[test]
@@ -7691,8 +7947,11 @@ mod tests {
 
         let rendered = render_app(&app, 100, 30);
 
-        assert!(rendered.contains("Up/Down/PgUp/PgDn move results  Esc close"));
-        assert!(rendered.contains("T today  M month  A all  C clear filters"));
+        assert!(rendered.contains("Tab fields  Enter search/open"));
+        assert!(rendered.contains("T today  W week"));
+        assert!(rendered.contains("Ctrl+L clear all"));
+        assert!(rendered.contains("Ctrl+R recall query"));
+        assert!(rendered.contains("Selected: 1 / 1"));
     }
 
     #[test]

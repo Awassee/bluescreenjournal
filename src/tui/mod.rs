@@ -672,7 +672,7 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("SETUP  Vault, sync folder, device, clock, ruler, word goal"),
         Line::from("Calendar: type YYYY-MM-DD, [ ] saved-day jump, < > entry months, T today"),
         Line::from("Index: type filter, S sort, Shift+F favorites, Shift+C conflicts"),
-        Line::from("Search: Tab fields, Enter search/open, T/M/A presets, C clear filters"),
+        Line::from("Search: Tab fields, Enter search/open, T/W/M/Y/A presets, Ctrl+R recall query"),
         Line::from("Header shows lock, verify, goal, session, and save state."),
         Line::from("Footer shows mode, context, stats, and status. Enter/Esc/F1 closes."),
     ];
@@ -760,8 +760,13 @@ fn draw_search_overlay(
         ),
         Line::from(""),
         Line::from(format!(
-            "Results: {}  Active: {}  Range: {}",
+            "Results: {}  Selected: {}  Active: {}  Range: {}",
             search.results.len(),
+            if search.results.is_empty() {
+                "0/0".to_string()
+            } else {
+                format!("{}/{}", search.selected + 1, search.results.len())
+            },
             match search.active_field {
                 SearchField::Query => "QUERY",
                 SearchField::From => "FROM",
@@ -824,7 +829,9 @@ fn draw_search_overlay(
     lines.push(Line::from(""));
     if let Some(result) = search.selected_result() {
         lines.push(Line::from(format!(
-            "Selected: {} entry {} line {} col {}",
+            "Selected: {} / {}  {} entry {} line {} col {}",
+            search.selected + 1,
+            search.results.len(),
             result.date.format("%Y-%m-%d"),
             result.entry_number,
             result.row + 1,
@@ -835,9 +842,16 @@ fn draw_search_overlay(
             truncate_to_width(&result.matched_text, area.width.saturating_sub(10) as usize)
         )));
     }
-    lines.push(Line::from("Tab fields  Enter search/open  Home/End jump"));
-    lines.push(Line::from("T today  M month  A all  C clear filters"));
-    lines.push(Line::from("Up/Down/PgUp/PgDn move results  Esc close"));
+    lines.push(Line::from(
+        "Tab fields  Enter search/open  Ctrl+N/Ctrl+P move",
+    ));
+    lines.push(Line::from("T today  W week  M month  Y year  A all"));
+    lines.push(Line::from(
+        "C clear filters  Ctrl+L clear all  Ctrl+R recall query",
+    ));
+    lines.push(Line::from(
+        "Up/Down/PgUp/PgDn move results  Home/End jump  Esc close",
+    ));
     if let Some(error) = &search.error {
         lines.push(Line::from(error.clone()));
     }
