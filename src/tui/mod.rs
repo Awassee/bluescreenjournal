@@ -127,14 +127,15 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let left = format!(
-        "PERSONAL JOURNAL{}{}  {}  ENTRY NO. {}",
+        "[{}]  PERSONAL JOURNAL{}{}  TIME {}  ENTRY NO. {}",
+        app.header_entry_focus_label(),
         if compact_mode { " [COMPACT]" } else { "" },
         if app.favorite_marker().is_empty() {
             ""
         } else {
             " *"
         },
-        app.header_date_time_label(),
+        app.header_time_label(),
         app.entry_number_label()
     );
     let mut right_parts = vec![
@@ -192,9 +193,9 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let hint = if app.menu().is_some() {
         "LEFT/RIGHT MENU  UP/DOWN ITEM  ENTER SELECT  ESC CLOSE"
     } else if area.width >= 130 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+LEFT/RIGHT DAY  ALT+UP/DOWN ENTRY"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+RIGHT NEXT DAY  ALT+N NEW ENTRY"
     } else if area.width >= 104 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+LEFT/RIGHT DAY"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+RIGHT NEXT DAY  ALT+N NEW"
     } else {
         "ESC MENUS  ALT+F/E/S/G/T/U/H MENU"
     };
@@ -446,13 +447,14 @@ fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
     }
 
     let legend = if width >= 130 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H menu | Alt+Left/Right day | Alt+Up/Down entry | F2 Save | F10 Quit".to_string()
+        "Esc Menus | Alt+F/E/S/G/T/U/H menu | Alt+Right next day | Alt+N next new entry | F2 Save | F10 Quit".to_string()
     } else if width >= 108 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H | Alt+Left/Right day | F2 Save | F10 Quit".to_string()
+        "Esc Menus | Alt+F/E/S/G/T/U/H | Alt+Right next day | Alt+N new | F2 Save | F10 Quit"
+            .to_string()
     } else if width >= 90 {
         "Esc Menus | Alt+F/E/S/G/T/U/H | F1 Help | F2 Save | F10 Quit".to_string()
     } else {
-        "Esc Menus | Alt+Left/Right day | F2 Save | F10 Quit".to_string()
+        "Esc Menus | Alt+Right day | Alt+N new | F2 Save | F10 Quit".to_string()
     };
 
     if compact_mode && width >= 100 {
@@ -702,17 +704,17 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
         Line::from("Classic 80x25 workspace. Type immediately when no menu or prompt is open."),
         Line::from("Esc menus. Alt+F/E/S/G/T/U/H menu. Ctrl+K = commands."),
-        Line::from("Alt+Left/Right day. Alt+Up/Down saved entry."),
+        Line::from("Alt+Right next day. Alt+N next blank new entry."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
         Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),
         Line::from("Ctrl+S Save  Ctrl+F Find"),
+        Line::from("Older entries: use F7 Index or F3 Calendar."),
         Line::from("FILE   Save, export, backup, restore, lock, quit"),
         Line::from("EDIT   Lines, stamps, metadata, favorite, reveal, typewriter"),
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),
         Line::from("GO     Calendar, index, recents, favorites, random, today"),
         Line::from("TOOLS  Sync, verify, review, dashboard, prompts, doctor"),
-        Line::from("SETUP  Vault, sync folder, device, clock, ruler, word goal"),
         Line::from("Calendar: type YYYY-MM-DD, [ ] saved-day jump, < > entry months, T today"),
         Line::from("Index: type filter, S sort, Shift+F favorites, Shift+C conflicts"),
         Line::from("Search: Tab fields, Enter search/open, T/W/M/Y/A presets, Ctrl+R recall query"),

@@ -1386,6 +1386,7 @@ pub enum MenuAction {
     RandomEntry,
     PreviousEntry,
     NextEntry,
+    NewEntry,
     Today,
     Index,
     Sync,
@@ -1756,18 +1757,25 @@ impl App {
         self.find_matches.get(self.current_match_idx)
     }
 
-    pub fn header_date_time_label(&self) -> String {
+    pub fn header_time_label(&self) -> String {
         let time_format = match (self.config.clock_12h, self.config.show_seconds) {
             (true, true) => "%I:%M:%S %p",
             (true, false) => "%I:%M %p",
             (false, true) => "%H:%M:%S",
             (false, false) => "%H:%M",
         };
-        format!(
-            "{} {}",
-            self.selected_date.format("%Y-%m-%d"),
-            Local::now().format(time_format)
-        )
+        Local::now().format(time_format).to_string()
+    }
+
+    pub fn header_entry_focus_label(&self) -> String {
+        let today = Local::now().date_naive();
+        if self.selected_date == today {
+            format!("TODAY {}", self.selected_date.format("%Y-%m-%d"))
+        } else if self.selected_date > today {
+            format!("NEXT {}", self.selected_date.format("%Y-%m-%d"))
+        } else {
+            format!("ARCHIVE {}", self.selected_date.format("%Y-%m-%d"))
+        }
     }
 
     pub fn entry_number_label(&self) -> String {
@@ -1985,8 +1993,8 @@ impl App {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
             "F2 saves a revision. Header changes to 'REVISION SAVED <time>'.",
-            "Alt+Right next day  Alt+Left previous day",
-            "Alt+Down next saved entry  Alt+Up previous saved entry",
+            "Alt+Right next day  Alt+N next blank new entry",
+            "Open older entries through F7 Index or F3 Calendar.",
             "Esc opens menus  Alt+F/E/S/G/T/U/H opens a menu directly",
             "F3 calendar  F7 index  F5 search vault",
             "F10 quit  F12 lock",
@@ -2333,6 +2341,12 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Next New Entry".to_string(),
+                    detail: "ALT+N".to_string(),
+                    action: MenuAction::NewEntry,
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Recent Entries".to_string(),
                     detail: "HIST".to_string(),
                     action: MenuAction::RecentEntries,
@@ -2600,22 +2614,13 @@ impl App {
 
         if key.modifiers.contains(KeyModifiers::ALT) {
             match key.code {
-                KeyCode::Left => {
-                    self.open_date(self.selected_date - ChronoDuration::days(1));
-                    self.flash_status(&format!("DATE {}.", self.selected_date.format("%Y-%m-%d")));
-                    return;
-                }
                 KeyCode::Right => {
                     self.open_date(self.selected_date + ChronoDuration::days(1));
                     self.flash_status(&format!("DATE {}.", self.selected_date.format("%Y-%m-%d")));
                     return;
                 }
-                KeyCode::Up => {
-                    self.open_adjacent_saved_entry(-1);
-                    return;
-                }
-                KeyCode::Down => {
-                    self.open_adjacent_saved_entry(1);
+                KeyCode::Char(ch) if ch.eq_ignore_ascii_case(&'n') => {
+                    self.open_next_new_entry();
                     return;
                 }
                 _ => {}
@@ -4258,9 +4263,10 @@ impl App {
             "1. Type immediately into today's entry.".to_string(),
             "2. Save with F2 or FILE -> Save Entry.".to_string(),
             "3. Press Esc to open menus if you don't remember keys.".to_string(),
-            "4. Use GO -> Open Calendar or Index Timeline to move through time.".to_string(),
-            "5. Use SEARCH -> Search Vault to find older entries fast.".to_string(),
-            "6. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
+            "4. Press Alt+N to jump to the next blank new-entry date.".to_string(),
+            "5. Use GO -> Open Calendar or Index Timeline for older entries.".to_string(),
+            "6. Use SEARCH -> Search Vault to find older entries fast.".to_string(),
+            "7. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
             String::new(),
             "The app autosaves encrypted drafts, but manual Save creates history.".to_string(),
             "F1 opens the key cheatsheet. HELP has first-run and operator guides.".to_string(),
@@ -4993,6 +4999,24 @@ impl App {
         self.flash_status(&format!("ENTRY {}.", target.format("%Y-%m-%d")));
     }
 
+    fn open_next_new_entry(&mut self) {
+        let mut target = self.selected_date + ChronoDuration::days(1);
+        if let Some(vault) = &self.vault {
+            let existing = match vault.list_entry_dates() {
+                Ok(dates) => dates.into_iter().collect::<BTreeSet<_>>(),
+                Err(_) => {
+                    self.flash_status("INDEX LOAD FAILED.");
+                    return;
+                }
+            };
+            while existing.contains(&target) {
+                target += ChronoDuration::days(1);
+            }
+        }
+        self.open_date(target);
+        self.flash_status(&format!("NEW ENTRY {}.", target.format("%Y-%m-%d")));
+    }
+
     fn perform_menu_action(&mut self, action: MenuAction, viewport_height: usize) {
         match action {
             MenuAction::CommandPalette => self.open_command_palette(),
@@ -5192,6 +5216,7 @@ impl App {
             MenuAction::RandomEntry => self.open_random_saved_entry(),
             MenuAction::PreviousEntry => self.open_adjacent_saved_entry(-1),
             MenuAction::NextEntry => self.open_adjacent_saved_entry(1),
+            MenuAction::NewEntry => self.open_next_new_entry(),
             MenuAction::Today => {
                 self.open_date(Local::now().date_naive());
                 self.flash_status("JUMPED TO TODAY.");
@@ -7008,7 +7033,7 @@ mod tests {
         tui::buffer::{MatchPos, TextBuffer},
         vault::{self, BackupEntry, ConflictHead, ConflictState, EntryMetadata, IndexEntry},
     };
-    use chrono::{Duration, NaiveDate, Utc};
+    use chrono::{Duration, Local, NaiveDate, Utc};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
     use secrecy::SecretString;
@@ -7076,7 +7101,7 @@ mod tests {
     fn app_respects_initial_open_date() {
         let initial = NaiveDate::from_ymd_opt(2026, 4, 2).expect("date");
         let app = App::with_initial_date(Some(initial));
-        assert!(app.header_date_time_label().starts_with("2026-04-02"));
+        assert!(app.header_entry_focus_label().contains("2026-04-02"));
     }
 
     #[test]
@@ -7109,6 +7134,79 @@ mod tests {
             app.menu(),
             Some(menu) if menu.selected_menu == MenuId::Search
         ));
+    }
+
+    #[test]
+    fn alt_n_opens_next_new_entry_date() {
+        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = App::with_initial_date(Some(start));
+        app.overlay = None;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT)),
+            20,
+        );
+
+        assert_eq!(app.selected_date, start + Duration::days(1));
+        assert_eq!(app.status_text(), Some("NEW ENTRY 2026-03-17."));
+    }
+
+    #[test]
+    fn alt_n_skips_existing_saved_dates() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+        let metadata = vault::create_vault(&root, &passphrase, None, "Test").expect("create");
+        let unlocked = vault::unlock_vault_with_device(&root, &passphrase, metadata.device_id)
+            .expect("unlock");
+        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        unlocked
+            .save_revision(start + Duration::days(1), "next day")
+            .expect("save next day");
+        unlocked
+            .save_revision(start + Duration::days(2), "day after")
+            .expect("save day after");
+
+        let mut app = App::with_initial_date(Some(start));
+        app.overlay = None;
+        app.vault_path = root;
+        app.vault = Some(unlocked);
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT)),
+            20,
+        );
+
+        assert_eq!(app.selected_date, start + Duration::days(3));
+        assert_eq!(app.status_text(), Some("NEW ENTRY 2026-03-19."));
+    }
+
+    #[test]
+    fn alt_left_no_longer_changes_selected_date() {
+        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = App::with_initial_date(Some(start));
+        app.overlay = None;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT)),
+            20,
+        );
+
+        assert_eq!(app.selected_date, start);
+    }
+
+    #[test]
+    fn header_focus_label_marks_today_archive_and_next() {
+        let today = Local::now().date_naive();
+        let mut app = App::with_initial_date(Some(today));
+        assert!(app.header_entry_focus_label().starts_with("TODAY "));
+
+        app.selected_date = today - Duration::days(1);
+        assert!(app.header_entry_focus_label().starts_with("ARCHIVE "));
+
+        app.selected_date = today + Duration::days(1);
+        assert!(app.header_entry_focus_label().starts_with("NEXT "));
     }
 
     #[test]
