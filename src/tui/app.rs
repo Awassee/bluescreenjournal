@@ -9,7 +9,7 @@ use crate::{
     search::{SearchIndex, SearchQuery, SearchResult},
     secure_fs, sync,
     tui::{
-        buffer::{MatchPos, TextBuffer},
+        buffer::{BufferStats, MatchPos, TextBuffer},
         calendar,
     },
     vault::{self, EntryMetadata, IndexEntry, UnlockedVault},
@@ -504,6 +504,8 @@ pub struct PickerOverlay {
     pub selected: usize,
     pub filter_input: String,
     pub empty_message: String,
+    filter_haystacks: Vec<String>,
+    filtered_indices: Vec<usize>,
 }
 
 impl PickerOverlay {
@@ -514,6 +516,18 @@ impl PickerOverlay {
     ) -> Self {
         Self {
             title: title.into(),
+            filter_haystacks: items
+                .iter()
+                .map(|item| {
+                    format!(
+                        "{} {} {}",
+                        item.title.to_ascii_lowercase(),
+                        item.detail.to_ascii_lowercase(),
+                        item.keywords.to_ascii_lowercase()
+                    )
+                })
+                .collect(),
+            filtered_indices: (0..items.len()).collect(),
             items,
             selected: 0,
             filter_input: String::new(),
@@ -521,63 +535,63 @@ impl PickerOverlay {
         }
     }
 
-    fn filtered_indices(&self) -> Vec<usize> {
+    fn recompute_filter(&mut self) {
         let trimmed = self.filter_input.trim().to_ascii_lowercase();
         if trimmed.is_empty() {
-            return (0..self.items.len()).collect();
+            self.filtered_indices = (0..self.items.len()).collect();
+            self.clamp_selection();
+            return;
         }
 
         let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
-        self.items
+        self.filtered_indices = self
+            .filter_haystacks
             .iter()
             .enumerate()
-            .filter_map(|(idx, item)| {
-                let haystack = format!(
-                    "{} {} {}",
-                    item.title.to_ascii_lowercase(),
-                    item.detail.to_ascii_lowercase(),
-                    item.keywords.to_ascii_lowercase()
-                );
+            .filter_map(|(idx, haystack)| {
                 tokens
                     .iter()
                     .all(|token| haystack.contains(token))
                     .then_some(idx)
             })
-            .collect()
+            .collect();
+        self.clamp_selection();
+    }
+
+    fn filtered_indices(&self) -> &[usize] {
+        &self.filtered_indices
     }
 
     fn clamp_selection(&mut self) {
-        let filtered_len = self.filtered_indices().len();
+        let filtered_len = self.filtered_indices.len();
         self.selected = self.selected.min(filtered_len.saturating_sub(1));
         if filtered_len == 0 {
             self.selected = 0;
         }
     }
 
-    pub fn window(&self, max_rows: usize) -> (Vec<usize>, usize, usize) {
-        let filtered = self.filtered_indices();
-        if filtered.is_empty() || max_rows == 0 {
-            return (filtered, 0, 0);
+    pub fn window(&self, max_rows: usize) -> (&[usize], usize, usize) {
+        if self.filtered_indices.is_empty() || max_rows == 0 {
+            return (&self.filtered_indices, 0, 0);
         }
         let max_rows = max_rows.max(1);
         let mut start = self.selected.saturating_sub(max_rows / 2);
-        let max_start = filtered.len().saturating_sub(max_rows);
+        let max_start = self.filtered_indices.len().saturating_sub(max_rows);
         if start > max_start {
             start = max_start;
         }
-        let end = (start + max_rows).min(filtered.len());
-        (filtered, start, end)
+        let end = (start + max_rows).min(self.filtered_indices.len());
+        (&self.filtered_indices, start, end)
     }
 
     fn selected_item(&self) -> Option<&PickerItem> {
-        let filtered = self.filtered_indices();
-        filtered
+        self.filtered_indices
             .get(self.selected)
             .and_then(|index| self.items.get(*index))
     }
 
     fn move_selection(&mut self, delta: isize) {
-        let filtered_len = self.filtered_indices().len();
+        let filtered_len = self.filtered_indices.len();
         if filtered_len == 0 {
             self.selected = 0;
             return;
@@ -597,17 +611,23 @@ impl PickerOverlay {
     fn push_filter_char(&mut self, ch: char) {
         self.filter_input.push(ch);
         self.selected = 0;
+        self.recompute_filter();
     }
 
     fn pop_filter_char(&mut self) {
         self.filter_input.pop();
-        self.clamp_selection();
+        self.recompute_filter();
     }
 
     fn wipe(&mut self) {
         self.title.zeroize();
         self.filter_input.zeroize();
         self.empty_message.zeroize();
+        for haystack in &mut self.filter_haystacks {
+            haystack.zeroize();
+        }
+        self.filter_haystacks.clear();
+        self.filtered_indices.clear();
         for item in &mut self.items {
             item.title.zeroize();
             item.detail.zeroize();
@@ -1544,6 +1564,23 @@ enum SaveKind {
     Autosaved,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DocumentStats {
+    lines: usize,
+    words: usize,
+    chars: usize,
+}
+
+impl From<BufferStats> for DocumentStats {
+    fn from(value: BufferStats) -> Self {
+        Self {
+            lines: value.lines,
+            words: value.words,
+            chars: value.chars,
+        }
+    }
+}
+
 pub struct App {
     config: AppConfig,
     buffer: TextBuffer,
@@ -1578,6 +1615,7 @@ pub struct App {
     session_started_at: Instant,
     recent_dates: Vec<NaiveDate>,
     search_history: Vec<String>,
+    document_stats: DocumentStats,
 }
 
 impl Default for App {
@@ -1593,6 +1631,7 @@ impl App {
 
     pub fn with_initial_date(initial_date: Option<NaiveDate>) -> Self {
         let config = AppConfig::load_or_default();
+        let initial_buffer = TextBuffer::new();
         let vault_path = if config.vault_path.as_os_str().is_empty() {
             default_vault_path()
         } else {
@@ -1609,7 +1648,7 @@ impl App {
 
         let mut app = Self {
             config,
-            buffer: TextBuffer::new(),
+            buffer: initial_buffer,
             closing_thought: None,
             entry_metadata: EntryMetadata::default(),
             selected_date: initial_date.unwrap_or_else(|| Local::now().date_naive()),
@@ -1641,6 +1680,11 @@ impl App {
             session_started_at: Instant::now(),
             recent_dates: Vec::new(),
             search_history: Vec::new(),
+            document_stats: DocumentStats::from(BufferStats {
+                lines: 1,
+                words: 0,
+                chars: 0,
+            }),
         };
         app.try_keychain_auto_unlock();
         app
@@ -1861,14 +1905,11 @@ impl App {
     }
 
     pub fn document_stats_label(&self) -> String {
-        let lines = self.buffer.line_count();
-        let text = self.buffer.to_text();
-        let words = self.document_word_count();
-        let chars = text.chars().count();
+        let stats = self.document_stats;
         if let Some(goal) = self.config.daily_word_goal {
-            format!("L{lines} W{words}/{goal} C{chars}")
+            format!("L{} W{}/{goal} C{}", stats.lines, stats.words, stats.chars)
         } else {
-            format!("L{lines} W{words} C{chars}")
+            format!("L{} W{} C{}", stats.lines, stats.words, stats.chars)
         }
     }
 
@@ -2588,6 +2629,7 @@ impl App {
 
         if mutated {
             self.dirty = true;
+            self.refresh_document_stats();
             self.refresh_find_matches();
         }
         self.ensure_cursor_visible(viewport_height);
@@ -2992,6 +3034,9 @@ impl App {
                         .buffer
                         .replace_all(&confirm.find_text, &confirm.replace_text);
                     self.dirty = replaced > 0;
+                    if replaced > 0 {
+                        self.refresh_document_stats();
+                    }
                     self.refresh_find_matches();
                     self.flash_status(&format!("REPLACED {replaced}."));
                     keep_overlay = false;
@@ -3397,12 +3442,14 @@ impl App {
 
         let Some(vault) = &self.vault else {
             self.buffer = TextBuffer::new();
+            self.refresh_document_stats();
             return;
         };
 
         match vault.load_date_state(self.selected_date) {
             Ok(state) => {
                 self.buffer = TextBuffer::from_text(state.revision_text.as_deref().unwrap_or(""));
+                self.refresh_document_stats();
                 self.closing_thought = state.revision_closing_thought;
                 self.entry_metadata = state.revision_entry_metadata;
                 self.scroll_row = 0;
@@ -3422,6 +3469,7 @@ impl App {
             }
             Err(_) => {
                 self.buffer = TextBuffer::new();
+                self.refresh_document_stats();
                 self.closing_thought = None;
                 self.entry_metadata = EntryMetadata::default();
                 self.scroll_row = 0;
@@ -3511,7 +3559,11 @@ impl App {
     }
 
     fn document_word_count(&self) -> usize {
-        self.buffer.to_text().split_whitespace().count()
+        self.document_stats.words
+    }
+
+    fn refresh_document_stats(&mut self) {
+        self.document_stats = self.buffer.stats().into();
     }
 
     fn favorite_dates(&self) -> BTreeSet<NaiveDate> {
@@ -3580,6 +3632,7 @@ impl App {
 
     fn finish_buffer_menu_edit(&mut self, viewport_height: usize, status: &str) {
         self.dirty = true;
+        self.refresh_document_stats();
         self.refresh_find_matches();
         self.ensure_cursor_visible(viewport_height);
         self.flash_status(status);
@@ -5719,6 +5772,7 @@ impl App {
         let (resolved_text, recovered) =
             resolve_recovery_text(use_draft, self.buffer.to_text().as_str(), draft_text);
         self.buffer = TextBuffer::from_text(&resolved_text);
+        self.refresh_document_stats();
         if use_draft {
             if let Some(closing_thought) = self.pending_recovery_closing.take() {
                 self.closing_thought = closing_thought;
@@ -6025,6 +6079,7 @@ impl App {
 
     fn wipe_entry_buffer(&mut self) {
         self.buffer.wipe();
+        self.refresh_document_stats();
         zeroize_optional_string(&mut self.closing_thought);
         wipe_entry_metadata(&mut self.entry_metadata);
         self.scroll_row = 0;
@@ -6066,6 +6121,7 @@ impl App {
     ) {
         self.wipe_entry_buffer();
         self.buffer = TextBuffer::from_text(text);
+        self.refresh_document_stats();
         self.closing_thought = closing_thought;
         self.entry_metadata = entry_metadata;
     }
@@ -6080,6 +6136,7 @@ impl App {
         };
         self.buffer.replace_at(&current, &confirm.replace_text);
         self.dirty = true;
+        self.refresh_document_stats();
         confirm.matches = self.buffer.find(&confirm.find_text);
         if confirm.matches.is_empty() {
             self.refresh_find_matches();
@@ -6135,6 +6192,7 @@ impl App {
             MacroActionConfig::InsertTemplate { text } => {
                 self.buffer.insert_text(&text);
                 self.dirty = true;
+                self.refresh_document_stats();
                 self.refresh_find_matches();
                 self.ensure_cursor_visible(viewport_height);
                 self.flash_status("MACRO INSERTED.");
@@ -6148,6 +6206,7 @@ impl App {
                     );
                     self.buffer.insert_text(&template);
                     self.dirty = true;
+                    self.refresh_document_stats();
                     self.refresh_find_matches();
                     self.ensure_cursor_visible(viewport_height);
                     self.flash_status("DATE HEADER INSERTED.");
@@ -7303,6 +7362,7 @@ mod tests {
         let mut app = App::with_initial_date(None);
         app.config.daily_word_goal = Some(5);
         app.buffer = TextBuffer::from_text("one two three");
+        app.refresh_document_stats();
 
         assert_eq!(app.word_goal_status_label(), "GOAL 3/5");
         assert!(app.document_stats_label().contains("W3/5"));
@@ -7429,6 +7489,7 @@ mod tests {
         app.vault_path = root;
         app.vault = Some(unlocked);
         app.buffer = TextBuffer::from_text("secret body");
+        app.refresh_document_stats();
         app.closing_thought = Some("secret closing".to_string());
         app.find_query = Some("secret".to_string());
         app.pending_search_jump = Some(SearchJump {

@@ -7,6 +7,13 @@ pub struct MatchPos {
     pub end_col: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BufferStats {
+    pub lines: usize,
+    pub words: usize,
+    pub chars: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct TextBuffer {
     lines: Vec<String>,
@@ -40,6 +47,21 @@ impl TextBuffer {
 
     pub fn to_text(&self) -> String {
         self.lines.join("\n")
+    }
+
+    pub fn stats(&self) -> BufferStats {
+        let lines = self.lines.len();
+        let mut words = 0usize;
+        let mut chars = lines.saturating_sub(1);
+        for line in &self.lines {
+            words += line.split_whitespace().count();
+            chars += line.chars().count();
+        }
+        BufferStats {
+            lines,
+            words,
+            chars,
+        }
     }
 
     pub fn line_count(&self) -> usize {
