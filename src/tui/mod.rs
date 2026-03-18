@@ -658,7 +658,7 @@ fn draw_unlock_overlay(
 fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
         Line::from("Classic 80x25 workspace. Type immediately when no menu or prompt is open."),
-        Line::from("Esc opens menus. Arrows move. Enter runs. Ctrl+K = commands."),
+        Line::from("Esc opens menus. Arrows move. Enter selects. Ctrl+K = commands."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
         Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),

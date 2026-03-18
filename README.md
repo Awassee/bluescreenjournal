@@ -239,7 +239,7 @@ Practical implications:
 
 ## Built-in guides and operator help
 
-These commands are intended to make the product self-describing after install:
+Daily use is menu-first inside the TUI. These CLI commands are optional references:
 
 ```bash
 bsj --help

@@ -218,9 +218,9 @@ ensure_path_hint() {
     return
   fi
 
-  warn "$path_entry is not on PATH in this shell."
+  warn "Install finished, but this shell cannot find bsj yet ($path_entry is not on PATH)."
   persist_path_update "$path_entry"
-  printf "Run now in this terminal:\n  export PATH=\"%s:\$PATH\"\n" "$path_entry"
+  printf "Open a new terminal window, or run this now:\n  export PATH=\"%s:\$PATH\"\n" "$path_entry"
 }
 
 append_path_line_if_missing() {
@@ -587,10 +587,11 @@ install_prebuilt() {
   cat <<EOF
 
 Next steps:
-  1. $final_bin_dir/bsj
-  2. First launch opens the in-app setup wizard automatically (no parameters needed)
-  3. Use the top menu bar in the app for Setup, Settings, Help, and Sync
-  4. Optional CLI reference: man $final_man_dir/bsj.1
+  1. Launch BlueScreen Journal: $final_bin_dir/bsj
+  2. First launch starts the setup wizard automatically.
+  3. In the app, press Esc to open menus (FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP).
+  4. Need key reminders? Press F1 for the keyboard cheat sheet.
+  5. Optional CLI reference: man $final_man_dir/bsj.1
 EOF
 }
 
@@ -648,9 +649,11 @@ install_from_source() {
   cat <<EOF
 
 Next steps:
-  1. $bsj_bin
-  2. First launch opens the in-app setup wizard automatically (no parameters needed)
-  3. Use the top menu bar in the app for Setup, Settings, Help, and Sync
+  1. Launch BlueScreen Journal: $bsj_bin
+  2. First launch starts the setup wizard automatically.
+  3. In the app, press Esc to open menus (FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP).
+  4. Need key reminders? Press F1 for the keyboard cheat sheet.
+  5. Optional CLI reference: $bsj_bin --help
 EOF
 }
 

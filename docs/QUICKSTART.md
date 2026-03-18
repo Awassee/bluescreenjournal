@@ -43,8 +43,15 @@ Default vault path:
 ```bash
 bsj
 bsj verify
-bsj settings
+bsj doctor --unlock
 ```
+
+In-product checks (menu-first):
+
+- `SETUP -> Settings Summary`
+- `TOOLS -> Doctor Report`
+
+CLI checks above are optional operator diagnostics.
 
 ## 5. Learn the core movement keys
 

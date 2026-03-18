@@ -49,7 +49,7 @@ Resize to at least `80x25`. The app warns instead of trying to render into an un
 
 ## Where should I start if I am stuck?
 
-1. `bsj doctor`
-2. `bsj doctor --unlock`
-3. `bsj settings`
+1. In the app: `TOOLS -> Doctor Report`
+2. In the app: `SETUP -> Settings Summary`
+3. Optional CLI diagnostics: `bsj doctor --unlock`
 4. `SUPPORT.md`

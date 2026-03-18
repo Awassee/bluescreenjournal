@@ -40,8 +40,9 @@ If you are new to BlueScreen Journal, use this page to choose the right next doc
 2. Run `bsj`
 3. Complete the setup wizard
 4. Save one entry with `F2`
-5. Run `bsj guide product`
-6. Run `bsj guide quickstart`
+5. Press `Esc`, then open `HELP -> First 2 Minutes`
+6. Open `SETUP -> Settings Summary` to confirm vault and sync paths
+7. Optional CLI docs: `bsj guide quickstart` and `bsj guide product`
 
 ## Built-in guides
 

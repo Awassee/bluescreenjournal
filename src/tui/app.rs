@@ -4206,16 +4206,14 @@ impl App {
             String::new(),
             "First 2 minutes:".to_string(),
             "1. Type immediately into today's entry.".to_string(),
-            "2. Press F2 for your first encrypted saved revision.".to_string(),
-            "3. Use EDIT -> Entry Metadata for tags, people, project, and mood.".to_string(),
+            "2. Save with F2 or FILE -> Save Entry.".to_string(),
+            "3. Press Esc to open menus if you don't remember keys.".to_string(),
             "4. Use GO -> Open Calendar or Index Timeline to move through time.".to_string(),
-            "5. Use EDIT for line tools, time stamps, and quick writing helpers.".to_string(),
-            "6. Use GO favorites and random jump once you have some history.".to_string(),
-            "7. Use TOOLS -> Sync Center before trusting a new sync target.".to_string(),
-            "8. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
+            "5. Use SEARCH -> Search Vault to find older entries fast.".to_string(),
+            "6. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
             String::new(),
             "The app autosaves encrypted drafts, but manual Save creates history.".to_string(),
-            "F1 opens the cheatsheet. Esc opens the full DOS-style menu bar.".to_string(),
+            "F1 opens the key cheatsheet. HELP has first-run and operator guides.".to_string(),
         ];
         self.open_info_overlay("First 2 Minutes", lines.join("\n"));
     }
