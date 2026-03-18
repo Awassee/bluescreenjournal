@@ -29,8 +29,8 @@ use ratatui::{
 };
 use std::{env, io, sync::OnceLock, time::Duration};
 
-const MIN_WIDTH: u16 = 80;
-const MIN_HEIGHT: u16 = 25;
+const MIN_WIDTH: u16 = 56;
+const MIN_HEIGHT: u16 = 18;
 const DOS_WIDTH: u16 = 80;
 const DOS_HEIGHT: u16 = 25;
 
@@ -67,7 +67,7 @@ fn run_loop(
     while !app.should_quit() {
         terminal.draw(|frame| draw(frame, &app))?;
         let area = terminal.size()?;
-        let screen = canonical_screen_rect(Rect::new(0, 0, area.width, area.height));
+        let screen = workspace_rect(Rect::new(0, 0, area.width, area.height));
         let viewport_height = app.editor_viewport_height(screen.height.saturating_sub(3) as usize);
 
         if event::poll(poll_timeout)? {
@@ -93,7 +93,8 @@ fn draw(frame: &mut Frame<'_>, app: &App) {
     }
 
     frame.render_widget(Block::new().style(screen_style()), area);
-    let screen = canonical_screen_rect(area);
+    let screen = workspace_rect(area);
+    let compact_mode = screen.width < DOS_WIDTH || screen.height < DOS_HEIGHT;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -109,10 +110,10 @@ fn draw(frame: &mut Frame<'_>, app: &App) {
     let body_area = chunks[2];
     let footer_area = chunks[3];
 
-    draw_header(frame, app, header_area);
+    draw_header(frame, app, header_area, compact_mode);
     draw_menu_bar(frame, app, menu_area);
     let editor_cursor = draw_editor(frame, app, body_area);
-    draw_footer(frame, app, footer_area);
+    draw_footer(frame, app, footer_area, compact_mode);
 
     draw_menu_dropdown(frame, app, menu_area, body_area);
     let overlay_cursor = draw_overlay(frame, app, body_area);
@@ -121,12 +122,13 @@ fn draw(frame: &mut Frame<'_>, app: &App) {
     }
 }
 
-fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool) {
     if area.width == 0 || area.height == 0 {
         return;
     }
     let left = format!(
-        "PERSONAL JOURNAL{}  {}  ENTRY NO. {}",
+        "PERSONAL JOURNAL{}{}  {}  ENTRY NO. {}",
+        if compact_mode { " [COMPACT]" } else { "" },
         if app.favorite_marker().is_empty() {
             ""
         } else {
@@ -391,7 +393,7 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
     Some((x, y))
 }
 
-fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -408,7 +410,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     } else {
         format!("{context} | {status}")
     };
-    let strip = footer_legend(app, area.width as usize);
+    let strip = footer_legend(app, area.width as usize, compact_mode);
     let content = join_left_right(area.width as usize, &left, &strip);
     frame.render_widget(
         Paragraph::new(Line::from(content)).style(
@@ -420,7 +422,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
 }
 
-fn footer_legend(app: &App, width: usize) -> String {
+fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
     if !app.show_footer_legend_enabled() {
         return "Ctrl+K Commands".to_string();
     }
@@ -439,12 +441,18 @@ fn footer_legend(app: &App, width: usize) -> String {
         return "Esc close | Enter confirm | F1 keys".to_string();
     }
 
-    if width >= 120 {
+    let legend = if width >= 120 {
         "Esc Menus | Alt+F/E/S/G/T/U/H menu | F1 Help | F2 Save | F5 Search | F10 Quit".to_string()
     } else if width >= 90 {
         "Esc Menus | Alt+F/E/S/G/T/U/H | F1 Help | F2 Save | F10 Quit".to_string()
     } else {
         "Esc Menus | F1 Help | F2 Save | F10 Quit".to_string()
+    };
+
+    if compact_mode && width >= 100 {
+        format!("{legend} | Compact layout")
+    } else {
+        legend
     }
 }
 
@@ -462,12 +470,17 @@ fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
         ),
         centered_line(
             area.width as usize,
-            "Resize the window, then continue typing.",
+            "Current size is below the usable minimum.",
         ),
         centered_line(
             area.width as usize,
-            "Resize to restore menus, prompts, and editing.",
+            &format!(
+                "Need at least {}x{} to edit. {}x{} is recommended.",
+                MIN_WIDTH, MIN_HEIGHT, DOS_WIDTH, DOS_HEIGHT
+            ),
         ),
+        Line::from(""),
+        centered_line(area.width as usize, "Resize, then press Esc for menus."),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
@@ -1630,6 +1643,14 @@ fn canonical_screen_rect(area: Rect) -> Rect {
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     Rect::new(x, y, width, height)
+}
+
+fn workspace_rect(area: Rect) -> Rect {
+    if area.width >= DOS_WIDTH && area.height >= DOS_HEIGHT {
+        canonical_screen_rect(area)
+    } else {
+        area
+    }
 }
 
 fn popup_rect(area: Rect, width: u16, height: u16) -> Rect {

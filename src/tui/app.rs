@@ -1636,6 +1636,7 @@ pub struct App {
     search_scope_from: String,
     search_scope_to: String,
     document_stats: DocumentStats,
+    menu_coach_shown: bool,
 }
 
 impl Default for App {
@@ -1707,6 +1708,7 @@ impl App {
                 words: 0,
                 chars: 0,
             }),
+            menu_coach_shown: false,
         };
         app.try_keychain_auto_unlock();
         app
@@ -3636,6 +3638,10 @@ impl App {
 
     fn open_menu(&mut self, menu: MenuId) {
         self.menu = Some(MenuState::new(menu, self));
+        if !self.menu_coach_shown {
+            self.menu_coach_shown = true;
+            self.flash_status("MENU OPEN. ARROWS MOVE, ENTER SELECTS.");
+        }
     }
 
     fn open_info_overlay(&mut self, title: impl Into<String>, text: String) {
@@ -7897,10 +7903,22 @@ mod tests {
     fn small_terminal_warning_reports_current_size() {
         let app = App::with_initial_date(None);
 
-        let rendered = render_app(&app, 60, 20);
+        let rendered = render_app(&app, 50, 16);
 
         assert!(rendered.contains("TERMINAL TOO SMALL"));
-        assert!(rendered.contains("CURRENT 60x20"));
+        assert!(rendered.contains("CURRENT 50x16"));
+        assert!(rendered.contains("Need at least"));
+    }
+
+    #[test]
+    fn compact_terminal_still_renders_editor_and_menu_bar() {
+        let app = App::with_initial_date(None);
+
+        let rendered = render_app(&app, 60, 20);
+
+        assert!(!rendered.contains("TERMINAL TOO SMALL"));
+        assert!(rendered.contains("PERSONAL JOURNAL [COMPACT]"));
+        assert!(rendered.contains("FILE"));
     }
 
     #[test]
