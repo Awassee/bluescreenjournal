@@ -1,6 +1,7 @@
+use crate::secure_fs;
 use log::{LevelFilter, Log, Metadata, Record};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::File,
     io::Write,
     path::PathBuf,
     sync::{Mutex, OnceLock},
@@ -10,14 +11,7 @@ static LOGGER: OnceLock<FileLogger> = OnceLock::new();
 
 pub fn init(debug: bool) -> Result<PathBuf, String> {
     let path = log_file_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create log directory: {error}"))?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
+    let file = secure_fs::open_private_log_file(&path)
         .map_err(|error| format!("failed to open log file: {error}"))?;
 
     let logger = FileLogger {

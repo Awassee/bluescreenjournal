@@ -1,8 +1,10 @@
-use crate::vault::{VaultError, VaultMetadata, VaultResult};
+use crate::{
+    secure_fs,
+    vault::{VaultError, VaultMetadata, VaultResult},
+};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{Client as S3Client, primitives::ByteStream};
 use chrono::NaiveDate;
-use rand::{RngCore, rngs::OsRng};
 use reqwest::{
     Method, StatusCode, Url,
     blocking::{Client as HttpClient, RequestBuilder},
@@ -11,7 +13,6 @@ use roxmltree::Document;
 use std::{
     collections::{BTreeSet, HashSet},
     env, fs,
-    io::Write,
     path::{Component, Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -276,12 +277,7 @@ impl WebDavBackend {
                 "missing BSJ_WEBDAV_URL or --remote https://server/path/".to_string()
             })?,
         };
-        let mut base_url =
-            Url::parse(&raw_url).map_err(|error| format!("invalid WebDAV URL: {error}"))?;
-        match base_url.scheme() {
-            "http" | "https" => {}
-            _ => return Err("WebDAV URL must use http:// or https://".to_string()),
-        }
+        let mut base_url = validate_webdav_base_url(&raw_url, insecure_webdav_http_allowed())?;
         if !base_url.path().ends_with('/') {
             let normalized = format!("{}/", base_url.path());
             base_url.set_path(&normalized);
@@ -807,33 +803,56 @@ fn sync_key_to_path(root: &Path, key: &str) -> VaultResult<PathBuf> {
 }
 
 fn write_local_key(root: &Path, key: &str, bytes: &[u8]) -> VaultResult<()> {
+    ensure_local_sync_parent_dirs(root, key)?;
     atomic_write(&sync_key_to_path(root, key)?, bytes)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> VaultResult<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| VaultError::Sync("missing sync file parent directory".to_string()))?;
-    fs::create_dir_all(parent)?;
+    secure_fs::atomic_write_private(path, bytes).map_err(Into::into)
+}
 
-    let mut suffix = [0u8; 4];
-    OsRng.fill_bytes(&mut suffix);
-    let tmp_path = parent.join(format!(
-        ".{}.tmp-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("sync"),
-        hex::encode(suffix)
-    ));
+fn ensure_local_sync_parent_dirs(root: &Path, key: &str) -> VaultResult<()> {
+    if key == "vault.json" {
+        return Ok(());
+    }
 
-    let mut file = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&tmp_path)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    fs::rename(tmp_path, path)?;
+    if key.starts_with("devices/") {
+        secure_fs::ensure_private_dir(&root.join("devices"))?;
+        return Ok(());
+    }
+
+    let parts = key.split('/').collect::<Vec<_>>();
+    if parts.len() == 4 && parts[0] == "entries" {
+        let entries_root = root.join("entries");
+        secure_fs::ensure_private_dir(&entries_root)?;
+        let year_dir = entries_root.join(parts[1]);
+        secure_fs::ensure_private_dir(&year_dir)?;
+        secure_fs::ensure_private_dir(&year_dir.join(parts[2]))?;
+    }
+
     Ok(())
+}
+
+fn insecure_webdav_http_allowed() -> bool {
+    matches!(
+        env::var("BSJ_WEBDAV_ALLOW_INSECURE_HTTP")
+            .ok()
+            .map(|value| value.to_ascii_lowercase()),
+        Some(value) if matches!(value.as_str(), "1" | "true" | "yes")
+    )
+}
+
+fn validate_webdav_base_url(raw_url: &str, allow_insecure_http: bool) -> Result<Url, String> {
+    let base_url = Url::parse(raw_url).map_err(|error| format!("invalid WebDAV URL: {error}"))?;
+    match base_url.scheme() {
+        "https" => Ok(base_url),
+        "http" if allow_insecure_http => Ok(base_url),
+        "http" => Err(
+            "WebDAV URL must use https:// by default. Set BSJ_WEBDAV_ALLOW_INSECURE_HTTP=1 only for trusted testing."
+                .to_string(),
+        ),
+        _ => Err("WebDAV URL must use http:// or https://".to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -1004,6 +1023,18 @@ mod tests {
         let backend =
             WebDavBackend::from_remote(Some("https://example.com/bsj-test")).expect("backend");
         assert_eq!(backend.base_url.as_str(), "https://example.com/bsj-test/");
+    }
+
+    #[test]
+    fn insecure_webdav_http_is_rejected_by_default() {
+        let error = validate_webdav_base_url("http://example.com/bsj/", false).expect_err("http");
+        assert!(error.contains("https://"));
+    }
+
+    #[test]
+    fn insecure_webdav_http_can_be_explicitly_allowed() {
+        let url = validate_webdav_base_url("http://example.com/bsj/", true).expect("allow http");
+        assert_eq!(url.as_str(), "http://example.com/bsj/");
     }
 
     #[test]

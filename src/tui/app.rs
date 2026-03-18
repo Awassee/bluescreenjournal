@@ -1,7 +1,10 @@
 use crate::{
     config::{self, AppConfig, MacroActionConfig, MacroCommandConfig, default_vault_path},
+    doctor,
+    help::{self, EnvironmentSettings},
+    logging,
     search::{SearchIndex, SearchQuery, SearchResult},
-    sync,
+    secure_fs, sync,
     tui::{
         buffer::{MatchPos, TextBuffer},
         calendar,
@@ -44,9 +47,11 @@ pub enum Overlay {
     Search(SearchOverlay),
     ReplacePrompt(ReplacePrompt),
     ReplaceConfirm(ReplaceConfirm),
+    ExportPrompt(ExportPrompt),
     SettingPrompt(SettingPrompt),
     Index(IndexState),
     SyncStatus(SyncStatusOverlay),
+    Info(InfoOverlay),
     RecoverDraft {
         draft_text: String,
     },
@@ -350,6 +355,134 @@ impl SearchOverlay {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InfoOverlay {
+    pub title: String,
+    pub lines: Vec<String>,
+    pub scroll: usize,
+}
+
+impl InfoOverlay {
+    fn from_text(title: impl Into<String>, text: String) -> Self {
+        let mut lines = text
+            .lines()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            lines.push(String::new());
+        }
+        Self {
+            title: title.into(),
+            lines,
+            scroll: 0,
+        }
+    }
+
+    pub fn window(&self, max_rows: usize) -> (usize, usize) {
+        if self.lines.is_empty() || max_rows == 0 {
+            return (0, 0);
+        }
+        let max_rows = max_rows.max(1);
+        let max_start = self.lines.len().saturating_sub(max_rows);
+        let start = self.scroll.min(max_start);
+        let end = (start + max_rows).min(self.lines.len());
+        (start, end)
+    }
+
+    fn move_scroll(&mut self, delta: isize) {
+        if self.lines.is_empty() {
+            self.scroll = 0;
+            return;
+        }
+        let max_scroll = self.lines.len().saturating_sub(1);
+        let next = self.scroll as isize + delta;
+        self.scroll = next.clamp(0, max_scroll as isize) as usize;
+    }
+
+    fn page_up(&mut self, amount: usize) {
+        self.move_scroll(-(amount.max(1) as isize));
+    }
+
+    fn page_down(&mut self, amount: usize) {
+        self.move_scroll(amount.max(1) as isize);
+    }
+
+    fn wipe(&mut self) {
+        self.title.zeroize();
+        for line in &mut self.lines {
+            line.zeroize();
+        }
+        self.lines.clear();
+        self.scroll = 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportFormatUi {
+    PlainText,
+    Markdown,
+}
+
+impl ExportFormatUi {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PlainText => "TEXT",
+            Self::Markdown => "MARKDOWN",
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::PlainText => "txt",
+            Self::Markdown => "md",
+        }
+    }
+
+    fn toggle(&mut self) {
+        *self = match self {
+            Self::PlainText => Self::Markdown,
+            Self::Markdown => Self::PlainText,
+        };
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportPrompt {
+    pub format: ExportFormatUi,
+    pub path_input: String,
+    pub error: Option<String>,
+}
+
+impl ExportPrompt {
+    fn new(date: NaiveDate) -> Self {
+        let format = ExportFormatUi::PlainText;
+        Self {
+            format,
+            path_input: default_export_path(date, format).display().to_string(),
+            error: None,
+        }
+    }
+
+    fn toggle_format(&mut self, date: NaiveDate) {
+        let old_extension = self.format.extension();
+        self.format.toggle();
+        let new_extension = self.format.extension();
+        if self.path_input.ends_with(&format!(".{old_extension}")) {
+            self.path_input
+                .truncate(self.path_input.len().saturating_sub(old_extension.len()));
+            self.path_input.push_str(new_extension);
+        } else if self.path_input.trim().is_empty() {
+            self.path_input = default_export_path(date, self.format).display().to_string();
+        }
+        self.error = None;
+    }
+
+    fn wipe(&mut self) {
+        self.path_input.zeroize();
+        zeroize_optional_string(&mut self.error);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexState {
     pub items: Vec<IndexEntry>,
     pub selected: usize,
@@ -543,7 +676,7 @@ pub enum SettingField {
 }
 
 impl SettingField {
-    fn key(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             SettingField::VaultPath => "vault_path",
             SettingField::SyncTargetPath => "sync_target_path",
@@ -639,10 +772,14 @@ impl SettingPrompt {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuAction {
     Save,
+    Export,
+    BackupHistory,
     Backup,
+    DoctorReport,
     Lock,
     Quit,
     Find,
+    ClearFind,
     Replace,
     ClosingThought,
     ToggleReveal,
@@ -651,10 +788,14 @@ pub enum MenuAction {
     FindPrevious,
     RebuildSearchIndex,
     Dates,
+    PreviousEntry,
+    NextEntry,
     Today,
     Index,
     Sync,
     Verify,
+    SettingsSummary,
+    QuickStart,
     EditSetting(SettingField),
     Help,
 }
@@ -702,21 +843,39 @@ impl MenuState {
     }
 
     fn move_item(&mut self, delta: isize, app: &App) {
-        let len = app.menu_items(self.selected_menu).len();
+        let items = app.menu_items(self.selected_menu);
+        let len = items.len();
         if len == 0 {
             self.selected_item = 0;
             return;
         }
-        let next = (self.selected_item as isize + delta).clamp(0, len as isize - 1) as usize;
-        self.selected_item = next;
+        let direction = if delta >= 0 { 1isize } else { -1isize };
+        let mut next = (self.selected_item as isize + delta).clamp(0, len as isize - 1);
+        while next >= 0 && next < len as isize {
+            if items[next as usize].enabled {
+                self.selected_item = next as usize;
+                return;
+            }
+            next += direction;
+        }
     }
 
     fn clamp_selection(&mut self, app: &App) {
-        let len = app.menu_items(self.selected_menu).len();
+        let items = app.menu_items(self.selected_menu);
+        let len = items.len();
         if len == 0 {
             self.selected_item = 0;
         } else if self.selected_item >= len {
             self.selected_item = len - 1;
+        }
+
+        if !items
+            .get(self.selected_item)
+            .map(|item| item.enabled)
+            .unwrap_or(false)
+            && let Some(enabled_idx) = items.iter().position(|item| item.enabled)
+        {
+            self.selected_item = enabled_idx;
         }
     }
 }
@@ -1004,6 +1163,100 @@ impl App {
             .unwrap_or_default()
     }
 
+    pub fn footer_mode_label(&self) -> &'static str {
+        if self.menu.is_some() {
+            "MENU"
+        } else {
+            match self.overlay.as_ref() {
+                Some(Overlay::SetupWizard(_)) => "SETUP",
+                Some(Overlay::UnlockPrompt { .. }) => "UNLOCK",
+                Some(Overlay::Help) => "HELP",
+                Some(Overlay::DatePicker(_)) => "DATES",
+                Some(Overlay::FindPrompt { .. }) => "FIND",
+                Some(Overlay::ClosingPrompt { .. }) => "CLOSING",
+                Some(Overlay::ConflictChoice(_)) => "CONFLICT",
+                Some(Overlay::MergeDiff(_)) => "MERGE",
+                Some(Overlay::Search(_)) => "SEARCH",
+                Some(Overlay::ReplacePrompt(_)) | Some(Overlay::ReplaceConfirm(_)) => "REPLACE",
+                Some(Overlay::ExportPrompt(_)) => "EXPORT",
+                Some(Overlay::SettingPrompt(_)) => "SETUP",
+                Some(Overlay::Index(_)) => "INDEX",
+                Some(Overlay::SyncStatus(_)) => "SYNC",
+                Some(Overlay::Info(_)) => "INFO",
+                Some(Overlay::RecoverDraft { .. }) => "RECOVER",
+                Some(Overlay::QuitConfirm) => "QUIT",
+                None if self.vault.is_some() => "EDIT",
+                None => "LOCKED",
+            }
+        }
+    }
+
+    pub fn footer_dirty_label(&self) -> &'static str {
+        if self.dirty { "MOD" } else { "VIEW" }
+    }
+
+    pub fn cursor_status_label(&self) -> String {
+        let (row, col) = self.buffer.cursor();
+        format!("LN {:>3} COL {:>3}", row + 1, col + 1)
+    }
+
+    pub fn footer_context_label(&self) -> String {
+        if let Some(menu) = &self.menu {
+            let items = self.menu_items(menu.selected_menu);
+            if items.is_empty() {
+                return menu.selected_menu.title().to_string();
+            }
+            return format!(
+                "{} {}/{}",
+                menu.selected_menu.title(),
+                menu.selected_item + 1,
+                items.len()
+            );
+        }
+
+        match self.overlay.as_ref() {
+            Some(Overlay::DatePicker(picker)) => format!(
+                "{} {}",
+                picker.selected_date.format("%Y-%m-%d"),
+                if picker.has_entry(picker.selected_date) {
+                    "SAVED"
+                } else {
+                    "BLANK"
+                }
+            ),
+            Some(Overlay::Search(search)) if !search.results.is_empty() => {
+                format!("RESULT {}/{}", search.selected + 1, search.results.len())
+            }
+            Some(Overlay::Index(index)) if !index.items.is_empty() => {
+                format!("ENTRY {}/{}", index.selected + 1, index.items.len())
+            }
+            Some(Overlay::Info(info)) => format!(
+                "LINES {}-{}",
+                info.scroll + 1,
+                (info.scroll + 1).min(info.lines.len())
+            ),
+            _ if !self.find_matches.is_empty() => {
+                format!(
+                    "FIND {}/{}",
+                    self.current_match_idx + 1,
+                    self.find_matches.len()
+                )
+            }
+            _ => self.cursor_status_label(),
+        }
+    }
+
+    pub fn empty_state_lines(&self) -> [&'static str; 6] {
+        [
+            "START TYPING TO WRITE TODAY'S ENTRY",
+            "Esc opens menus for FILE / EDIT / SEARCH / GO / TOOLS / SETUP / HELP",
+            "F2 saves an encrypted revision. Autosave writes an encrypted draft.",
+            "F3 calendar  F5 vault search  F7 index  F8 sync",
+            "F9 closing thought  F11 reveal codes  F12 lock",
+            "F1 shows the quick help sheet.",
+        ]
+    }
+
     fn setting_menu_item(&self, field: SettingField) -> MenuItem {
         MenuItem {
             label: field.label().to_string(),
@@ -1023,9 +1276,21 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Export Current".to_string(),
+                    detail: "TXT/MD".to_string(),
+                    action: MenuAction::Export,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
                     label: "Backup Snapshot".to_string(),
                     detail: "NOW".to_string(),
                     action: MenuAction::Backup,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Backup History".to_string(),
+                    detail: "LIST".to_string(),
+                    action: MenuAction::BackupHistory,
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
@@ -1047,6 +1312,12 @@ impl App {
                     detail: "F4".to_string(),
                     action: MenuAction::Find,
                     enabled: true,
+                },
+                MenuItem {
+                    label: "Clear Find".to_string(),
+                    detail: "CLEAR".to_string(),
+                    action: MenuAction::ClearFind,
+                    enabled: self.find_query.is_some(),
                 },
                 MenuItem {
                     label: "Replace in Entry".to_string(),
@@ -1105,6 +1376,18 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Previous Saved Entry".to_string(),
+                    detail: "OLDER".to_string(),
+                    action: MenuAction::PreviousEntry,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Next Saved Entry".to_string(),
+                    detail: "NEWER".to_string(),
+                    action: MenuAction::NextEntry,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
                     label: "Jump to Today".to_string(),
                     detail: "NOW".to_string(),
                     action: MenuAction::Today,
@@ -1130,8 +1413,20 @@ impl App {
                     action: MenuAction::Verify,
                     enabled: self.vault.is_some(),
                 },
+                MenuItem {
+                    label: "Doctor Report".to_string(),
+                    detail: "CHECK".to_string(),
+                    action: MenuAction::DoctorReport,
+                    enabled: true,
+                },
             ],
             MenuId::Setup => vec![
+                MenuItem {
+                    label: "Settings Summary".to_string(),
+                    detail: "REPORT".to_string(),
+                    action: MenuAction::SettingsSummary,
+                    enabled: true,
+                },
                 self.setting_menu_item(SettingField::VaultPath),
                 self.setting_menu_item(SettingField::SyncTargetPath),
                 self.setting_menu_item(SettingField::DeviceNickname),
@@ -1139,12 +1434,20 @@ impl App {
                 self.setting_menu_item(SettingField::BackupWeekly),
                 self.setting_menu_item(SettingField::BackupMonthly),
             ],
-            MenuId::Help => vec![MenuItem {
-                label: "Key and Menu Guide".to_string(),
-                detail: "F1".to_string(),
-                action: MenuAction::Help,
-                enabled: true,
-            }],
+            MenuId::Help => vec![
+                MenuItem {
+                    label: "Key and Menu Guide".to_string(),
+                    detail: "F1".to_string(),
+                    action: MenuAction::Help,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Quick Start".to_string(),
+                    detail: "START".to_string(),
+                    action: MenuAction::QuickStart,
+                    enabled: true,
+                },
+            ],
         }
     }
 
@@ -1331,8 +1634,12 @@ impl App {
                     .get(menu.selected_item)
                     .cloned()
                 {
-                    keep_menu = false;
-                    self.perform_menu_action(item.action, viewport_height);
+                    if item.enabled {
+                        keep_menu = false;
+                        self.perform_menu_action(item.action, viewport_height);
+                    } else {
+                        self.flash_status("UNAVAILABLE.");
+                    }
                 }
             }
             KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
@@ -1409,6 +1716,21 @@ impl App {
                 KeyCode::Down => picker.move_selection_by_days(7),
                 KeyCode::PageUp => picker.shift_month(-1),
                 KeyCode::PageDown => picker.shift_month(1),
+                KeyCode::Home => {
+                    picker.selected_date = calendar::month_start(picker.selected_date);
+                    picker.month = calendar::month_start(picker.selected_date);
+                }
+                KeyCode::End => {
+                    picker.selected_date = calendar::shift_date_by_months(
+                        calendar::month_start(picker.selected_date),
+                        1,
+                    ) - ChronoDuration::days(1);
+                    picker.month = calendar::month_start(picker.selected_date);
+                }
+                KeyCode::Char('t') | KeyCode::Char('T') => {
+                    picker.selected_date = Local::now().date_naive();
+                    picker.month = calendar::month_start(picker.selected_date);
+                }
                 KeyCode::Enter => {
                     let date = picker.selected_date;
                     self.open_date(date);
@@ -1624,6 +1946,24 @@ impl App {
                 }
                 _ => {}
             },
+            Overlay::ExportPrompt(prompt) => match key.code {
+                KeyCode::Esc => keep_overlay = false,
+                KeyCode::Tab => prompt.toggle_format(self.selected_date),
+                KeyCode::Backspace => {
+                    prompt.path_input.pop();
+                    prompt.error = None;
+                }
+                KeyCode::Enter => {
+                    if self.apply_export_prompt(prompt) {
+                        keep_overlay = false;
+                    }
+                }
+                KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
+                    prompt.path_input.push(ch);
+                    prompt.error = None;
+                }
+                _ => {}
+            },
             Overlay::SettingPrompt(prompt) => match key.code {
                 KeyCode::Esc => keep_overlay = false,
                 KeyCode::Backspace => {
@@ -1661,6 +2001,15 @@ impl App {
                         index.selected = index.items.len() - 1;
                     }
                 }
+                KeyCode::Char('t') | KeyCode::Char('T') => {
+                    if let Some(position) = index
+                        .items
+                        .iter()
+                        .position(|entry| entry.date == Local::now().date_naive())
+                    {
+                        index.selected = position;
+                    }
+                }
                 KeyCode::Enter => {
                     if let Some(date) = index.selected_date() {
                         self.open_date(date);
@@ -1673,6 +2022,20 @@ impl App {
             Overlay::SyncStatus(sync_status) => match key.code {
                 KeyCode::Esc | KeyCode::Enter | KeyCode::F(8) if sync_status.can_close() => {
                     keep_overlay = false;
+                }
+                _ => {}
+            },
+            Overlay::Info(info) => match key.code {
+                KeyCode::Esc | KeyCode::Enter => keep_overlay = false,
+                KeyCode::Up => info.move_scroll(-1),
+                KeyCode::Down => info.move_scroll(1),
+                KeyCode::PageUp => info.page_up(viewport_height.saturating_sub(4)),
+                KeyCode::PageDown => info.page_down(viewport_height.saturating_sub(4)),
+                KeyCode::Home => info.scroll = 0,
+                KeyCode::End => {
+                    if !info.lines.is_empty() {
+                        info.scroll = info.lines.len() - 1;
+                    }
                 }
                 _ => {}
             },
@@ -1914,6 +2277,11 @@ impl App {
         self.overlay = Some(Overlay::Search(SearchOverlay::new(self.find_query.clone())));
     }
 
+    fn open_export_prompt(&mut self) {
+        self.menu = None;
+        self.overlay = Some(Overlay::ExportPrompt(ExportPrompt::new(self.selected_date)));
+    }
+
     fn open_index_overlay(&mut self) {
         self.menu = None;
         let items = self.load_index_entries();
@@ -1931,10 +2299,187 @@ impl App {
         self.menu = Some(MenuState::new(menu, self));
     }
 
+    fn open_info_overlay(&mut self, title: impl Into<String>, text: String) {
+        self.menu = None;
+        self.overlay = Some(Overlay::Info(InfoOverlay::from_text(title, text)));
+    }
+
+    fn open_quickstart_overlay(&mut self) {
+        self.open_info_overlay("Quick Start", help::render_quickstart_guide());
+    }
+
+    fn open_settings_summary_overlay(&mut self) {
+        let config_path = match config::config_file_path() {
+            Ok(path) => path,
+            Err(error) => {
+                self.flash_status(&format!("SETTINGS PATH ERROR: {error}"));
+                return;
+            }
+        };
+        let config_exists = config_path.exists();
+        let log_path = logging::log_file_path();
+        let env = EnvironmentSettings::capture();
+        let (vault_metadata, _) = if vault::vault_exists(&self.config.vault_path) {
+            match vault::load_vault_metadata(&self.config.vault_path) {
+                Ok(metadata) => (Some(metadata), None::<String>),
+                Err(_) => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+
+        let report = help::render_settings_report(
+            &config_path,
+            config_exists,
+            &self.config,
+            &log_path,
+            &env,
+            vault_metadata.as_ref(),
+        );
+        self.open_info_overlay("Settings Summary", report);
+    }
+
+    fn open_doctor_overlay(&mut self) {
+        let config_path = match config::config_file_path() {
+            Ok(path) => path,
+            Err(error) => {
+                self.flash_status(&format!("DOCTOR CONFIG ERROR: {error}"));
+                return;
+            }
+        };
+        let config_exists = config_path.exists();
+        let log_path = logging::log_file_path();
+        let env = EnvironmentSettings::capture();
+        let (vault_metadata, vault_metadata_error) = if vault::vault_exists(&self.config.vault_path)
+        {
+            match vault::load_vault_metadata(&self.config.vault_path) {
+                Ok(metadata) => (Some(metadata), None),
+                Err(error) => (None, Some(error.to_string())),
+            }
+        } else {
+            (None, None)
+        };
+
+        let (integrity_report, unlock_error, entry_count, backup_count, conflict_count) =
+            if let Some(vault) = &self.vault {
+                let integrity = vault.verify_integrity().ok();
+                let entries = vault.list_entry_dates().ok().map(|dates| dates.len());
+                let backups = vault.list_backups().ok().map(|entries| entries.len());
+                let conflicts = vault.list_conflicted_dates().ok().map(|dates| dates.len());
+                (integrity, None, entries, backups, conflicts)
+            } else if vault::vault_exists(&self.config.vault_path) {
+                (
+                    None,
+                    Some("vault locked; unlock to run integrity and content checks".to_string()),
+                    None,
+                    None,
+                    None,
+                )
+            } else {
+                (None, None, None, None, None)
+            };
+
+        let report = doctor::build_report(doctor::DoctorInputs {
+            config_path: &config_path,
+            config_exists,
+            config_error: None,
+            config: &self.config,
+            log_path: &log_path,
+            env: &env,
+            vault_exists: vault::vault_exists(&self.config.vault_path),
+            vault_metadata: vault_metadata.as_ref(),
+            vault_metadata_error: vault_metadata_error.as_deref(),
+            integrity_report: integrity_report.as_ref(),
+            unlock_error: unlock_error.as_deref(),
+            entry_count,
+            backup_count,
+            conflict_count,
+        });
+
+        self.open_info_overlay("Doctor Report", doctor::render_text(&report));
+    }
+
+    fn open_backup_history_overlay(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+
+        let output = match vault.list_backups() {
+            Ok(backups) if backups.is_empty() => "No encrypted backups yet.".to_string(),
+            Ok(backups) => {
+                let mut lines = vec![
+                    "Encrypted backups".to_string(),
+                    String::new(),
+                    "DATE/TIME           SIZE       FILE".to_string(),
+                    "-----------------------------------------------".to_string(),
+                ];
+                for backup in backups.into_iter().take(14) {
+                    let file_name = backup
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("backup");
+                    lines.push(format!(
+                        "{}  {:>8}  {}",
+                        backup.created_at.format("%Y-%m-%d %H:%M"),
+                        human_bytes(backup.size_bytes),
+                        file_name
+                    ));
+                }
+                lines.join("\n")
+            }
+            Err(error) => format!("Failed to load backups: {error}"),
+        };
+
+        self.open_info_overlay("Backup History", output);
+    }
+
+    fn open_adjacent_saved_entry(&mut self, delta: isize) {
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+
+        let mut dates = match vault.list_entry_dates() {
+            Ok(dates) => dates,
+            Err(_) => {
+                self.flash_status("INDEX LOAD FAILED.");
+                return;
+            }
+        };
+        dates.sort_unstable();
+        let Some(current_idx) = dates.iter().position(|date| *date == self.selected_date) else {
+            if let Some(target) = if delta < 0 {
+                dates.last()
+            } else {
+                dates.first()
+            } {
+                self.open_date(*target);
+                self.flash_status("DATE OPENED.");
+            } else {
+                self.flash_status("NO SAVED ENTRIES.");
+            }
+            return;
+        };
+
+        let next_idx = current_idx as isize + delta;
+        if !(0..dates.len() as isize).contains(&next_idx) {
+            self.flash_status("NO MORE SAVED ENTRIES.");
+            return;
+        }
+
+        self.open_date(dates[next_idx as usize]);
+        self.flash_status("DATE OPENED.");
+    }
+
     fn perform_menu_action(&mut self, action: MenuAction, viewport_height: usize) {
         match action {
             MenuAction::Save => self.save_current_date(),
+            MenuAction::Export => self.open_export_prompt(),
+            MenuAction::BackupHistory => self.open_backup_history_overlay(),
             MenuAction::Backup => self.create_backup_now(),
+            MenuAction::DoctorReport => self.open_doctor_overlay(),
             MenuAction::Lock => self.lock_vault(),
             MenuAction::Quit => self.overlay = Some(Overlay::QuitConfirm),
             MenuAction::Find => {
@@ -1943,6 +2488,7 @@ impl App {
                     error: None,
                 });
             }
+            MenuAction::ClearFind => self.clear_find_state(),
             MenuAction::Replace => {
                 self.overlay = Some(Overlay::ReplacePrompt(ReplacePrompt::new()))
             }
@@ -1973,6 +2519,8 @@ impl App {
             }
             MenuAction::RebuildSearchIndex => self.rebuild_search_index(),
             MenuAction::Dates => self.open_date_picker(),
+            MenuAction::PreviousEntry => self.open_adjacent_saved_entry(-1),
+            MenuAction::NextEntry => self.open_adjacent_saved_entry(1),
             MenuAction::Today => {
                 self.open_date(Local::now().date_naive());
                 self.flash_status("JUMPED TO TODAY.");
@@ -1980,6 +2528,8 @@ impl App {
             MenuAction::Index => self.open_index_overlay(),
             MenuAction::Sync => self.begin_sync(),
             MenuAction::Verify => self.verify_integrity_now(),
+            MenuAction::SettingsSummary => self.open_settings_summary_overlay(),
+            MenuAction::QuickStart => self.open_quickstart_overlay(),
             MenuAction::EditSetting(field) => self.open_setting_prompt(field),
             MenuAction::Help => self.overlay = Some(Overlay::Help),
         }
@@ -2294,6 +2844,48 @@ impl App {
             | SettingField::BackupMonthly => "RETENTION UPDATED.",
         });
         true
+    }
+
+    fn apply_export_prompt(&mut self, prompt: &mut ExportPrompt) -> bool {
+        if self.vault.is_none() {
+            prompt.error = Some("Vault locked.".to_string());
+            return false;
+        }
+
+        let path_text = prompt.path_input.trim();
+        if path_text.is_empty() {
+            prompt.error = Some("Export path cannot be blank.".to_string());
+            return false;
+        }
+
+        let path = expand_tilde(path_text);
+        let entry_number = self.entry_number_label();
+        let rendered = match prompt.format {
+            ExportFormatUi::PlainText => {
+                vault::format_export_text(&self.buffer.to_text(), self.closing_thought.as_deref())
+            }
+            ExportFormatUi::Markdown => render_markdown_export(
+                self.selected_date,
+                &entry_number,
+                &self.buffer.to_text(),
+                self.closing_thought.as_deref(),
+            ),
+        };
+
+        match secure_fs::atomic_write_restricted(&path, rendered.as_bytes()) {
+            Ok(()) => {
+                let file_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("export");
+                self.flash_status(&format!("EXPORTED {file_name}."));
+                true
+            }
+            Err(error) => {
+                prompt.error = Some(format!("Failed to write {}: {error}", path.display()));
+                false
+            }
+        }
     }
 
     fn load_entry_dates(&mut self) -> BTreeSet<NaiveDate> {
@@ -2847,6 +3439,51 @@ fn sync_target_label_webdav() -> Result<String, String> {
         .map_err(|_| "BSJ_WEBDAV_URL is required for TUI WebDAV sync.".to_string())
 }
 
+fn default_export_path(date: NaiveDate, format: ExportFormatUi) -> PathBuf {
+    let base = dirs::desktop_dir()
+        .or_else(dirs::document_dir)
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
+    base.join(format!(
+        "bsj-{}.{}",
+        date.format("%Y-%m-%d"),
+        format.extension()
+    ))
+}
+
+fn render_markdown_export(
+    date: NaiveDate,
+    entry_number: &str,
+    body: &str,
+    closing_thought: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    out.push_str("# BlueScreen Journal Entry\n\n");
+    out.push_str(&format!("Date: {}\n", date.format("%Y-%m-%d")));
+    out.push_str(&format!("Entry No.: {}\n\n", entry_number));
+    out.push_str(body.trim_end());
+    if let Some(closing_thought) = normalize_overlay_text(closing_thought.unwrap_or_default()) {
+        if !body.trim_end().is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str("## Closing Thought\n\n");
+        out.push_str(&closing_thought);
+    }
+    out
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes_f >= MIB {
+        format!("{:.1} MiB", bytes_f / MIB)
+    } else if bytes_f >= KIB {
+        format!("{:.1} KiB", bytes_f / KIB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 fn zeroize_optional_string(value: &mut Option<String>) {
     if let Some(mut string) = value.take() {
         string.zeroize();
@@ -2891,9 +3528,11 @@ fn wipe_overlay(overlay: &mut Overlay) {
         Overlay::Search(search) => search.wipe(),
         Overlay::ReplacePrompt(prompt) => prompt.wipe(),
         Overlay::ReplaceConfirm(confirm) => confirm.wipe(),
+        Overlay::ExportPrompt(prompt) => prompt.wipe(),
         Overlay::SettingPrompt(prompt) => prompt.wipe(),
         Overlay::Index(index) => index.wipe(),
         Overlay::SyncStatus(sync_status) => sync_status.wipe(),
+        Overlay::Info(info) => info.wipe(),
         Overlay::RecoverDraft { draft_text } => draft_text.zeroize(),
     }
 }
@@ -3065,13 +3704,13 @@ fn parse_optional_overlay_date(label: &str, input: &str) -> Result<Option<NaiveD
 #[cfg(test)]
 mod tests {
     use super::{
-        App, IndexState, MenuId, Overlay, SearchField, SearchJump, SearchOverlay, SyncPhase,
-        SyncRequest, SyncStatusOverlay, format_reveal_codes, macro_key_matches,
-        parse_optional_overlay_date, resolve_recovery_text,
+        App, ExportPrompt, IndexState, MenuId, Overlay, SearchField, SearchJump, SearchOverlay,
+        SyncPhase, SyncRequest, SyncStatusOverlay, default_export_path, format_reveal_codes,
+        macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
     };
     use crate::{
         search::{SearchDocument, SearchIndex, SearchResult, Snippet},
-        tui::buffer::TextBuffer,
+        tui::buffer::{MatchPos, TextBuffer},
         vault::{self, IndexEntry},
     };
     use chrono::{Duration, NaiveDate};
@@ -3173,6 +3812,36 @@ mod tests {
     }
 
     #[test]
+    fn file_menu_lists_export_and_backup_history() {
+        let app = App::with_initial_date(None);
+        let labels = app
+            .menu_items(MenuId::File)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"Export Current".to_string()));
+        assert!(labels.contains(&"Backup History".to_string()));
+    }
+
+    #[test]
+    fn disabled_menu_item_does_not_execute() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.menu = Some(super::MenuState {
+            selected_menu: MenuId::File,
+            selected_item: 0,
+        });
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())),
+            20,
+        );
+
+        assert!(app.menu().is_some());
+        assert_eq!(app.status_text(), Some("UNAVAILABLE."));
+    }
+
+    #[test]
     fn search_overlay_cycles_into_results_when_present() {
         let mut overlay = SearchOverlay::new(None);
         overlay.results.push(crate::search::SearchResult {
@@ -3217,6 +3886,40 @@ mod tests {
         assert!(line.contains("⟦TAG:work⟧"));
         assert!(line.contains("⟦MOOD:7⟧"));
         assert!(line.contains("⟦CLOSE:See you tomorrow.⟧"));
+    }
+
+    #[test]
+    fn export_prompt_uses_date_based_default_filename() {
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let prompt = ExportPrompt::new(date);
+        assert!(prompt.path_input.ends_with("bsj-2026-03-16.txt"));
+        assert_eq!(
+            default_export_path(date, prompt.format)
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("bsj-2026-03-16.txt")
+        );
+    }
+
+    #[test]
+    fn footer_context_prefers_find_progress_over_cursor_position() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.find_matches = vec![
+            MatchPos {
+                row: 0,
+                start_col: 0,
+                end_col: 4,
+            },
+            MatchPos {
+                row: 1,
+                start_col: 2,
+                end_col: 6,
+            },
+        ];
+        app.current_match_idx = 1;
+
+        assert_eq!(app.footer_context_label(), "FIND 2/2");
     }
 
     #[test]

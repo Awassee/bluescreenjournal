@@ -186,6 +186,10 @@ The menu bar is the primary discoverability surface.
 - arrows move between menus and menu items
 - `Enter` runs the selected command
 - function keys remain as direct shortcuts
+- `FILE` includes save, export, backup snapshot, backup history, lock, and quit
+- `TOOLS` includes sync, integrity verify, and an in-product doctor report
+- `SETUP` includes a live settings summary plus editable vault/sync/device/retention values
+- `HELP` includes the key sheet and a quick-start guide inside the TUI
 
 Primary keys:
 

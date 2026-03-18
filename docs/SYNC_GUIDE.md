@@ -52,6 +52,14 @@ export BSJ_WEBDAV_PASSWORD=your-password
 bsj sync
 ```
 
+`https://` is the default requirement.
+
+If you are testing against a trusted local lab server and explicitly want insecure HTTP anyway, you can opt in:
+
+```bash
+export BSJ_WEBDAV_ALLOW_INSECURE_HTTP=1
+```
+
 ## How reconciliation works
 
 At a high level, sync does this:

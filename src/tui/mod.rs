@@ -4,9 +4,9 @@ pub mod calendar;
 
 use crate::tui::{
     app::{
-        App, ConflictMode, ConflictOverlay, DatePicker, IndexState, MenuId, MenuItem, Overlay,
-        ReplacePrompt, ReplaceStage, SearchField, SearchOverlay, SettingPrompt, SetupStep,
-        SetupWizard, SyncPhase, SyncStatusOverlay,
+        App, ConflictMode, ConflictOverlay, DatePicker, ExportPrompt, IndexState, InfoOverlay,
+        MenuId, MenuItem, Overlay, ReplacePrompt, ReplaceStage, SearchField, SearchOverlay,
+        SettingPrompt, SetupStep, SetupWizard, SyncPhase, SyncStatusOverlay,
     },
     buffer::MatchPos,
 };
@@ -166,7 +166,16 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         {
             style = style.add_modifier(Modifier::REVERSED);
         }
-        spans.push(Span::styled(format!(" {} ", tab.label), style));
+        let mut chars = tab.label.chars();
+        let first = chars.next().unwrap_or(' ');
+        let rest = chars.collect::<String>();
+        spans.push(Span::styled(" ".to_string(), style));
+        spans.push(Span::styled(
+            first.to_string(),
+            style.add_modifier(Modifier::UNDERLINED),
+        ));
+        spans.push(Span::styled(rest, style));
+        spans.push(Span::styled(" ".to_string(), style));
     }
 
     let hint = if app.menu().is_some() {
@@ -294,18 +303,42 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
     let start = app.scroll_row();
     let end = (start + editor_area.height as usize).min(app.buffer().line_count());
     let mut lines = Vec::new();
-    for row in start..end {
-        lines.push(line_with_matches(
-            app.buffer().line(row).unwrap_or_default(),
-            row,
-            app.find_matches(),
-            app.current_match(),
-        ));
-    }
-    if lines.is_empty() {
+    let empty_editor = app.buffer().line_count() == 1
+        && app.buffer().line(0).unwrap_or_default().is_empty()
+        && app.overlay().is_none();
+    if empty_editor {
         lines.push(Line::from(String::new()));
+    } else {
+        for row in start..end {
+            lines.push(line_with_matches(
+                app.buffer().line(row).unwrap_or_default(),
+                row,
+                app.find_matches(),
+                app.current_match(),
+            ));
+        }
+        if lines.is_empty() {
+            lines.push(Line::from(String::new()));
+        }
     }
     frame.render_widget(Paragraph::new(lines).style(screen_style()), editor_area);
+
+    if empty_editor {
+        let hints = app
+            .empty_state_lines()
+            .into_iter()
+            .map(|line| centered_line(editor_area.width as usize, line))
+            .collect::<Vec<_>>();
+        let hint_height = hints.len() as u16;
+        let hint_y = editor_area
+            .y
+            .saturating_add(editor_area.height.saturating_sub(hint_height) / 3);
+        let hint_area = Rect::new(editor_area.x, hint_y, editor_area.width, hint_height);
+        frame.render_widget(
+            Paragraph::new(hints).style(screen_style().add_modifier(Modifier::DIM)),
+            hint_area,
+        );
+    }
 
     if show_closing {
         let closing_text = app.closing_thought().unwrap_or("[none]");
@@ -337,9 +370,20 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
     }
+    let context = format!(
+        "{} {} {}",
+        app.footer_mode_label(),
+        app.footer_dirty_label(),
+        app.footer_context_label()
+    );
     let status = app.status_text().unwrap_or("");
+    let left = if status.is_empty() {
+        context
+    } else {
+        format!("{context} | {status}")
+    };
     let strip = "EscMenu F1Hl F2Sv F3Dt F4Fd F5Sr F6Rp F7Ix F8Sy F9Cl F10Qt F11Rv F12Lk";
-    let content = join_left_right(area.width as usize, status, strip);
+    let content = join_left_right(area.width as usize, &left, strip);
     frame.render_widget(
         Paragraph::new(Line::from(content)).style(
             screen_style()
@@ -388,9 +432,11 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::Search(_) => popup_rect(body_area, 84, 16),
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
+        Overlay::ExportPrompt(_) => popup_rect(body_area, 72, 8),
         Overlay::SettingPrompt(_) => popup_rect(body_area, 70, 7),
         Overlay::Index(_) => popup_rect(body_area, 78, 14),
         Overlay::SyncStatus(_) => popup_rect(body_area, 76, 10),
+        Overlay::Info(_) => popup_rect(body_area, 76, 16),
         Overlay::RecoverDraft { .. } => popup_rect(body_area, 44, 5),
         Overlay::QuitConfirm => popup_rect(body_area, 44, 5),
     };
@@ -484,6 +530,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
             frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
             None
         }
+        Overlay::ExportPrompt(prompt) => draw_export_prompt_overlay(frame, inner, prompt),
         Overlay::SettingPrompt(prompt) => draw_setting_prompt_overlay(frame, inner, prompt),
         Overlay::Index(index) => {
             draw_index_overlay(frame, inner, index);
@@ -491,6 +538,10 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         }
         Overlay::SyncStatus(sync_status) => {
             draw_sync_overlay(frame, inner, sync_status);
+            None
+        }
+        Overlay::Info(info) => {
+            draw_info_overlay(frame, inner, info);
             None
         }
         Overlay::RecoverDraft { .. } => {
@@ -557,6 +608,9 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("| Index: Up/Down/PgUp/PgDn | Enter opens date        |"),
         Line::from("| Search: Tab fields | Enter search/open result      |"),
         Line::from("| Sync: F8 runs encrypted sync and shows results     |"),
+        Line::from("| FILE menu also exports current entry + backups     |"),
+        Line::from("| TOOLS menu includes Doctor report + Verify         |"),
+        Line::from("| SETUP menu includes a live settings summary        |"),
         Line::from("| Closing Thought lives above footer | F9 edits it   |"),
         Line::from("| Reveal shows DATE / ENTRY / TAG / MOOD / CLOSE     |"),
         Line::from("| Header shows VERIFY OK / BROKEN after unlock/save  |"),
@@ -600,8 +654,9 @@ fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePick
         lines.push(Line::from(spans));
     }
 
-    lines.push(Line::from("Arrows move  PgUp/PgDn month"));
-    lines.push(Line::from("Enter open   Esc close"));
+    lines.push(Line::from("Bold = saved day  Reverse = selected"));
+    lines.push(Line::from("Arrows move  PgUp/PgDn month  T today"));
+    lines.push(Line::from("Home first day  End last day  Enter open"));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
@@ -631,6 +686,16 @@ fn draw_search_overlay(
             search.active_field == SearchField::To,
         ),
         Line::from(""),
+        Line::from(format!(
+            "Results: {}  Active: {}",
+            search.results.len(),
+            match search.active_field {
+                SearchField::Query => "QUERY",
+                SearchField::From => "FROM",
+                SearchField::To => "TO",
+                SearchField::Results => "RESULTS",
+            }
+        )),
         Line::from("DATE         ENTRY NO  LOCATION  SNIPPET"),
         Line::from("----------------------------------------"),
     ];
@@ -638,7 +703,7 @@ fn draw_search_overlay(
     if search.results.is_empty() {
         lines.push(Line::from("No results yet. Enter runs the search."));
     } else {
-        let visible_rows = area.height.saturating_sub(8) as usize;
+        let visible_rows = area.height.saturating_sub(9) as usize;
         let (start, end) = search.window(visible_rows);
         let preview_width = area.width.saturating_sub(34) as usize;
         for (offset, result) in search.results[start..end].iter().enumerate() {
@@ -671,9 +736,8 @@ fn draw_search_overlay(
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(
-        "Tab fields  Enter search/open  Up/Down move  Esc close",
-    ));
+    lines.push(Line::from("Tab fields  Enter search/open  Home/End jump"));
+    lines.push(Line::from("Up/Down/PgUp/PgDn move results  Esc close"));
     if let Some(error) = &search.error {
         lines.push(Line::from(error.clone()));
     }
@@ -799,16 +863,37 @@ fn draw_replace_prompt_overlay(
     ))
 }
 
+fn draw_export_prompt_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    prompt: &ExportPrompt,
+) -> Option<(u16, u16)> {
+    let lines = vec![
+        Line::from("Export the current editor contents to a plaintext file."),
+        Line::from(format!("Format: {} (Tab toggles)", prompt.format.label())),
+        Line::from(format!("Path  : {}", prompt.path_input)),
+        Line::from("Unsaved edits are included in the export."),
+        Line::from("Enter write file  Esc cancel"),
+        Line::from(prompt.error.clone().unwrap_or_default()),
+    ];
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+    Some((
+        (area.x + 8 + prompt.path_input.chars().count() as u16).min(area.right().saturating_sub(1)),
+        (area.y + 2).min(area.bottom().saturating_sub(1)),
+    ))
+}
+
 fn draw_setting_prompt_overlay(
     frame: &mut Frame<'_>,
     area: Rect,
     prompt: &SettingPrompt,
 ) -> Option<(u16, u16)> {
     let lines = vec![
-        Line::from(prompt.field.label()),
+        Line::from(format!("{} ({})", prompt.field.label(), prompt.field.key())),
         Line::from(prompt.field.prompt()),
         Line::from(format!("> {}", prompt.input)),
         Line::from(prompt.field.help()),
+        Line::from("Enter save  Esc cancel"),
         Line::from(prompt.error.clone().unwrap_or_default()),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
@@ -824,6 +909,15 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
     }
 
     let mut lines = vec![
+        Line::from(format!(
+            "Saved entries: {}  Selected: {}",
+            index.items.len(),
+            index
+                .items
+                .get(index.selected)
+                .map(|entry| entry.date.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "none".to_string())
+        )),
         Line::from("DATE         ENTRY NO  CF        PREVIEW"),
         Line::from("----------------------------------------"),
     ];
@@ -831,7 +925,7 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
     if index.items.is_empty() {
         lines.push(Line::from("No saved entries."));
     } else {
-        let visible_rows = area.height.saturating_sub(4) as usize;
+        let visible_rows = area.height.saturating_sub(5) as usize;
         let (start, end) = index.window(visible_rows);
         let preview_width = area.width.saturating_sub(31) as usize;
         for (offset, entry) in index.items[start..end].iter().enumerate() {
@@ -854,7 +948,8 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from("Up/Down/PgUp/PgDn move  Enter open  Esc close"));
+    lines.push(Line::from("Up/Down/PgUp/PgDn move  Home/End jump  T today"));
+    lines.push(Line::from("Enter open  Esc close"));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
@@ -929,6 +1024,22 @@ fn draw_sync_overlay(frame: &mut Frame<'_>, area: Rect, sync_status: &SyncStatus
         ));
     }
 
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+}
+
+fn draw_info_overlay(frame: &mut Frame<'_>, area: Rect, info: &InfoOverlay) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let visible_rows = area.height.saturating_sub(2) as usize;
+    let (start, end) = info.window(visible_rows);
+    let mut lines = info.lines[start..end]
+        .iter()
+        .map(|line| Line::from(truncate_to_width(line, area.width as usize)))
+        .collect::<Vec<_>>();
+    lines.push(Line::from(""));
+    lines.push(Line::from("Up/Down/PgUp/PgDn scroll  Enter/Esc close"));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
@@ -1060,24 +1171,26 @@ fn centered_line(width: usize, text: &str) -> Line<'static> {
     Line::from(format!("{}{}", " ".repeat(left_padding), text))
 }
 
-fn overlay_title(overlay: &Overlay) -> &'static str {
+fn overlay_title(overlay: &Overlay) -> String {
     match overlay {
-        Overlay::SetupWizard(_) => " Setup ",
-        Overlay::UnlockPrompt { .. } => " Unlock ",
-        Overlay::Help => " Help ",
-        Overlay::DatePicker(_) => " Dates ",
-        Overlay::ConflictChoice(_) => " Conflict ",
-        Overlay::MergeDiff(_) => " Merge ",
-        Overlay::FindPrompt { .. } => " Find ",
-        Overlay::ClosingPrompt { .. } => " Closing ",
-        Overlay::Search(_) => " Search ",
-        Overlay::ReplacePrompt(_) => " Replace ",
-        Overlay::ReplaceConfirm(_) => " Replace ",
-        Overlay::SettingPrompt(_) => " Setup ",
-        Overlay::Index(_) => " Index ",
-        Overlay::SyncStatus(_) => " Sync ",
-        Overlay::RecoverDraft { .. } => " Recovery ",
-        Overlay::QuitConfirm => " Quit ",
+        Overlay::SetupWizard(_) => " Setup ".to_string(),
+        Overlay::UnlockPrompt { .. } => " Unlock ".to_string(),
+        Overlay::Help => " Help ".to_string(),
+        Overlay::DatePicker(_) => " Dates ".to_string(),
+        Overlay::ConflictChoice(_) => " Conflict ".to_string(),
+        Overlay::MergeDiff(_) => " Merge ".to_string(),
+        Overlay::FindPrompt { .. } => " Find ".to_string(),
+        Overlay::ClosingPrompt { .. } => " Closing ".to_string(),
+        Overlay::Search(_) => " Search ".to_string(),
+        Overlay::ReplacePrompt(_) => " Replace ".to_string(),
+        Overlay::ReplaceConfirm(_) => " Replace ".to_string(),
+        Overlay::ExportPrompt(prompt) => format!(" Export {} ", prompt.format.label()),
+        Overlay::SettingPrompt(_) => " Setup ".to_string(),
+        Overlay::Index(_) => " Index ".to_string(),
+        Overlay::SyncStatus(_) => " Sync ".to_string(),
+        Overlay::Info(info) => format!(" {} ", info.title),
+        Overlay::RecoverDraft { .. } => " Recovery ".to_string(),
+        Overlay::QuitConfirm => " Quit ".to_string(),
     }
 }
 

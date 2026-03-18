@@ -3,6 +3,7 @@ mod doctor;
 mod help;
 mod logging;
 mod search;
+mod secure_fs;
 mod sync;
 mod tui;
 mod vault;
@@ -12,7 +13,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use secrecy::SecretString;
 use std::{
-    env, fs, io,
+    env, io,
     path::{Path, PathBuf},
 };
 
@@ -923,11 +924,8 @@ fn render_markdown_export(entry: &vault::ExportedEntry) -> String {
 }
 
 fn write_plaintext_output(path: &Path, text: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create output directory: {error}"))?;
-    }
-    fs::write(path, text).map_err(|error| format!("failed to write {}: {error}", path.display()))
+    secure_fs::atomic_write_restricted(path, text.as_bytes())
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 #[cfg(test)]

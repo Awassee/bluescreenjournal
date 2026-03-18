@@ -1,5 +1,6 @@
+use crate::secure_fs;
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Write, path::PathBuf};
+use std::{fs, path::PathBuf};
 use thiserror::Error;
 
 const READABLE_SETTING_KEYS: &[&str] = &[
@@ -116,21 +117,8 @@ impl AppConfig {
 
     pub fn save(&self) -> Result<(), ConfigError> {
         let path = config_file_path()?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let tmp_path = path.with_extension("json.tmp");
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&tmp_path)?;
-
         let bytes = serde_json::to_vec_pretty(self)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        fs::rename(tmp_path, path)?;
+        secure_fs::atomic_write_private(&path, &bytes)?;
         Ok(())
     }
 }

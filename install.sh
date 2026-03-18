@@ -281,6 +281,13 @@ release_checksum_name() {
   printf '%s.sha256' "$(release_asset_name)"
 }
 
+archive_source_name() {
+  local source="$1"
+  source="${source%%\#*}"
+  source="${source%%\?*}"
+  basename "$source"
+}
+
 release_download_base() {
   if [[ "$RELEASE_VERSION" == "latest" ]]; then
     printf 'https://github.com/%s/releases/latest/download' "$GITHUB_REPO"
@@ -301,8 +308,9 @@ download_to() {
   local url="$1"
   local output="$2"
   require_command curl
+  [[ "$url" =~ ^https:// ]] || die "Refusing insecure download URL: $url"
   info "Downloading $(basename "$output")"
-  curl --fail --location --retry 3 --retry-delay 1 --silent --show-error "$url" --output "$output"
+  curl --proto '=https' --tlsv1.2 --fail --location --retry 3 --retry-delay 1 --silent --show-error "$url" --output "$output"
 }
 
 copy_or_download_archive() {
@@ -320,34 +328,37 @@ maybe_download_checksum() {
   local checksum_source="$1"
   local output="$2"
   if [[ "$SKIP_CHECKSUM" -eq 1 ]]; then
-    return
+    return 0
   fi
   if [[ "$checksum_source" =~ ^https?:// ]]; then
-    if ! curl --fail --location --retry 3 --retry-delay 1 --silent --show-error "$checksum_source" --output "$output"; then
-      warn "Checksum download failed; continuing without checksum verification."
-      rm -f "$output"
-    fi
+    [[ "$checksum_source" =~ ^https:// ]] || die "Refusing insecure checksum URL: $checksum_source"
+    curl --proto '=https' --tlsv1.2 --fail --location --retry 3 --retry-delay 1 --silent --show-error "$checksum_source" --output "$output"
+    return 0
   elif [[ -f "$checksum_source" ]]; then
     cp "$checksum_source" "$output"
+    return 0
   fi
+  return 1
 }
 
 verify_archive_if_possible() {
   local archive_path="$1"
   local checksum_path="$2"
-  local expected actual
+  local expected checksum_target actual
   if [[ "$SKIP_CHECKSUM" -eq 1 ]]; then
     warn "Skipping checksum verification by request."
     return
   fi
-  if [[ ! -f "$checksum_path" ]]; then
-    warn "No checksum file available; continuing without checksum verification."
-    return
-  fi
+  [[ -f "$checksum_path" ]] || die "Checksum file missing for $(basename "$archive_path")"
   require_command shasum
   info "Verifying archive checksum"
   expected="$(awk '{print $1; exit}' "$checksum_path")"
   [[ -n "$expected" ]] || die "Checksum file is empty: $checksum_path"
+  checksum_target="$(awk 'NF >= 2 {print $2; exit}' "$checksum_path")"
+  if [[ -n "$checksum_target" ]]; then
+    checksum_target="${checksum_target#./}"
+    [[ "$checksum_target" == "$(basename "$archive_path")" ]] || die "Checksum file does not match archive name $(basename "$archive_path")"
+  fi
   actual="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
   [[ "$actual" == "$expected" ]] || die "Checksum mismatch for $(basename "$archive_path")"
 }
@@ -361,20 +372,34 @@ extract_archive_bundle() {
 }
 
 bootstrap_prebuilt_install() {
-  local tmp_dir archive_path checksum_path bundle_dir checksum_source
+  local tmp_dir archive_path checksum_path bundle_dir checksum_source require_checksum archive_name
   tmp_dir="$(mktemp -d /tmp/bsj-install.XXXXXX)"
-  archive_path="$tmp_dir/$(release_asset_name)"
-  checksum_path="$tmp_dir/$(release_checksum_name)"
+  require_checksum=0
 
   if [[ -n "$ARCHIVE_SOURCE" ]]; then
+    archive_name="$(archive_source_name "$ARCHIVE_SOURCE")"
+    archive_path="$tmp_dir/$archive_name"
+    checksum_path="${archive_path}.sha256"
     info "Using provided archive source"
     copy_or_download_archive "$ARCHIVE_SOURCE" "$archive_path"
     checksum_source="${ARCHIVE_SOURCE}.sha256"
-    maybe_download_checksum "$checksum_source" "$checksum_path"
+    if [[ "$ARCHIVE_SOURCE" =~ ^https?:// ]]; then
+      require_checksum=1
+    fi
   else
+    archive_path="$tmp_dir/$(release_asset_name)"
+    checksum_path="$tmp_dir/$(release_checksum_name)"
     info "Bootstrapping public release from GitHub"
     download_to "$(release_bundle_url)" "$archive_path"
-    maybe_download_checksum "$(release_checksum_url)" "$checksum_path"
+    checksum_source="$(release_checksum_url)"
+    require_checksum=1
+  fi
+
+  if ! maybe_download_checksum "$checksum_source" "$checksum_path"; then
+    if [[ "$require_checksum" -eq 1 && "$SKIP_CHECKSUM" -eq 0 ]]; then
+      die "Checksum download failed for $(basename "$archive_path"). Re-run with --skip-checksum only if you trust the source."
+    fi
+    warn "No checksum file available; continuing without checksum verification."
   fi
 
   verify_archive_if_possible "$archive_path" "$checksum_path"

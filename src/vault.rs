@@ -1,6 +1,7 @@
 use crate::{
     config::BackupRetentionConfig,
     search::SearchDocument,
+    secure_fs,
     sync::{self, FolderBackend, SyncBackend},
 };
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -17,7 +18,7 @@ use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashSet},
     fs,
-    io::{Cursor, Write},
+    io::Cursor,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -341,7 +342,11 @@ impl UnlockedVault {
         closing_thought: Option<&str>,
     ) -> VaultResult<()> {
         let date_directory = date_dir(&self.root, date);
-        fs::create_dir_all(&date_directory)?;
+        let year_directory = date_directory
+            .parent()
+            .ok_or_else(|| VaultError::InvalidFormat("missing year directory".to_string()))?;
+        secure_fs::ensure_private_dir(year_directory)?;
+        secure_fs::ensure_private_dir(&date_directory)?;
         let payload = DraftPayload {
             kind: "draft".to_string(),
             saved_at: Utc::now().to_rfc3339(),
@@ -391,7 +396,7 @@ impl UnlockedVault {
         )?;
 
         let backup_dir = self.root.join("backups");
-        fs::create_dir_all(&backup_dir)?;
+        secure_fs::ensure_private_dir(&backup_dir)?;
         let path = backup_dir.join(backup_file_name(created_at));
         atomic_write(&path, &encrypted.to_bytes())?;
         let pruned = prune_backups(&backup_dir, retention)?;
@@ -408,9 +413,8 @@ impl UnlockedVault {
             backup_aad_string(timestamp).as_bytes(),
         )?;
         let archive_bytes = zstd::stream::decode_all(Cursor::new(compressed))?;
-        fs::create_dir_all(target_root)?;
-        let mut archive = tar::Archive::new(Cursor::new(archive_bytes));
-        archive.unpack(target_root)?;
+        secure_fs::ensure_private_dir(target_root)?;
+        unpack_backup_archive_safely(&archive_bytes, target_root)?;
         Ok(())
     }
 
@@ -625,7 +629,11 @@ impl UnlockedVault {
         existing_records: &[RevisionRecord],
     ) -> VaultResult<()> {
         let date_directory = date_dir(&self.root, date);
-        fs::create_dir_all(&date_directory)?;
+        let year_directory = date_directory
+            .parent()
+            .ok_or_else(|| VaultError::InvalidFormat("missing year directory".to_string()))?;
+        secure_fs::ensure_private_dir(year_directory)?;
+        secure_fs::ensure_private_dir(&date_directory)?;
 
         if let Some(prev_hash) = &prev_hash
             && !existing_records
@@ -709,9 +717,9 @@ pub fn create_vault(
     epoch_date: Option<NaiveDate>,
     nickname: &str,
 ) -> VaultResult<VaultMetadata> {
-    fs::create_dir_all(path)?;
-    fs::create_dir_all(path.join("entries"))?;
-    fs::create_dir_all(path.join("devices"))?;
+    secure_fs::ensure_private_dir(path)?;
+    secure_fs::ensure_private_dir(&path.join("entries"))?;
+    secure_fs::ensure_private_dir(&path.join("devices"))?;
 
     let created_date = Utc::now().date_naive();
     let epoch = epoch_date.unwrap_or(created_date);
@@ -1012,6 +1020,7 @@ fn verify_records_for_date(date: NaiveDate, records: &[RevisionRecord]) -> Vec<I
 }
 
 fn write_device_metadata(root: &Path, device_id: &str, nickname: &str) -> VaultResult<()> {
+    secure_fs::ensure_private_dir(&root.join("devices"))?;
     let device_metadata = DeviceMetadata {
         nickname: nickname.to_string(),
     };
@@ -1077,6 +1086,151 @@ fn build_backup_archive(root: &Path) -> VaultResult<Vec<u8>> {
         builder.finish()?;
     }
     Ok(tar_bytes)
+}
+
+fn unpack_backup_archive_safely(archive_bytes: &[u8], target_root: &Path) -> VaultResult<()> {
+    ensure_safe_restore_root(target_root)?;
+    let mut archive = tar::Archive::new(Cursor::new(archive_bytes));
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let relative_path = sanitize_backup_member_path(entry.path()?.as_ref())?;
+        let entry_type = entry.header().entry_type();
+
+        if entry_type.is_symlink() || entry_type.is_hard_link() {
+            return Err(VaultError::InvalidFormat(
+                "backup archive contains unsupported link entry".to_string(),
+            ));
+        }
+
+        let destination = resolve_restore_destination(target_root, &relative_path)?;
+        if entry_type.is_dir() {
+            ensure_safe_restore_directory(&destination)?;
+            continue;
+        }
+
+        if !entry_type.is_file() {
+            return Err(VaultError::InvalidFormat(
+                "backup archive contains unsupported entry type".to_string(),
+            ));
+        }
+
+        if let Some(parent) = destination.parent() {
+            ensure_safe_restore_directory(parent)?;
+        }
+        reject_symlink_destination(&destination)?;
+
+        let mut file_bytes = Vec::new();
+        std::io::copy(&mut entry, &mut file_bytes)?;
+        secure_fs::atomic_write_private(&destination, &file_bytes)?;
+    }
+
+    Ok(())
+}
+
+fn sanitize_backup_member_path(path: &Path) -> VaultResult<PathBuf> {
+    let mut sanitized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(segment) => sanitized.push(segment),
+            _ => {
+                return Err(VaultError::InvalidFormat(
+                    "backup archive contains invalid path".to_string(),
+                ));
+            }
+        }
+    }
+
+    if sanitized.as_os_str().is_empty() {
+        return Err(VaultError::InvalidFormat(
+            "backup archive contains empty path".to_string(),
+        ));
+    }
+
+    Ok(sanitized)
+}
+
+fn ensure_safe_restore_root(target_root: &Path) -> VaultResult<()> {
+    match fs::symlink_metadata(target_root) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(VaultError::InvalidFormat(
+                    "restore target root cannot be a symlink".to_string(),
+                ));
+            }
+            if !file_type.is_dir() {
+                return Err(VaultError::InvalidFormat(
+                    "restore target root must be a directory".to_string(),
+                ));
+            }
+            secure_fs::set_private_dir_permissions(target_root)?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            secure_fs::ensure_private_dir(target_root)?;
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn resolve_restore_destination(target_root: &Path, relative_path: &Path) -> VaultResult<PathBuf> {
+    let mut current = target_root.to_path_buf();
+    for component in relative_path.components() {
+        match component {
+            std::path::Component::Normal(segment) => current.push(segment),
+            _ => {
+                return Err(VaultError::InvalidFormat(
+                    "backup archive contains invalid path".to_string(),
+                ));
+            }
+        }
+    }
+
+    if let Some(parent) = current.parent() {
+        ensure_safe_restore_directory(parent)?;
+    }
+
+    Ok(current)
+}
+
+fn ensure_safe_restore_directory(path: &Path) -> VaultResult<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(VaultError::InvalidFormat(
+                    "restore target contains a symlinked directory".to_string(),
+                ));
+            }
+            if !file_type.is_dir() {
+                return Err(VaultError::InvalidFormat(
+                    "restore target contains a non-directory path".to_string(),
+                ));
+            }
+            secure_fs::set_private_dir_permissions(path)?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            secure_fs::ensure_private_dir(path)?;
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn reject_symlink_destination(path: &Path) -> VaultResult<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(VaultError::InvalidFormat(
+            "restore target contains a symlinked file".to_string(),
+        )),
+        Ok(metadata) if metadata.is_dir() => Err(VaultError::InvalidFormat(
+            "restore target file path resolves to a directory".to_string(),
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn backup_source_paths(root: &Path) -> VaultResult<Vec<PathBuf>> {
@@ -1242,29 +1396,7 @@ fn backup_artifact_to_entry(artifact: &BackupArtifact) -> VaultResult<BackupEntr
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> VaultResult<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| VaultError::InvalidFormat("missing parent directory".to_string()))?;
-    fs::create_dir_all(parent)?;
-
-    let mut suffix = [0u8; 4];
-    OsRng.fill_bytes(&mut suffix);
-    let tmp_path = parent.join(format!(
-        ".{}.tmp-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("tmp"),
-        hex::encode(suffix)
-    ));
-
-    let mut file = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&tmp_path)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    fs::rename(tmp_path, path)?;
-    Ok(())
+    secure_fs::atomic_write_private(path, bytes).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -1273,6 +1405,62 @@ mod tests {
     use crate::config::BackupRetentionConfig;
     use std::{thread::sleep, time::Duration};
     use tempfile::tempdir;
+
+    fn build_raw_tar_archive(
+        path: &str,
+        entry_type: u8,
+        payload: &[u8],
+        link_name: &str,
+    ) -> Vec<u8> {
+        let mut header = [0u8; 512];
+        copy_tar_field(&mut header[0..100], path.as_bytes());
+        write_tar_octal(&mut header[100..108], 0o600);
+        write_tar_octal(&mut header[108..116], 0);
+        write_tar_octal(&mut header[116..124], 0);
+        write_tar_octal(&mut header[124..136], payload.len() as u64);
+        write_tar_octal(&mut header[136..148], 0);
+        header[148..156].fill(b' ');
+        header[156] = entry_type;
+        copy_tar_field(&mut header[157..257], link_name.as_bytes());
+        header[257..263].copy_from_slice(b"ustar\0");
+        header[263..265].copy_from_slice(b"00");
+
+        let checksum: u32 = header.iter().map(|byte| *byte as u32).sum();
+        write_tar_checksum(&mut header[148..156], checksum);
+
+        let mut archive = Vec::from(header);
+        archive.extend_from_slice(payload);
+        let padding = (512 - (payload.len() % 512)) % 512;
+        archive.extend(std::iter::repeat_n(0u8, padding));
+        archive.extend([0u8; 1024]);
+        archive
+    }
+
+    fn copy_tar_field(field: &mut [u8], bytes: &[u8]) {
+        assert!(
+            bytes.len() <= field.len(),
+            "tar field overflow in test fixture"
+        );
+        field[..bytes.len()].copy_from_slice(bytes);
+    }
+
+    fn write_tar_octal(field: &mut [u8], value: u64) {
+        let width = field.len() - 1;
+        let encoded = format!("{value:0width$o}", width = width);
+        assert!(
+            encoded.len() <= width,
+            "octal value too large for tar field in test fixture"
+        );
+        field[..width].copy_from_slice(encoded.as_bytes());
+        field[width] = 0;
+    }
+
+    fn write_tar_checksum(field: &mut [u8], checksum: u32) {
+        let encoded = format!("{checksum:06o}");
+        field[..6].copy_from_slice(encoded.as_bytes());
+        field[6] = 0;
+        field[7] = b' ';
+    }
 
     #[test]
     fn encrypt_decrypt_roundtrip() {
@@ -1706,6 +1894,81 @@ mod tests {
             restored_state.recovery_draft_closing_thought.as_deref(),
             Some("Draft closing.")
         );
+    }
+
+    #[test]
+    fn restore_rejects_backup_path_traversal_entries() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let restore_root = dir.path().join("restored");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+
+        let timestamp = DateTime::parse_from_rfc3339("2026-03-17T12:00:00Z")
+            .expect("timestamp")
+            .with_timezone(&Utc);
+        let backup_dir = root.join("backups");
+        secure_fs::ensure_private_dir(&backup_dir).expect("backup dir");
+        let backup_path = backup_dir.join(backup_file_name(timestamp));
+
+        let tar_bytes = build_raw_tar_archive("../escape.txt", b'0', b"owned", "");
+
+        let compressed = zstd::stream::encode_all(Cursor::new(tar_bytes), 3).expect("compress");
+        let encrypted = encrypt_payload(
+            &vault.key,
+            &compressed,
+            backup_aad_string(timestamp).as_bytes(),
+        )
+        .expect("encrypt");
+        atomic_write(&backup_path, &encrypted.to_bytes()).expect("write backup");
+
+        let error = vault
+            .restore_backup_into(&backup_path, &restore_root)
+            .expect_err("reject traversal");
+        assert!(error.to_string().contains("invalid path"));
+        assert!(!dir.path().join("escape.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_rejects_symlinked_target_directories() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let restore_root = dir.path().join("restored");
+        let outside = dir.path().join("outside");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+
+        let timestamp = DateTime::parse_from_rfc3339("2026-03-17T12:00:00Z")
+            .expect("timestamp")
+            .with_timezone(&Utc);
+        let backup_dir = root.join("backups");
+        secure_fs::ensure_private_dir(&backup_dir).expect("backup dir");
+        let backup_path = backup_dir.join(backup_file_name(timestamp));
+
+        secure_fs::ensure_private_dir(&outside).expect("outside dir");
+        secure_fs::ensure_private_dir(&restore_root).expect("restore root");
+        symlink(&outside, restore_root.join("entries")).expect("symlink");
+
+        let tar_bytes = build_raw_tar_archive("entries/2026-03-17.txt", b'0', b"owned", "");
+        let compressed = zstd::stream::encode_all(Cursor::new(tar_bytes), 3).expect("compress");
+        let encrypted = encrypt_payload(
+            &vault.key,
+            &compressed,
+            backup_aad_string(timestamp).as_bytes(),
+        )
+        .expect("encrypt");
+        atomic_write(&backup_path, &encrypted.to_bytes()).expect("write backup");
+
+        let error = vault
+            .restore_backup_into(&backup_path, &restore_root)
+            .expect_err("reject symlinked target");
+        assert!(error.to_string().contains("symlinked directory"));
+        assert!(!outside.join("2026-03-17.txt").exists());
     }
 
     #[test]
