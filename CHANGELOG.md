@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.10
+
+- made export history actionable by reopening a prefilled export prompt instead of a dead-end info screen
+- made backup history actionable by jumping straight into restore with the chosen encrypted backup selected
+- turned Sync Center into an actionable control surface with run, snapshot, history, diagnostics, settings, and integrity actions
+- added focused TUI tests for the new export-history, backup-history, and sync-center workflows
+- revalidated the release bundle and installer smoke path after the remaining feature pass
+
 ## v0.1.9
 
 - fixed overlay sizing bugs that clipped help, conflict, date, index, sync, and settings screens

@@ -475,8 +475,18 @@ pub enum PickerAction {
     Menu(MenuAction),
     OpenDate(NaiveDate),
     OpenSearch(String),
+    OpenExportPrompt {
+        format: ExportFormatUi,
+        path: String,
+    },
+    OpenRestorePrompt {
+        backup_path: PathBuf,
+    },
     InsertText(String),
-    ShowInfo { title: String, text: String },
+    ShowInfo {
+        title: String,
+        text: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -604,8 +614,13 @@ impl PickerOverlay {
             item.keywords.zeroize();
             match &mut item.action {
                 PickerAction::Menu(_) | PickerAction::OpenDate(_) => {}
-                PickerAction::OpenSearch(query) | PickerAction::InsertText(query) => {
+                PickerAction::OpenSearch(query)
+                | PickerAction::OpenExportPrompt { path: query, .. }
+                | PickerAction::InsertText(query) => {
                     query.zeroize();
+                }
+                PickerAction::OpenRestorePrompt { backup_path } => {
+                    backup_path.as_mut_os_string().clear();
                 }
                 PickerAction::ShowInfo { title, text } => {
                     title.zeroize();
@@ -660,6 +675,19 @@ impl ExportPrompt {
         Self {
             format,
             path_input: default_export_path(date, format).display().to_string(),
+            error: None,
+        }
+    }
+
+    fn with_preset(date: NaiveDate, format: ExportFormatUi, path_input: String) -> Self {
+        let path_input = if path_input.trim().is_empty() {
+            default_export_path(date, format).display().to_string()
+        } else {
+            path_input
+        };
+        Self {
+            format,
+            path_input,
             error: None,
         }
     }
@@ -1199,6 +1227,22 @@ impl RestorePrompt {
             stage: RestoreStage::SelectBackup,
             error: None,
         }
+    }
+
+    fn with_selected_backup(
+        backups: Vec<vault::BackupEntry>,
+        selected_date: NaiveDate,
+        selected_backup_path: &Path,
+    ) -> Self {
+        let mut prompt = Self::new(backups, selected_date);
+        if let Some(index) = prompt
+            .backups
+            .iter()
+            .position(|backup| backup.path == selected_backup_path)
+        {
+            prompt.selected = index;
+        }
+        prompt
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -3419,6 +3463,15 @@ impl App {
         self.overlay = Some(Overlay::ExportPrompt(ExportPrompt::new(self.selected_date)));
     }
 
+    fn open_export_prompt_with_preset(&mut self, format: ExportFormatUi, path: String) {
+        self.menu = None;
+        self.overlay = Some(Overlay::ExportPrompt(ExportPrompt::with_preset(
+            self.selected_date,
+            format,
+            path,
+        )));
+    }
+
     fn open_index_overlay(&mut self) {
         self.menu = None;
         let items = self.load_index_entries();
@@ -3616,20 +3669,24 @@ impl App {
             .config
             .export_history
             .iter()
-            .map(|entry| PickerItem {
-                title: format!("{} {}", entry.date, entry.format.to_ascii_uppercase()),
-                detail: entry.path.chars().take(42).collect(),
-                keywords: format!("export history {} {}", entry.date, entry.path),
-                action: PickerAction::ShowInfo {
-                    title: "Export Record".to_string(),
-                    text: [
-                        format!("When   : {}", entry.timestamp),
-                        format!("Date   : {}", entry.date),
-                        format!("Format : {}", entry.format),
-                        format!("Path   : {}", entry.path),
-                    ]
-                    .join("\n"),
-                },
+            .map(|entry| {
+                let file_name = Path::new(&entry.path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("export");
+                let format = parse_export_history_format(&entry.format);
+                PickerItem {
+                    title: format!("{file_name} {}", format.label()),
+                    detail: format!("{} {}", entry.date, truncate_for_picker(&entry.path, 30)),
+                    keywords: format!(
+                        "export history {} {} {} {}",
+                        entry.date, entry.timestamp, entry.format, entry.path
+                    ),
+                    action: PickerAction::OpenExportPrompt {
+                        format,
+                        path: entry.path.clone(),
+                    },
+                }
             })
             .collect::<Vec<_>>();
         self.open_picker_overlay(PickerOverlay::new(
@@ -4115,47 +4172,134 @@ impl App {
             return;
         };
 
-        let mut lines = vec!["Sync Center".to_string(), String::new()];
-        match self.resolve_sync_request() {
-            Ok(request) => {
-                lines.push(format!("Backend      : {}", request.backend_label()));
-                lines.push(format!("Target       : {}", request.target_label()));
-                match self.sync_preview_report(&request) {
-                    Ok(preview) => {
-                        lines.push(format!("Local revs   : {}", preview.local_revisions));
-                        lines.push(format!("Remote revs  : {}", preview.remote_revisions));
-                        lines.push(format!("Upload queue : {}", preview.local_only_revisions));
-                        lines.push(format!("Download q   : {}", preview.remote_only_revisions));
-                        lines.push(format!("Shared revs  : {}", preview.shared_revisions));
-                    }
-                    Err(error) => lines.push(format!("Preview      : {error}")),
-                }
-            }
-            Err(error) => lines.push(format!("Backend      : {error}")),
-        }
         let conflicts = vault
             .list_conflicted_dates()
             .map(|dates| dates.len())
             .unwrap_or(0);
-        lines.push(format!("Conflicts    : {conflicts}"));
-        lines.push(format!(
-            "Dirty draft  : {}",
-            if self.dirty { "YES" } else { "NO" }
-        ));
-        lines.push(format!(
-            "Last sync    : {}",
-            self.config
-                .last_sync
-                .as_ref()
-                .map(|sync| format!(
+        let dirty_state = if self.dirty {
+            "draft dirty"
+        } else {
+            "draft clean"
+        };
+        let (backend_label, target_label, preview_detail, preview_text) =
+            match self.resolve_sync_request() {
+                Ok(request) => match self.sync_preview_report(&request) {
+                    Ok(preview) => (
+                        request.backend_label().to_string(),
+                        request.target_label().to_string(),
+                        format!(
+                            "up {} down {} shared {}",
+                            preview.local_only_revisions,
+                            preview.remote_only_revisions,
+                            preview.shared_revisions
+                        ),
+                        [
+                            format!("Backend      : {}", request.backend_label()),
+                            format!("Target       : {}", request.target_label()),
+                            format!("Local revs   : {}", preview.local_revisions),
+                            format!("Remote revs  : {}", preview.remote_revisions),
+                            format!("Upload queue : {}", preview.local_only_revisions),
+                            format!("Download q   : {}", preview.remote_only_revisions),
+                            format!("Shared revs  : {}", preview.shared_revisions),
+                            format!("Conflicts    : {conflicts}"),
+                            format!("Dirty draft  : {}", if self.dirty { "YES" } else { "NO" }),
+                            format!(
+                                "Last sync    : {}",
+                                self.config
+                                    .last_sync
+                                    .as_ref()
+                                    .map(|sync| format!(
+                                        "{} {} +{} / -{}",
+                                        sync.timestamp, sync.backend, sync.pushed, sync.pulled
+                                    ))
+                                    .unwrap_or_else(|| "never".to_string())
+                            ),
+                        ]
+                        .join("\n"),
+                    ),
+                    Err(error) => (
+                        request.backend_label().to_string(),
+                        request.target_label().to_string(),
+                        format!("preview unavailable: {error}"),
+                        [
+                            format!("Backend      : {}", request.backend_label()),
+                            format!("Target       : {}", request.target_label()),
+                            format!("Preview      : {error}"),
+                            format!("Conflicts    : {conflicts}"),
+                            format!("Dirty draft  : {}", if self.dirty { "YES" } else { "NO" }),
+                        ]
+                        .join("\n"),
+                    ),
+                },
+                Err(error) => (
+                    "UNCONFIGURED".to_string(),
+                    "Set a sync target first".to_string(),
+                    "configure a target".to_string(),
+                    [
+                        format!("Backend      : {error}"),
+                        format!("Conflicts    : {conflicts}"),
+                        format!("Dirty draft  : {}", if self.dirty { "YES" } else { "NO" }),
+                    ]
+                    .join("\n"),
+                ),
+            };
+        let last_sync_detail = self
+            .config
+            .last_sync
+            .as_ref()
+            .map(|sync| {
+                format!(
                     "{} {} +{} / -{}",
                     sync.timestamp, sync.backend, sync.pushed, sync.pulled
-                ))
-                .unwrap_or_else(|| "never".to_string())
+                )
+            })
+            .unwrap_or_else(|| "never".to_string());
+        let items = vec![
+            PickerItem {
+                title: "Run Encrypted Sync".to_string(),
+                detail: format!("{backend_label} {preview_detail}"),
+                keywords: format!("sync run upload download {backend_label} {target_label}"),
+                action: PickerAction::Menu(MenuAction::Sync),
+            },
+            PickerItem {
+                title: "Show Sync Snapshot".to_string(),
+                detail: format!("{dirty_state} | conflicts {conflicts}"),
+                keywords: format!("sync preview snapshot conflicts {target_label}"),
+                action: PickerAction::ShowInfo {
+                    title: "Sync Snapshot".to_string(),
+                    text: preview_text,
+                },
+            },
+            PickerItem {
+                title: "Recent Sync Runs".to_string(),
+                detail: truncate_for_picker(&last_sync_detail, 40),
+                keywords: "sync history runs last sync".to_string(),
+                action: PickerAction::Menu(MenuAction::SyncHistory),
+            },
+            PickerItem {
+                title: "Doctor Report".to_string(),
+                detail: format!("{conflicts} conflict(s) | {dirty_state}"),
+                keywords: "doctor diagnostics sync health".to_string(),
+                action: PickerAction::Menu(MenuAction::DoctorReport),
+            },
+            PickerItem {
+                title: "Settings Summary".to_string(),
+                detail: truncate_for_picker(&target_label, 40),
+                keywords: "settings sync target backend".to_string(),
+                action: PickerAction::Menu(MenuAction::SettingsSummary),
+            },
+            PickerItem {
+                title: "Verify Integrity".to_string(),
+                detail: self.integrity_status_label(),
+                keywords: "verify integrity hashchain".to_string(),
+                action: PickerAction::Menu(MenuAction::IntegrityDetails),
+            },
+        ];
+        self.open_picker_overlay(PickerOverlay::new(
+            "Sync Center",
+            items,
+            "No sync actions available.",
         ));
-        lines.push(String::new());
-        lines.push("Use F8 or TOOLS -> Sync Vault to run the encrypted sync pipeline.".to_string());
-        self.open_info_overlay("Sync Center", lines.join("\n"));
     }
 
     fn open_review_overlay(&mut self) {
@@ -4275,34 +4419,45 @@ impl App {
             return;
         };
 
-        let output = match vault.list_backups() {
-            Ok(backups) if backups.is_empty() => "No encrypted backups yet.".to_string(),
+        match vault.list_backups() {
+            Ok(backups) if backups.is_empty() => self.flash_status("NO BACKUPS."),
             Ok(backups) => {
-                let mut lines = vec![
-                    "Encrypted backups".to_string(),
-                    String::new(),
-                    "DATE/TIME           SIZE       FILE".to_string(),
-                    "-----------------------------------------------".to_string(),
-                ];
-                for backup in backups.into_iter().take(14) {
-                    let file_name = backup
-                        .path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("backup");
-                    lines.push(format!(
-                        "{}  {:>8}  {}",
-                        backup.created_at.format("%Y-%m-%d %H:%M"),
-                        human_bytes(backup.size_bytes),
-                        file_name
-                    ));
-                }
-                lines.join("\n")
+                let items = backups
+                    .into_iter()
+                    .map(|backup| {
+                        let file_name = backup
+                            .path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("backup")
+                            .to_string();
+                        let detail = format!(
+                            "{}  {}",
+                            backup.created_at.format("%Y-%m-%d %H:%M"),
+                            human_bytes(backup.size_bytes)
+                        );
+                        PickerItem {
+                            title: file_name,
+                            detail,
+                            keywords: format!(
+                                "backup restore {} {}",
+                                backup.created_at.format("%Y-%m-%d %H:%M:%S"),
+                                backup.path.display()
+                            ),
+                            action: PickerAction::OpenRestorePrompt {
+                                backup_path: backup.path,
+                            },
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                self.open_picker_overlay(PickerOverlay::new(
+                    "Backup History",
+                    items,
+                    "No encrypted backups yet.",
+                ));
             }
-            Err(error) => format!("Failed to load backups: {error}"),
-        };
-
-        self.open_info_overlay("Backup History", output);
+            Err(error) => self.flash_status(&format!("BACKUP LIST FAILED: {error}")),
+        }
     }
 
     fn open_backup_cleanup_preview_overlay(&mut self) {
@@ -4390,6 +4545,25 @@ impl App {
                 self.overlay = Some(Overlay::RestorePrompt(RestorePrompt::new(
                     backups,
                     self.selected_date,
+                )));
+            }
+            Err(error) => self.flash_status(&format!("RESTORE LIST FAILED: {error}")),
+        }
+    }
+
+    fn open_restore_prompt_with_selected_backup(&mut self, selected_backup_path: &Path) {
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+        match vault.list_backups() {
+            Ok(backups) if backups.is_empty() => self.flash_status("NO BACKUPS."),
+            Ok(backups) => {
+                self.menu = None;
+                self.overlay = Some(Overlay::RestorePrompt(RestorePrompt::with_selected_backup(
+                    backups,
+                    self.selected_date,
+                    selected_backup_path,
                 )));
             }
             Err(error) => self.flash_status(&format!("RESTORE LIST FAILED: {error}")),
@@ -5207,6 +5381,13 @@ impl App {
                 }
                 self.menu = None;
                 self.overlay = Some(Overlay::Search(overlay));
+            }
+            PickerAction::OpenExportPrompt { format, path } => {
+                self.open_export_prompt_with_preset(format, path);
+                self.flash_status("EXPORT PRESET LOADED.");
+            }
+            PickerAction::OpenRestorePrompt { backup_path } => {
+                self.open_restore_prompt_with_selected_backup(&backup_path);
             }
             PickerAction::InsertText(text) => {
                 self.buffer.insert_text(&text);
@@ -6060,6 +6241,36 @@ fn default_export_path(date: NaiveDate, format: ExportFormatUi) -> PathBuf {
     ))
 }
 
+fn parse_export_history_format(value: &str) -> ExportFormatUi {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "markdown" | "md" => ExportFormatUi::Markdown,
+        _ => ExportFormatUi::PlainText,
+    }
+}
+
+fn truncate_for_picker(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text.to_string();
+    }
+    if max_chars <= 3 {
+        return "...".chars().take(max_chars).collect();
+    }
+    let keep = max_chars - 3;
+    let head = keep / 2;
+    let tail = keep - head;
+    let prefix = text.chars().take(head).collect::<String>();
+    let suffix = text
+        .chars()
+        .rev()
+        .take(tail)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
+}
+
 fn render_markdown_export(
     date: NaiveDate,
     entry_number: &str,
@@ -6540,6 +6751,7 @@ mod tests {
         parse_optional_overlay_date, resolve_recovery_text,
     };
     use crate::{
+        config::RecentExportInfo,
         search::{SearchDocument, SearchIndex, SearchResult, Snippet},
         tui::buffer::{MatchPos, TextBuffer},
         vault::{self, BackupEntry, ConflictHead, ConflictState, EntryMetadata, IndexEntry},
@@ -7059,6 +7271,34 @@ mod tests {
     }
 
     #[test]
+    fn export_history_picker_opens_prefilled_export_prompt() {
+        let mut app =
+            App::with_initial_date(Some(NaiveDate::from_ymd_opt(2026, 3, 18).expect("date")));
+        app.config.export_history = vec![RecentExportInfo {
+            timestamp: "2026-03-18T10:15:00-04:00".to_string(),
+            date: "2026-03-16".to_string(),
+            format: "markdown".to_string(),
+            path: "/tmp/exports/quiet.md".to_string(),
+        }];
+
+        app.open_export_history_overlay();
+        let action = match app.overlay() {
+            Some(Overlay::Picker(picker)) => picker.items[0].action.clone(),
+            other => panic!("expected export history picker, got {other:?}"),
+        };
+
+        app.apply_picker_action(action, 20);
+
+        match app.overlay() {
+            Some(Overlay::ExportPrompt(prompt)) => {
+                assert_eq!(prompt.format, ExportFormatUi::Markdown);
+                assert_eq!(prompt.path_input, "/tmp/exports/quiet.md");
+            }
+            other => panic!("expected export prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn word_goal_status_label_reflects_progress() {
         let mut app = App::with_initial_date(None);
         app.config.daily_word_goal = Some(5);
@@ -7085,6 +7325,92 @@ mod tests {
         match app.overlay() {
             Some(Overlay::Search(search)) => assert_eq!(search.query_input, "quiet"),
             other => panic!("expected search overlay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn backup_history_picker_opens_restore_prompt_with_selected_backup() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+        let metadata = vault::create_vault(&root, &passphrase, None, "Test").expect("create");
+        let unlocked = vault::unlock_vault_with_device(&root, &passphrase, metadata.device_id)
+            .expect("unlock");
+        let selected_backup = unlocked
+            .create_backup(&crate::config::BackupRetentionConfig::default())
+            .expect("backup")
+            .path;
+
+        let mut app =
+            App::with_initial_date(Some(NaiveDate::from_ymd_opt(2026, 3, 18).expect("date")));
+        app.vault_path = root;
+        app.vault = Some(unlocked);
+
+        app.open_backup_history_overlay();
+        let action = match app.overlay() {
+            Some(Overlay::Picker(picker)) => picker
+                .items
+                .iter()
+                .find(|item| matches!(
+                    item.action,
+                    PickerAction::OpenRestorePrompt { ref backup_path } if *backup_path == selected_backup
+                ))
+                .map(|item| item.action.clone())
+                .expect("restore action"),
+            other => panic!("expected backup history picker, got {other:?}"),
+        };
+
+        app.apply_picker_action(action, 20);
+
+        match app.overlay() {
+            Some(Overlay::RestorePrompt(prompt)) => {
+                assert_eq!(
+                    prompt.selected_backup().expect("selected").path,
+                    selected_backup
+                );
+            }
+            other => panic!("expected restore prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sync_center_is_actionable_picker() {
+        let dir = tempdir().expect("tempdir");
+        let local_root = dir.path().join("local");
+        let remote_root = dir.path().join("remote");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+        let metadata =
+            vault::create_vault(&local_root, &passphrase, None, "Local").expect("create local");
+        vault::create_vault(&remote_root, &passphrase, None, "Remote").expect("create remote");
+        let local_metadata = std::fs::read(local_root.join("vault.json")).expect("local metadata");
+        std::fs::write(remote_root.join("vault.json"), local_metadata).expect("align metadata");
+        let unlocked =
+            vault::unlock_vault_with_device(&local_root, &passphrase, metadata.device_id)
+                .expect("unlock");
+
+        let mut app =
+            App::with_initial_date(Some(NaiveDate::from_ymd_opt(2026, 3, 18).expect("date")));
+        app.vault_path = local_root;
+        app.vault = Some(unlocked);
+        app.config.sync_target_path = Some(remote_root.clone());
+
+        app.open_sync_center_overlay();
+
+        match app.overlay() {
+            Some(Overlay::Picker(picker)) => {
+                assert_eq!(picker.title, "Sync Center");
+                assert!(picker.items.iter().any(|item| {
+                    item.title == "Run Encrypted Sync"
+                        && matches!(item.action, PickerAction::Menu(MenuAction::Sync))
+                }));
+                assert!(picker.items.iter().any(|item| {
+                    item.title == "Recent Sync Runs"
+                        && matches!(item.action, PickerAction::Menu(MenuAction::SyncHistory))
+                }));
+            }
+            other => panic!("expected sync center picker, got {other:?}"),
         }
     }
 
