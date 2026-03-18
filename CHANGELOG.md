@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.7
+
+- added a command palette so major in-product actions are reachable from one searchable overlay
+- added recent entries and favorite dates pickers for faster time navigation
+- added recent search query recall and reusable writing prompts
+- added a daily word goal setting plus live goal progress in the UI
+- added session timing and richer dashboard telemetry
+- added persistent sync history so past sync outcomes are visible inside the product
+- expanded settings and product reporting to expose the new state cleanly
+
 ## v0.1.6
 
 - added a DOS-style writing ruler with live cursor position emphasis

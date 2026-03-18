@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "bsj"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "argon2",
  "aws-config",
