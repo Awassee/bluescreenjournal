@@ -127,7 +127,8 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let left = format!(
-        "[{}]  PERSONAL JOURNAL{}{}  TIME {}  ENTRY NO. {}",
+        "BSJ {}  [{}]  PERSONAL JOURNAL{}{}  TIME {}  ENTRY NO. {}",
+        app.app_version_label(),
         app.header_entry_focus_label(),
         if compact_mode { " [COMPACT]" } else { "" },
         if app.favorite_marker().is_empty() {
@@ -702,8 +703,12 @@ fn draw_unlock_overlay(
 }
 
 fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
+    let version_line = format!(
+        "BlueScreen Journal {}  |  Classic 80x25 workspace.",
+        env!("CARGO_PKG_VERSION")
+    );
     let lines = vec![
-        Line::from("Classic 80x25 workspace. Type immediately when no menu or prompt is open."),
+        Line::from(version_line),
         Line::from("Esc menus. Alt+F/E/S/G/T/U/H menu. Ctrl+K = commands."),
         Line::from("Alt+Right next day. Alt+N next blank new entry."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),

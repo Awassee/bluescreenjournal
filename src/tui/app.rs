@@ -1794,6 +1794,14 @@ impl App {
         Local::now().format(time_format).to_string()
     }
 
+    pub fn app_version_label(&self) -> String {
+        if let Some(sha) = option_env!("BSJ_GIT_SHA") {
+            format!("v{}+{}", env!("CARGO_PKG_VERSION"), sha)
+        } else {
+            format!("v{}", env!("CARGO_PKG_VERSION"))
+        }
+    }
+
     pub fn header_entry_focus_label(&self) -> String {
         let today = Local::now().date_naive();
         if self.selected_date == today {
@@ -4893,6 +4901,7 @@ impl App {
         let output = [
             "BlueScreen Journal Dashboard".to_string(),
             String::new(),
+            format!("Version     : {}", self.app_version_label()),
             format!("Vault       : {vault_state}"),
             format!("Date        : {}", self.selected_date.format("%Y-%m-%d")),
             format!("Entry No.   : {}", self.entry_number_label()),
@@ -8197,6 +8206,8 @@ mod tests {
 
         let rendered = render_app(&app, 100, 30);
 
+        assert!(rendered.contains("BlueScreen Journal"));
+        assert!(rendered.contains(env!("CARGO_PKG_VERSION")));
         assert!(rendered.contains("Enter/Esc/F1 closes."));
         assert!(rendered.contains("Ctrl+K = commands."));
     }
@@ -8219,6 +8230,7 @@ mod tests {
         let rendered = render_app(&app, 60, 20);
 
         assert!(!rendered.contains("TERMINAL TOO SMALL"));
+        assert!(rendered.contains("BSJ v"));
         assert!(rendered.contains("PERSONAL JOURNAL [COMPACT]"));
         assert!(rendered.contains("FILE"));
     }
