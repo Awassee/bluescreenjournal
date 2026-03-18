@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.9
+
+- fixed overlay sizing bugs that clipped help, conflict, date, index, sync, and settings screens
+- improved setup, unlock, export, restore, and conflict copy so first-run and recovery flows are clearer
+- kept a compact `Ctrl+K` commands hint in the footer when the full function-key strip is hidden
+- added render-smoke tests that draw major screens and overlays at real terminal sizes
+- revalidated the product with format, clippy, tests, packaging, and installer smoke checks
+
 ## v0.1.8
 
 - added a large writing-tools pass with line duplication, deletion, line movement, blank-line insertion, divider insertion, and date/time/stat/metadata stamps

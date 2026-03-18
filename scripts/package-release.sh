@@ -8,6 +8,29 @@ UNIVERSAL=0
 AUDIT=1
 PACKAGE_RUSTFLAGS="${RUSTFLAGS:-}"
 
+bootstrap_rustup_toolchain_path() {
+  local rustc_path=""
+  local toolchain_bin=""
+
+  if ! command -v rustup >/dev/null 2>&1; then
+    return
+  fi
+
+  rustc_path="$(rustup which rustc 2>/dev/null || true)"
+  if [[ -z "$rustc_path" ]]; then
+    return
+  fi
+
+  toolchain_bin="$(dirname "$rustc_path")"
+  case ":$PATH:" in
+    *":$toolchain_bin:"*) ;;
+    *)
+      PATH="$toolchain_bin:$PATH"
+      export PATH
+      ;;
+  esac
+}
+
 usage() {
   cat <<'EOF'
 package-release.sh
@@ -53,6 +76,8 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+bootstrap_rustup_toolchain_path
 
 if [[ -n "$TARGET" && "$UNIVERSAL" -eq 1 ]]; then
   echo "--target and --universal cannot be combined" >&2

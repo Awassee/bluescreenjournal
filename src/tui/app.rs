@@ -1849,6 +1849,14 @@ impl App {
         }
     }
 
+    pub fn vault_path_label(&self) -> String {
+        self.vault_path.display().to_string()
+    }
+
+    pub fn keychain_memory_enabled(&self) -> bool {
+        self.config.remember_passphrase_in_keychain
+    }
+
     pub fn empty_state_lines(&self) -> [&'static str; 7] {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
@@ -3593,7 +3601,7 @@ impl App {
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("export");
-                self.flash_status(&format!("EXPORTED {file_name}."));
+                self.flash_status(&format!("PLAINTEXT EXPORTED {file_name}."));
             }
             Err(error) => self.flash_status(&format!("EXPORT FAILED: {error}")),
         }
@@ -5425,7 +5433,7 @@ impl App {
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("export");
-                self.flash_status(&format!("EXPORTED {file_name}."));
+                self.flash_status(&format!("PLAINTEXT EXPORTED {file_name}."));
                 true
             }
             Err(error) => {
@@ -6525,21 +6533,43 @@ fn next_entry_month(entry_dates: &BTreeSet<NaiveDate>, selected: NaiveDate) -> O
 #[cfg(test)]
 mod tests {
     use super::{
-        App, DatePicker, ExportFormatUi, ExportPrompt, IndexState, MenuAction, MenuId, Overlay,
-        PickerAction, PickerItem, PickerOverlay, SearchField, SearchJump, SearchOverlay, SyncPhase,
-        SyncRequest, SyncStatusOverlay, default_export_path, format_reveal_codes,
-        macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
+        App, ConflictOverlay, DatePicker, ExportFormatUi, ExportPrompt, IndexState, MenuAction,
+        MenuId, Overlay, PickerAction, PickerItem, PickerOverlay, RestorePrompt, SearchField,
+        SearchJump, SearchOverlay, SettingField, SettingPrompt, SyncPhase, SyncRequest,
+        SyncStatusOverlay, default_export_path, format_reveal_codes, macro_key_matches,
+        parse_optional_overlay_date, resolve_recovery_text,
     };
     use crate::{
         search::{SearchDocument, SearchIndex, SearchResult, Snippet},
         tui::buffer::{MatchPos, TextBuffer},
-        vault::{self, EntryMetadata, IndexEntry},
+        vault::{self, BackupEntry, ConflictHead, ConflictState, EntryMetadata, IndexEntry},
     };
-    use chrono::{Duration, NaiveDate};
+    use chrono::{Duration, NaiveDate, Utc};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
     use secrecy::SecretString;
     use std::path::PathBuf;
     use tempfile::tempdir;
+
+    fn render_app(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| super::super::draw(frame, app))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let area = *buffer.area();
+        let mut lines = Vec::new();
+        for y in 0..area.height {
+            let mut line = String::new();
+            for x in 0..area.width {
+                let cell = buffer.cell((x, y)).expect("cell");
+                line.push_str(cell.symbol());
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        lines.join("\n")
+    }
 
     #[test]
     fn resize_event_does_not_panic() {
@@ -7178,5 +7208,180 @@ mod tests {
             .filter_map(Result::ok)
             .count();
         assert_eq!(synced_files, 1);
+    }
+
+    #[test]
+    fn help_overlay_renders_close_hint() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::Help);
+
+        let rendered = render_app(&app, 100, 30);
+
+        assert!(rendered.contains("Enter/Esc/F1 closes."));
+        assert!(rendered.contains("Ctrl+K = commands."));
+    }
+
+    #[test]
+    fn small_terminal_warning_reports_current_size() {
+        let app = App::with_initial_date(None);
+
+        let rendered = render_app(&app, 60, 20);
+
+        assert!(rendered.contains("TERMINAL TOO SMALL"));
+        assert!(rendered.contains("CURRENT 60x20"));
+    }
+
+    #[test]
+    fn setting_prompt_renders_full_footer_line() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::SettingPrompt(SettingPrompt::new(
+            SettingField::VaultPath,
+            &app.config,
+        )));
+
+        let rendered = render_app(&app, 100, 30);
+
+        assert!(rendered.contains("Enter save  Esc cancel"));
+    }
+
+    #[test]
+    fn conflict_overlay_renders_all_actions_and_footer() {
+        let mut app = App::with_initial_date(None);
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let conflict = ConflictState {
+            date,
+            heads: vec![
+                ConflictHead {
+                    revision_hash: "a".repeat(64),
+                    device_id: "mac-a".to_string(),
+                    seq: 1,
+                    saved_at: Utc::now(),
+                    body: "Body A".to_string(),
+                    closing_thought: None,
+                    entry_metadata: EntryMetadata::default(),
+                    preview: "Preview A".to_string(),
+                },
+                ConflictHead {
+                    revision_hash: "b".repeat(64),
+                    device_id: "mac-b".to_string(),
+                    seq: 2,
+                    saved_at: Utc::now(),
+                    body: "Body B".to_string(),
+                    closing_thought: None,
+                    entry_metadata: EntryMetadata::default(),
+                    preview: "Preview B".to_string(),
+                },
+            ],
+        };
+        app.overlay = Some(Overlay::ConflictChoice(ConflictOverlay::new(conflict)));
+
+        let rendered = render_app(&app, 100, 30);
+
+        assert!(rendered.contains("CONFLICT DETECTED FOR 2026-03-16"));
+        assert!(rendered.contains("Left/Right or 1-5 choose  Esc close"));
+    }
+
+    #[test]
+    fn search_overlay_renders_bottom_navigation_hints() {
+        let mut app = App::with_initial_date(None);
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut overlay = SearchOverlay::new(Some("quiet".to_string()));
+        overlay.results = vec![SearchResult {
+            date,
+            entry_number: "0000001".to_string(),
+            snippet: Snippet {
+                text: "quiet morning notes".to_string(),
+                highlight_start: 0,
+                highlight_end: 5,
+            },
+            row: 0,
+            start_col: 0,
+            end_col: 5,
+            matched_text: "quiet".to_string(),
+        }];
+        overlay.active_field = SearchField::Results;
+        app.overlay = Some(Overlay::Search(overlay));
+
+        let rendered = render_app(&app, 100, 30);
+
+        assert!(rendered.contains("Up/Down/PgUp/PgDn move results  Esc close"));
+        assert!(rendered.contains("T today  M month  A all  C clear filters"));
+    }
+
+    #[test]
+    fn index_overlay_renders_filter_and_open_hints() {
+        let mut app = App::with_initial_date(None);
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        app.overlay = Some(Overlay::Index(IndexState::new(
+            vec![
+                IndexEntry {
+                    date,
+                    entry_number: "0000001".to_string(),
+                    preview: "Quiet morning".to_string(),
+                    has_conflict: false,
+                    metadata: EntryMetadata::default(),
+                },
+                IndexEntry {
+                    date: date + Duration::days(1),
+                    entry_number: "0000002".to_string(),
+                    preview: "Conflict review".to_string(),
+                    has_conflict: true,
+                    metadata: EntryMetadata {
+                        tags: vec!["work".to_string()],
+                        people: vec!["Alex".to_string()],
+                        project: Some("Launch".to_string()),
+                        mood: Some(7),
+                    },
+                },
+            ],
+            date,
+            Default::default(),
+        )));
+
+        let rendered = render_app(&app, 100, 30);
+
+        assert!(rendered.contains("Shift+F favorites  Shift+C conflicts"));
+        assert!(rendered.contains("Enter open  Esc close"));
+    }
+
+    #[test]
+    fn restore_overlay_renders_safety_guidance() {
+        let mut app = App::with_initial_date(None);
+        let backup = BackupEntry {
+            path: PathBuf::from("/tmp/backup-20260316T010203Z.bsjbak.enc"),
+            created_at: Utc::now(),
+            size_bytes: 4096,
+        };
+        app.overlay = Some(Overlay::RestorePrompt(RestorePrompt::new(
+            vec![backup],
+            NaiveDate::from_ymd_opt(2026, 3, 16).expect("date"),
+        )));
+
+        let rendered = render_app(&app, 100, 30);
+
+        assert!(rendered.contains("Use a new or empty folder."));
+        assert!(rendered.contains("Enter next/restore  Esc cancel"));
+    }
+
+    #[test]
+    fn sync_overlay_renders_close_hint() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::SyncStatus(SyncStatusOverlay {
+            backend_label: "FOLDER".to_string(),
+            target_label: "/tmp/bsj-sync".to_string(),
+            phase: SyncPhase::Complete {
+                pulled: 1,
+                pushed: 2,
+                conflicts: vec![NaiveDate::from_ymd_opt(2026, 3, 16).expect("date")],
+                integrity_ok: true,
+                integrity_issue_count: 0,
+            },
+            draft_notice: true,
+        }));
+
+        let rendered = render_app(&app, 100, 30);
+
+        assert!(rendered.contains("SYNC COMPLETE"));
+        assert!(rendered.contains("Enter/Esc close"));
     }
 }

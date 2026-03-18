@@ -411,7 +411,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let strip = if app.show_footer_legend_enabled() {
         "EscMenu F1Hl F2Sv F3Dt F4Fd F5Sr F6Rp F7Ix F8Sy F9Cl F10Qt F11Rv F12Lk"
     } else {
-        ""
+        "Ctrl+K COMMANDS"
     };
     let content = join_left_right(area.width as usize, &left, strip);
     frame.render_widget(
@@ -432,8 +432,8 @@ fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
         centered_line(
             area.width as usize,
             &format!(
-                "TERMINAL TOO SMALL: NEED AT LEAST {}x{} DOS SCREEN",
-                MIN_WIDTH, MIN_HEIGHT
+                "TERMINAL TOO SMALL: NEED {}x{}  CURRENT {}x{}",
+                MIN_WIDTH, MIN_HEIGHT, area.width, area.height
             ),
         ),
         centered_line(
@@ -451,22 +451,22 @@ fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
 fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u16, u16)> {
     let overlay = app.overlay()?;
     let rect = match overlay {
-        Overlay::SetupWizard(_) => popup_rect(body_area, 76, 9),
-        Overlay::UnlockPrompt { .. } => popup_rect(body_area, 64, 6),
-        Overlay::Help => popup_rect(body_area, 72, 21),
-        Overlay::DatePicker(_) => popup_rect(body_area, 38, 12),
+        Overlay::SetupWizard(_) => popup_rect(body_area, 76, 10),
+        Overlay::UnlockPrompt { .. } => popup_rect(body_area, 68, 8),
+        Overlay::Help => popup_rect(body_area, 72, 20),
+        Overlay::DatePicker(_) => popup_rect(body_area, 38, 13),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
         Overlay::ClosingPrompt { .. } => popup_rect(body_area, 58, 5),
-        Overlay::ConflictChoice(_) => popup_rect(body_area, 72, 9),
+        Overlay::ConflictChoice(_) => popup_rect(body_area, 72, 15),
         Overlay::MergeDiff(_) => popup_rect(body_area, 92, 18),
         Overlay::Search(_) => popup_rect(body_area, 84, 16),
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
-        Overlay::ExportPrompt(_) => popup_rect(body_area, 72, 8),
-        Overlay::SettingPrompt(_) => popup_rect(body_area, 70, 7),
+        Overlay::ExportPrompt(_) => popup_rect(body_area, 72, 9),
+        Overlay::SettingPrompt(_) => popup_rect(body_area, 70, 8),
         Overlay::MetadataPrompt(_) => popup_rect(body_area, 72, 9),
-        Overlay::Index(_) => popup_rect(body_area, 78, 14),
-        Overlay::SyncStatus(_) => popup_rect(body_area, 76, 10),
+        Overlay::Index(_) => popup_rect(body_area, 78, 16),
+        Overlay::SyncStatus(_) => popup_rect(body_area, 76, 14),
         Overlay::Info(_) => popup_rect(body_area, 76, 16),
         Overlay::Picker(_) => popup_rect(body_area, 76, 14),
         Overlay::RestorePrompt(_) => popup_rect(body_area, 76, 12),
@@ -490,17 +490,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
     match overlay {
         Overlay::SetupWizard(wizard) => draw_setup_overlay(frame, inner, wizard),
         Overlay::UnlockPrompt { input, error } => {
-            let masked = "*".repeat(input.chars().count());
-            let lines = vec![
-                Line::from("Enter vault passphrase to unlock:"),
-                Line::from(format!("> {masked}")),
-                Line::from(error.clone().unwrap_or_default()),
-            ];
-            frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
-            Some((
-                (inner.x + 2 + masked.chars().count() as u16).min(inner.right().saturating_sub(1)),
-                (inner.y + 1).min(inner.bottom().saturating_sub(1)),
-            ))
+            draw_unlock_overlay(frame, inner, app, input, error)
         }
         Overlay::Help => {
             draw_help_overlay(frame, inner);
@@ -607,6 +597,12 @@ fn draw_setup_overlay(
     area: Rect,
     wizard: &SetupWizard,
 ) -> Option<(u16, u16)> {
+    let step_hint = match wizard.step {
+        SetupStep::VaultPath => "Enter accepts the default Documents vault path.",
+        SetupStep::Passphrase => "Use a long passphrase; journal text stays encrypted on disk.",
+        SetupStep::ConfirmPassphrase => "Re-enter the same passphrase exactly.",
+        SetupStep::EpochDate => "Leave blank to start numbering from the vault creation date.",
+    };
     let lines = vec![
         Line::from(wizard.title()),
         Line::from(format!("Vault: {}", wizard.path_input)),
@@ -618,6 +614,7 @@ fn draw_setup_overlay(
             SetupStep::ConfirmPassphrase => "Step 3/4",
             SetupStep::EpochDate => "Step 4/4",
         }),
+        Line::from(step_hint),
         Line::from("Enter = Next, Esc = Quit setup"),
         Line::from(wizard.error.clone().unwrap_or_default()),
     ];
@@ -629,31 +626,55 @@ fn draw_setup_overlay(
     ))
 }
 
+fn draw_unlock_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    input: &str,
+    error: &Option<String>,
+) -> Option<(u16, u16)> {
+    let masked = "*".repeat(input.chars().count());
+    let vault_label = truncate_to_width(&app.vault_path_label(), area.width as usize);
+    let keychain_hint = if app.keychain_memory_enabled() {
+        "Keychain memory is enabled for this vault."
+    } else {
+        "SETUP can enable Keychain memory after unlock."
+    };
+    let lines = vec![
+        Line::from("Enter vault passphrase to unlock:"),
+        Line::from(format!("Vault: {vault_label}")),
+        Line::from(format!("> {masked}")),
+        Line::from(keychain_hint),
+        Line::from("Enter unlock  Esc keep locked"),
+        Line::from(error.clone().unwrap_or_default()),
+    ];
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+    Some((
+        (area.x + 2 + masked.chars().count() as u16).min(area.right().saturating_sub(1)),
+        (area.y + 2).min(area.bottom().saturating_sub(1)),
+    ))
+}
+
 fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
-        Line::from("+----------------------------------------------------+"),
-        Line::from("| Active screen stays centered at classic 80x25      |"),
-        Line::from("| Esc Menus opens FILE / EDIT / SEARCH / GO / ...    |"),
-        Line::from("| Menus use Left/Right + Up/Down + Enter             |"),
-        Line::from("| F1 Help         F2 Save        F3 Dates            |"),
-        Line::from("| F4 Find         F5 Search      F6 Replace          |"),
-        Line::from("| F7 Index        F8 Sync        F9 Closing          |"),
-        Line::from("| F10 Quit        F11 Reveal     F12 Lock            |"),
-        Line::from("| Ctrl+S Save     Ctrl+F Find     Ctrl+K Commands    |"),
-        Line::from("|                                                    |"),
-        Line::from("| EDIT: line tools, stamps, divider, stats, metadata |"),
-        Line::from("| GO: recents, favorites, random jump, calendar      |"),
-        Line::from("| SEARCH: live query, T today, M month, A all, C clr |"),
-        Line::from("| Calendar: type YYYY-MM-DD | [ ] saved | < > month  |"),
-        Line::from("| Index: type filter | Shift+S sort | F/C toggles    |"),
-        Line::from("| FILE: quick export, export history, backup policy  |"),
-        Line::from("| TOOLS: dashboard, review, cache, verify, doctor    |"),
-        Line::from("| SETUP: clock, seconds, ruler, footer, word goal    |"),
-        Line::from("| Header shows lock, verify, goal, session, save     |"),
-        Line::from("| Footer shows mode, context, and live document stats|"),
-        Line::from("| Reveal shows DATE / ENTRY / TAG / MOOD / CLOSE     |"),
-        Line::from("| F12 locks and clears in-memory editor/search state |"),
-        Line::from("+----------------------------------------------------+"),
+        Line::from("Classic 80x25 workspace. Type immediately when no menu or prompt is open."),
+        Line::from("Esc opens menus. Arrows move. Enter runs. Ctrl+K = commands."),
+        Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
+        Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
+        Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),
+        Line::from("Ctrl+S Save  Ctrl+F Find"),
+        Line::from(""),
+        Line::from("FILE   Save, export, backup, restore, lock, quit"),
+        Line::from("EDIT   Lines, stamps, metadata, favorite, reveal, typewriter"),
+        Line::from("SEARCH Vault search, recent queries, presets, cache status"),
+        Line::from("GO     Calendar, index, recents, favorites, random, today"),
+        Line::from("TOOLS  Sync, verify, review, dashboard, prompts, doctor"),
+        Line::from("SETUP  Vault, sync folder, device, clock, ruler, word goal"),
+        Line::from("Calendar: type YYYY-MM-DD, [ ] saved-day jump, < > entry months, T today"),
+        Line::from("Index: type filter, S sort, Shift+F favorites, Shift+C conflicts"),
+        Line::from("Search: Tab fields, Enter search/open, T/M/A presets, C clear filters"),
+        Line::from("Header shows lock, verify, goal, session, and save state."),
+        Line::from("Footer shows mode, context, stats, and status. Enter/Esc/F1 closes."),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
@@ -706,7 +727,9 @@ fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePick
         }
     )));
     lines.push(Line::from("Arrows move  PgUp/PgDn month  < > entry months"));
-    lines.push(Line::from("Home/End month bounds  T today  Enter open"));
+    lines.push(Line::from(
+        "Home/End month bounds  T today  Enter open  Esc close",
+    ));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
@@ -752,9 +775,21 @@ fn draw_search_overlay(
     ];
 
     if search.results.is_empty() {
-        lines.push(Line::from("No results yet. Enter runs the search."));
+        let empty_state = if search.query_input.trim().is_empty() {
+            "Type a query to search saved revisions."
+        } else {
+            "No matches yet. Enter reruns the search with the current filters."
+        };
+        lines.push(Line::from(empty_state));
     } else {
-        let visible_rows = area.height.saturating_sub(9) as usize;
+        let footer_rows =
+            1 + if search.selected_result().is_some() {
+                2
+            } else {
+                0
+            } + 3
+                + if search.error.is_some() { 1 } else { 0 };
+        let visible_rows = area.height.saturating_sub((7 + footer_rows) as u16).max(1) as usize;
         let (start, end) = search.window(visible_rows);
         let preview_width = area.width.saturating_sub(34) as usize;
         for (offset, result) in search.results[start..end].iter().enumerate() {
@@ -833,7 +868,11 @@ fn draw_conflict_choice_overlay(frame: &mut Frame<'_>, area: Rect, conflict: &Co
     let more_heads = conflict.conflict.heads.len().saturating_sub(2);
 
     let mut lines = vec![
-        Line::from("CONFLICT DETECTED"),
+        Line::from(format!(
+            "CONFLICT DETECTED FOR {}",
+            conflict.conflict.date.format("%Y-%m-%d")
+        )),
+        Line::from(format!("Heads: {}", conflict.conflict.heads.len())),
         conflict_option_line("1) View A", conflict.selected == ConflictMode::ViewA),
         Line::from(format!(
             "A: {}",
@@ -861,7 +900,7 @@ fn draw_conflict_choice_overlay(frame: &mut Frame<'_>, area: Rect, conflict: &Co
                 String::new()
             }
         )),
-        Line::from("Enter select  Tab cycle  Esc close"),
+        Line::from("Enter select  Tab cycle  Left/Right or 1-5 choose  Esc close"),
     ];
 
     frame.render_widget(
@@ -941,7 +980,7 @@ fn draw_export_prompt_overlay(
         Line::from("Export the current editor contents to a plaintext file."),
         Line::from(format!("Format: {} (Tab toggles)", prompt.format.label())),
         Line::from(format!("Path  : {}", prompt.path_input)),
-        Line::from("Unsaved edits are included in the export."),
+        Line::from("Warning: exports are plaintext. Unsaved edits are included."),
         Line::from("Enter write file  Esc cancel"),
         Line::from(prompt.error.clone().unwrap_or_default()),
     ];
@@ -1038,7 +1077,7 @@ fn draw_restore_prompt_overlay(
     if prompt.backups.is_empty() {
         lines.push(Line::from("No backups available."));
     } else {
-        let visible_rows = area.height.saturating_sub(7) as usize;
+        let visible_rows = area.height.saturating_sub(8).max(1) as usize;
         let (start, end) = prompt.window(visible_rows.max(1));
         for (offset, backup) in prompt.backups[start..end].iter().enumerate() {
             let absolute_idx = start + offset;
@@ -1073,6 +1112,9 @@ fn draw_restore_prompt_overlay(
         format!("> Target: {}", prompt.target_input),
         target_style,
     )));
+    lines.push(Line::from(
+        "Use a new or empty folder. Existing vaults stay untouched.",
+    ));
     lines.push(Line::from(
         "Tab switch stage  Enter next/restore  Esc cancel",
     ));
@@ -1127,7 +1169,7 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
     if index.items.is_empty() {
         lines.push(Line::from("No saved entries match the current filter."));
     } else {
-        let visible_rows = area.height.saturating_sub(8) as usize;
+        let visible_rows = area.height.saturating_sub(11).max(1) as usize;
         let (start, end) = index.window(visible_rows);
         let preview_width = area.width.saturating_sub(31) as usize;
         for (offset, entry) in index.items[start..end].iter().enumerate() {
@@ -1186,6 +1228,7 @@ fn draw_sync_overlay(frame: &mut Frame<'_>, area: Rect, sync_status: &SyncStatus
     match &sync_status.phase {
         SyncPhase::Pending => {
             lines.push(Line::from("Preparing encrypted sync..."));
+            lines.push(Line::from("Pull  Reconcile  Conflict Check  Push  Verify"));
         }
         SyncPhase::Running => {
             lines.push(Line::from("SYNCING ENCRYPTED BLOBS..."));
@@ -1218,7 +1261,6 @@ fn draw_sync_overlay(frame: &mut Frame<'_>, area: Rect, sync_status: &SyncStatus
             } else {
                 format!("Verify   : BROKEN ({integrity_issue_count})")
             }));
-            lines.push(Line::from("Enter/Esc close"));
         }
         SyncPhase::Error { message } => {
             lines.push(Line::from("SYNC FAILED"));
@@ -1226,7 +1268,6 @@ fn draw_sync_overlay(frame: &mut Frame<'_>, area: Rect, sync_status: &SyncStatus
                 message,
                 area.width.saturating_sub(1) as usize,
             )));
-            lines.push(Line::from("Enter/Esc close"));
         }
     }
 
@@ -1236,6 +1277,8 @@ fn draw_sync_overlay(frame: &mut Frame<'_>, area: Rect, sync_status: &SyncStatus
             "Note: unsaved edits were autosaved locally; only revisions sync.",
         ));
     }
+    lines.push(Line::from(""));
+    lines.push(Line::from("Enter/Esc close"));
 
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
