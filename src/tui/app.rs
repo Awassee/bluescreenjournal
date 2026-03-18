@@ -1,6 +1,7 @@
 use crate::{
     config::{
-        self, AppConfig, LastSyncInfo, MacroActionConfig, MacroCommandConfig, default_vault_path,
+        self, AppConfig, LastSyncInfo, MacroActionConfig, MacroCommandConfig, RecentExportInfo,
+        default_vault_path,
     },
     doctor,
     help::{self, EnvironmentSettings},
@@ -13,7 +14,7 @@ use crate::{
     },
     vault::{self, EntryMetadata, IndexEntry, UnlockedVault},
 };
-use chrono::{DateTime, Duration as ChronoDuration, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use secrecy::SecretString;
 use std::{
@@ -305,6 +306,35 @@ impl SearchOverlay {
             results: Vec::new(),
             selected: 0,
             error: None,
+        }
+    }
+
+    fn apply_today_scope(&mut self, today: NaiveDate) {
+        let today = today.format("%Y-%m-%d").to_string();
+        self.from_input = today.clone();
+        self.to_input = today;
+        self.error = None;
+    }
+
+    fn apply_month_scope(&mut self, today: NaiveDate) {
+        let month_start = today.with_day(1).unwrap_or(today);
+        self.from_input = month_start.format("%Y-%m-%d").to_string();
+        self.to_input = today.format("%Y-%m-%d").to_string();
+        self.error = None;
+    }
+
+    fn clear_filters(&mut self) {
+        self.from_input.clear();
+        self.to_input.clear();
+        self.error = None;
+    }
+
+    pub(crate) fn range_label(&self) -> String {
+        match (self.from_input.trim(), self.to_input.trim()) {
+            ("", "") => "ALL TIME".to_string(),
+            (from, "") => format!("FROM {from}"),
+            ("", to) => format!("TO {to}"),
+            (from, to) => format!("{from}..{to}"),
         }
     }
 
@@ -661,16 +691,26 @@ pub struct IndexState {
     pub selected: usize,
     pub filter_input: String,
     pub sort_oldest_first: bool,
+    pub favorites_only: bool,
+    pub conflicts_only: bool,
+    pub favorite_dates: BTreeSet<NaiveDate>,
 }
 
 impl IndexState {
-    fn new(items: Vec<IndexEntry>, selected_date: NaiveDate) -> Self {
+    fn new(
+        items: Vec<IndexEntry>,
+        selected_date: NaiveDate,
+        favorite_dates: BTreeSet<NaiveDate>,
+    ) -> Self {
         let mut state = Self {
             all_items: items.clone(),
             items,
             selected: 0,
             filter_input: String::new(),
             sort_oldest_first: false,
+            favorites_only: false,
+            conflicts_only: false,
+            favorite_dates,
         };
         state.refresh(selected_date);
         state
@@ -715,6 +755,16 @@ impl IndexState {
         self.refresh(selected_date);
     }
 
+    fn toggle_favorites_only(&mut self, selected_date: NaiveDate) {
+        self.favorites_only = !self.favorites_only;
+        self.refresh(selected_date);
+    }
+
+    fn toggle_conflicts_only(&mut self, selected_date: NaiveDate) {
+        self.conflicts_only = !self.conflicts_only;
+        self.refresh(selected_date);
+    }
+
     fn push_filter_char(&mut self, ch: char, selected_date: NaiveDate) {
         self.filter_input.push(ch);
         self.refresh(selected_date);
@@ -730,7 +780,11 @@ impl IndexState {
         self.items = self
             .all_items
             .iter()
-            .filter(|entry| index_matches_filter(entry, &needle))
+            .filter(|entry| {
+                (!self.favorites_only || self.favorite_dates.contains(&entry.date))
+                    && (!self.conflicts_only || entry.has_conflict)
+                    && index_matches_filter(entry, &needle)
+            })
             .cloned()
             .collect();
         if self.sort_oldest_first {
@@ -750,16 +804,21 @@ impl IndexState {
         for item in &mut self.all_items {
             item.entry_number.zeroize();
             item.preview.zeroize();
+            zeroize_entry_metadata(&mut item.metadata);
         }
         self.all_items.clear();
         for item in &mut self.items {
             item.entry_number.zeroize();
             item.preview.zeroize();
+            zeroize_entry_metadata(&mut item.metadata);
         }
         self.items.clear();
         self.selected = 0;
         self.filter_input.zeroize();
         self.sort_oldest_first = false;
+        self.favorites_only = false;
+        self.conflicts_only = false;
+        self.favorite_dates.clear();
     }
 }
 
@@ -892,6 +951,10 @@ pub enum SettingField {
     VaultPath,
     SyncTargetPath,
     DeviceNickname,
+    Clock12h,
+    ShowSeconds,
+    ShowRuler,
+    ShowFooterLegend,
     DailyWordGoal,
     BackupDaily,
     BackupWeekly,
@@ -904,6 +967,10 @@ impl SettingField {
             SettingField::VaultPath => "vault_path",
             SettingField::SyncTargetPath => "sync_target_path",
             SettingField::DeviceNickname => "device_nickname",
+            SettingField::Clock12h => "clock_12h",
+            SettingField::ShowSeconds => "show_seconds",
+            SettingField::ShowRuler => "show_ruler",
+            SettingField::ShowFooterLegend => "show_footer_legend",
             SettingField::DailyWordGoal => "daily_word_goal",
             SettingField::BackupDaily => "backup_retention.daily",
             SettingField::BackupWeekly => "backup_retention.weekly",
@@ -916,6 +983,10 @@ impl SettingField {
             SettingField::VaultPath => "Vault Path",
             SettingField::SyncTargetPath => "Sync Folder",
             SettingField::DeviceNickname => "Device Name",
+            SettingField::Clock12h => "12-Hour Clock",
+            SettingField::ShowSeconds => "Show Seconds",
+            SettingField::ShowRuler => "Show Ruler",
+            SettingField::ShowFooterLegend => "Footer Legend",
             SettingField::DailyWordGoal => "Daily Word Goal",
             SettingField::BackupDaily => "Daily Backups",
             SettingField::BackupWeekly => "Weekly Backups",
@@ -928,6 +999,10 @@ impl SettingField {
             SettingField::VaultPath => "Set vault path:",
             SettingField::SyncTargetPath => "Set folder sync path (blank clears):",
             SettingField::DeviceNickname => "Set device nickname:",
+            SettingField::Clock12h => "Use 12-hour clock (true/false):",
+            SettingField::ShowSeconds => "Show seconds in header clock (true/false):",
+            SettingField::ShowRuler => "Show DOS ruler above editor (true/false):",
+            SettingField::ShowFooterLegend => "Show function-key footer legend (true/false):",
             SettingField::DailyWordGoal => "Set daily word goal (blank clears):",
             SettingField::BackupDaily => "Keep daily backups:",
             SettingField::BackupWeekly => "Keep weekly backups:",
@@ -940,6 +1015,10 @@ impl SettingField {
             SettingField::VaultPath => "Changing the path relocks into the selected vault.",
             SettingField::SyncTargetPath => "Folder sync target for iCloud / Dropbox style sync.",
             SettingField::DeviceNickname => "Shown in devices/<deviceId>.json and conflicts.",
+            SettingField::Clock12h => "Changes header clock formatting across the app.",
+            SettingField::ShowSeconds => "Useful for tight writing sessions and save timing.",
+            SettingField::ShowRuler => "Turns the WordPerfect-style ruler line on or off.",
+            SettingField::ShowFooterLegend => "Hide when you want a cleaner writing footer.",
             SettingField::DailyWordGoal => "Shown as live progress in the footer and dashboard.",
             SettingField::BackupDaily
             | SettingField::BackupWeekly
@@ -956,6 +1035,10 @@ impl SettingField {
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
             SettingField::DeviceNickname => config.device_nickname.clone(),
+            SettingField::Clock12h => config.clock_12h.to_string(),
+            SettingField::ShowSeconds => config.show_seconds.to_string(),
+            SettingField::ShowRuler => config.show_ruler.to_string(),
+            SettingField::ShowFooterLegend => config.show_footer_legend.to_string(),
             SettingField::DailyWordGoal => config
                 .daily_word_goal
                 .map(|goal| goal.to_string())
@@ -1163,8 +1246,12 @@ pub enum MenuAction {
     CommandPalette,
     Save,
     Export,
+    QuickExportText,
+    QuickExportMarkdown,
+    ExportHistory,
     BackupHistory,
     BackupCleanupPreview,
+    BackupPolicy,
     BackupPruneNow,
     Backup,
     RestoreBackup,
@@ -1183,25 +1270,50 @@ pub enum MenuAction {
     ToggleFavorite,
     ToggleReveal,
     ToggleTypewriter,
+    DuplicateLine,
+    DeleteLine,
+    MoveLineUp,
+    MoveLineDown,
+    InsertTimeStamp,
+    InsertDateStamp,
+    InsertDateTimeStamp,
+    InsertDivider,
+    InsertBlankAbove,
+    InsertBlankBelow,
+    JumpTop,
+    JumpBottom,
+    InsertStatsStamp,
+    InsertMetadataStamp,
     GlobalSearch,
     SearchHistory,
+    SearchScopeToday,
+    SearchScopeMonth,
+    SearchScopeAll,
+    SearchClearFilters,
     FindNext,
     FindPrevious,
     PreviousParagraph,
     NextParagraph,
     RebuildSearchIndex,
+    SearchCacheStatus,
     Dates,
     RecentEntries,
     FavoriteEntries,
+    PreviousFavorite,
+    NextFavorite,
+    RandomEntry,
     PreviousEntry,
     NextEntry,
     Today,
     Index,
     Sync,
     Verify,
+    IntegrityDetails,
     SettingsSummary,
     ReviewPrompts,
     SyncHistory,
+    SessionReset,
+    HelpTopics,
     ToggleKeychainMemory,
     QuickStart,
     EditSetting(SettingField),
@@ -1533,10 +1645,16 @@ impl App {
     }
 
     pub fn header_date_time_label(&self) -> String {
+        let time_format = match (self.config.clock_12h, self.config.show_seconds) {
+            (true, true) => "%I:%M:%S %p",
+            (true, false) => "%I:%M %p",
+            (false, true) => "%H:%M:%S",
+            (false, false) => "%H:%M",
+        };
         format!(
             "{} {}",
             self.selected_date.format("%Y-%m-%d"),
-            Local::now().format("%H:%M")
+            Local::now().format(time_format)
         )
     }
 
@@ -1654,10 +1772,25 @@ impl App {
                 }
             ),
             Some(Overlay::Search(search)) if !search.results.is_empty() => {
-                format!("RESULT {}/{}", search.selected + 1, search.results.len())
+                format!(
+                    "RESULT {}/{} {}",
+                    search.selected + 1,
+                    search.results.len(),
+                    search.range_label()
+                )
             }
             Some(Overlay::Index(index)) if !index.items.is_empty() => {
-                format!("ENTRY {}/{}", index.selected + 1, index.items.len())
+                format!(
+                    "ENTRY {}/{}{}{}",
+                    index.selected + 1,
+                    index.items.len(),
+                    if index.favorites_only { " FAV" } else { "" },
+                    if index.conflicts_only {
+                        " CONFLICT"
+                    } else {
+                        ""
+                    }
+                )
             }
             Some(Overlay::Info(info)) => format!(
                 "LINES {}-{}",
@@ -1716,15 +1849,24 @@ impl App {
         }
     }
 
-    pub fn empty_state_lines(&self) -> [&'static str; 6] {
+    pub fn empty_state_lines(&self) -> [&'static str; 7] {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
             "Esc opens menus for FILE / EDIT / SEARCH / GO / TOOLS / SETUP / HELP",
             "F2 saves an encrypted revision. Autosave writes an encrypted draft.",
-            "F3 calendar  F5 vault search  F7 index  F8 sync/sync center",
-            "Use favorites, recents, prompts, and command palette from menus",
+            "EDIT adds line tools, stamps, divider inserts, and quick writing ops.",
+            "GO adds favorites, random jumps, calendar saved-date hops, and the index.",
+            "SEARCH adds presets, cache status, and live filters. TOOLS adds review/admin.",
             "F1 shows help. Ctrl+K opens the command palette.",
         ]
+    }
+
+    pub fn show_ruler_enabled(&self) -> bool {
+        self.config.show_ruler
+    }
+
+    pub fn show_footer_legend_enabled(&self) -> bool {
+        self.config.show_footer_legend
     }
 
     fn setting_menu_item(&self, field: SettingField) -> MenuItem {
@@ -1752,6 +1894,24 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Quick Export Text".to_string(),
+                    detail: "AUTO".to_string(),
+                    action: MenuAction::QuickExportText,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Quick Export Markdown".to_string(),
+                    detail: "AUTO".to_string(),
+                    action: MenuAction::QuickExportMarkdown,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Export History".to_string(),
+                    detail: "LAST 16".to_string(),
+                    action: MenuAction::ExportHistory,
+                    enabled: !self.config.export_history.is_empty(),
+                },
+                MenuItem {
                     label: "Backup Snapshot".to_string(),
                     detail: "NOW".to_string(),
                     action: MenuAction::Backup,
@@ -1762,6 +1922,12 @@ impl App {
                     detail: "LIST".to_string(),
                     action: MenuAction::BackupHistory,
                     enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Backup Policy".to_string(),
+                    detail: "KEEP".to_string(),
+                    action: MenuAction::BackupPolicy,
+                    enabled: true,
                 },
                 MenuItem {
                     label: "Backup Cleanup Preview".to_string(),
@@ -1857,6 +2023,90 @@ impl App {
                     enabled: true,
                 },
                 MenuItem {
+                    label: "Duplicate Line".to_string(),
+                    detail: "COPY".to_string(),
+                    action: MenuAction::DuplicateLine,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Delete Line".to_string(),
+                    detail: "DROP".to_string(),
+                    action: MenuAction::DeleteLine,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Move Line Up".to_string(),
+                    detail: "SHIFT".to_string(),
+                    action: MenuAction::MoveLineUp,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Move Line Down".to_string(),
+                    detail: "SHIFT".to_string(),
+                    action: MenuAction::MoveLineDown,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Insert Time".to_string(),
+                    detail: "STAMP".to_string(),
+                    action: MenuAction::InsertTimeStamp,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Insert Date".to_string(),
+                    detail: "STAMP".to_string(),
+                    action: MenuAction::InsertDateStamp,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Insert Date+Time".to_string(),
+                    detail: "STAMP".to_string(),
+                    action: MenuAction::InsertDateTimeStamp,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Insert Divider".to_string(),
+                    detail: "RULE".to_string(),
+                    action: MenuAction::InsertDivider,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Blank Line Above".to_string(),
+                    detail: "OPEN".to_string(),
+                    action: MenuAction::InsertBlankAbove,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Blank Line Below".to_string(),
+                    detail: "OPEN".to_string(),
+                    action: MenuAction::InsertBlankBelow,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Insert Stats Stamp".to_string(),
+                    detail: "L/W/C".to_string(),
+                    action: MenuAction::InsertStatsStamp,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Insert Metadata Stamp".to_string(),
+                    detail: "META".to_string(),
+                    action: MenuAction::InsertMetadataStamp,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Jump To Top".to_string(),
+                    detail: "START".to_string(),
+                    action: MenuAction::JumpTop,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Jump To Bottom".to_string(),
+                    detail: "END".to_string(),
+                    action: MenuAction::JumpBottom,
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Previous Paragraph".to_string(),
                     detail: "CTRL+P".to_string(),
                     action: MenuAction::PreviousParagraph,
@@ -1883,6 +2133,30 @@ impl App {
                     enabled: !self.search_history.is_empty(),
                 },
                 MenuItem {
+                    label: "Search Today".to_string(),
+                    detail: "RANGE".to_string(),
+                    action: MenuAction::SearchScopeToday,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Search This Month".to_string(),
+                    detail: "RANGE".to_string(),
+                    action: MenuAction::SearchScopeMonth,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Search All Time".to_string(),
+                    detail: "RANGE".to_string(),
+                    action: MenuAction::SearchScopeAll,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Clear Search Filters".to_string(),
+                    detail: "RESET".to_string(),
+                    action: MenuAction::SearchClearFilters,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
                     label: "Find Next".to_string(),
                     detail: "DOWN".to_string(),
                     action: MenuAction::FindNext,
@@ -1898,6 +2172,12 @@ impl App {
                     label: "Rebuild Search Cache".to_string(),
                     detail: "RAM".to_string(),
                     action: MenuAction::RebuildSearchIndex,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Search Cache Status".to_string(),
+                    detail: "INFO".to_string(),
+                    action: MenuAction::SearchCacheStatus,
                     enabled: self.vault.is_some(),
                 },
             ],
@@ -1919,6 +2199,24 @@ impl App {
                     detail: "STAR".to_string(),
                     action: MenuAction::FavoriteEntries,
                     enabled: !self.favorite_dates().is_empty(),
+                },
+                MenuItem {
+                    label: "Previous Favorite".to_string(),
+                    detail: "STAR".to_string(),
+                    action: MenuAction::PreviousFavorite,
+                    enabled: !self.favorite_dates().is_empty(),
+                },
+                MenuItem {
+                    label: "Next Favorite".to_string(),
+                    detail: "STAR".to_string(),
+                    action: MenuAction::NextFavorite,
+                    enabled: !self.favorite_dates().is_empty(),
+                },
+                MenuItem {
+                    label: "Random Saved Entry".to_string(),
+                    detail: "RND".to_string(),
+                    action: MenuAction::RandomEntry,
+                    enabled: self.vault.is_some(),
                 },
                 MenuItem {
                     label: "Previous Saved Entry".to_string(),
@@ -1977,6 +2275,12 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Integrity Details".to_string(),
+                    detail: "CHAIN".to_string(),
+                    action: MenuAction::IntegrityDetails,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
                     label: "Review Mode".to_string(),
                     detail: "LOOK".to_string(),
                     action: MenuAction::ReviewMode,
@@ -2006,6 +2310,12 @@ impl App {
                     action: MenuAction::DoctorReport,
                     enabled: true,
                 },
+                MenuItem {
+                    label: "Reset Session Timer".to_string(),
+                    detail: "ZERO".to_string(),
+                    action: MenuAction::SessionReset,
+                    enabled: true,
+                },
             ],
             MenuId::Setup => vec![
                 MenuItem {
@@ -2029,6 +2339,10 @@ impl App {
                 self.setting_menu_item(SettingField::SyncTargetPath),
                 self.setting_menu_item(SettingField::DeviceNickname),
                 self.setting_menu_item(SettingField::DailyWordGoal),
+                self.setting_menu_item(SettingField::Clock12h),
+                self.setting_menu_item(SettingField::ShowSeconds),
+                self.setting_menu_item(SettingField::ShowRuler),
+                self.setting_menu_item(SettingField::ShowFooterLegend),
                 self.setting_menu_item(SettingField::BackupDaily),
                 self.setting_menu_item(SettingField::BackupWeekly),
                 self.setting_menu_item(SettingField::BackupMonthly),
@@ -2038,6 +2352,12 @@ impl App {
                     label: "Key and Menu Guide".to_string(),
                     detail: "F1".to_string(),
                     action: MenuAction::Help,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Guide Topics".to_string(),
+                    detail: "DOCS".to_string(),
+                    action: MenuAction::HelpTopics,
                     enabled: true,
                 },
                 MenuItem {
@@ -2331,6 +2651,35 @@ impl App {
                 KeyCode::Down => picker.move_selection_by_days(7),
                 KeyCode::PageUp => picker.shift_month(-1),
                 KeyCode::PageDown => picker.shift_month(1),
+                KeyCode::Char('[') => {
+                    if let Some(date) =
+                        previous_entry_date(&picker.entry_dates, picker.selected_date)
+                    {
+                        picker.selected_date = date;
+                        picker.month = calendar::month_start(date);
+                    }
+                }
+                KeyCode::Char(']') => {
+                    if let Some(date) = next_entry_date(&picker.entry_dates, picker.selected_date) {
+                        picker.selected_date = date;
+                        picker.month = calendar::month_start(date);
+                    }
+                }
+                KeyCode::Char('<') => {
+                    if let Some(date) =
+                        previous_entry_month(&picker.entry_dates, picker.selected_date)
+                    {
+                        picker.selected_date = date;
+                        picker.month = calendar::month_start(date);
+                    }
+                }
+                KeyCode::Char('>') => {
+                    if let Some(date) = next_entry_month(&picker.entry_dates, picker.selected_date)
+                    {
+                        picker.selected_date = date;
+                        picker.month = calendar::month_start(date);
+                    }
+                }
                 KeyCode::Backspace => {
                     if !picker.jump_input.is_empty() {
                         picker.jump_input.pop();
@@ -2431,6 +2780,22 @@ impl App {
                 KeyCode::Tab => {
                     search.cycle_field();
                     search.error = None;
+                }
+                KeyCode::Char('T') => {
+                    search.apply_today_scope(self.selected_date);
+                    self.maybe_live_run_global_search(search);
+                }
+                KeyCode::Char('M') => {
+                    search.apply_month_scope(self.selected_date);
+                    self.maybe_live_run_global_search(search);
+                }
+                KeyCode::Char('A') => {
+                    search.clear_filters();
+                    self.maybe_live_run_global_search(search);
+                }
+                KeyCode::Char('C') => {
+                    search.clear_filters();
+                    search.clear_results();
                 }
                 KeyCode::Backspace => {
                     if let Some(input) = search.active_input_mut() {
@@ -2674,9 +3039,17 @@ impl App {
                         index.selected = position;
                     }
                 }
-                KeyCode::Char('s') | KeyCode::Char('S') => {
+                KeyCode::Char('S') => {
                     let selected_date = index.selected_date().unwrap_or(self.selected_date);
                     index.toggle_sort(selected_date);
+                }
+                KeyCode::Char('F') => {
+                    let selected_date = index.selected_date().unwrap_or(self.selected_date);
+                    index.toggle_favorites_only(selected_date);
+                }
+                KeyCode::Char('C') => {
+                    let selected_date = index.selected_date().unwrap_or(self.selected_date);
+                    index.toggle_conflicts_only(selected_date);
                 }
                 KeyCode::Char(ch) if Self::is_text_input_key(&key) && !ch.is_control() => {
                     index.push_filter_char(ch, self.selected_date);
@@ -3041,7 +3414,11 @@ impl App {
     fn open_index_overlay(&mut self) {
         self.menu = None;
         let items = self.load_index_entries();
-        self.overlay = Some(Overlay::Index(IndexState::new(items, self.selected_date)));
+        self.overlay = Some(Overlay::Index(IndexState::new(
+            items,
+            self.selected_date,
+            self.favorite_dates(),
+        )));
     }
 
     fn open_closing_prompt(&mut self) {
@@ -3123,6 +3500,183 @@ impl App {
         self.search_history.retain(|existing| existing != trimmed);
         self.search_history.insert(0, trimmed.to_string());
         self.search_history.truncate(12);
+    }
+
+    fn record_export_history(&mut self, format: ExportFormatUi, path: &Path) {
+        let record = RecentExportInfo {
+            timestamp: Local::now().to_rfc3339(),
+            date: self.selected_date.format("%Y-%m-%d").to_string(),
+            format: format.label().to_ascii_lowercase(),
+            path: path.display().to_string(),
+        };
+        self.config
+            .export_history
+            .retain(|existing| existing.path != record.path);
+        self.config.export_history.insert(0, record);
+        self.config.export_history.truncate(16);
+        let _ = self.config.save();
+    }
+
+    fn finish_buffer_menu_edit(&mut self, viewport_height: usize, status: &str) {
+        self.dirty = true;
+        self.refresh_find_matches();
+        self.ensure_cursor_visible(viewport_height);
+        self.flash_status(status);
+    }
+
+    fn current_time_string(&self) -> String {
+        if self.config.clock_12h {
+            Local::now().format("%I:%M %p").to_string()
+        } else {
+            Local::now().format("%H:%M").to_string()
+        }
+    }
+
+    fn current_timestamp_string(&self) -> String {
+        if self.config.clock_12h {
+            Local::now().format("%Y-%m-%d %I:%M %p").to_string()
+        } else {
+            Local::now().format("%Y-%m-%d %H:%M").to_string()
+        }
+    }
+
+    fn metadata_stamp(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.entry_metadata.tags.is_empty() {
+            parts.push(format!("tags={}", self.entry_metadata.tags.join(",")));
+        }
+        if !self.entry_metadata.people.is_empty() {
+            parts.push(format!("people={}", self.entry_metadata.people.join(",")));
+        }
+        if let Some(project) = self.entry_metadata.project.as_deref() {
+            parts.push(format!("project={project}"));
+        }
+        if let Some(mood) = self.entry_metadata.mood {
+            parts.push(format!("mood={mood}"));
+        }
+        if parts.is_empty() {
+            "[metadata: none]\n".to_string()
+        } else {
+            format!("[metadata: {}]\n", parts.join(" | "))
+        }
+    }
+
+    fn insert_text_snippet(&mut self, text: &str, viewport_height: usize, status: &str) {
+        self.buffer.insert_text(text);
+        self.finish_buffer_menu_edit(viewport_height, status);
+    }
+
+    fn quick_export_current(&mut self, format: ExportFormatUi) {
+        if self.vault.is_none() {
+            self.flash_status("LOCKED.");
+            return;
+        }
+        let path = default_export_path(self.selected_date, format);
+        let entry_number = self.entry_number_label();
+        let rendered = match format {
+            ExportFormatUi::PlainText => {
+                vault::format_export_text(&self.buffer.to_text(), self.closing_thought.as_deref())
+            }
+            ExportFormatUi::Markdown => render_markdown_export(
+                self.selected_date,
+                &entry_number,
+                &self.entry_metadata,
+                &self.buffer.to_text(),
+                self.closing_thought.as_deref(),
+            ),
+        };
+
+        match secure_fs::atomic_write_restricted(&path, rendered.as_bytes()) {
+            Ok(()) => {
+                self.record_export_history(format, &path);
+                let file_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("export");
+                self.flash_status(&format!("EXPORTED {file_name}."));
+            }
+            Err(error) => self.flash_status(&format!("EXPORT FAILED: {error}")),
+        }
+    }
+
+    fn open_export_history_overlay(&mut self) {
+        if self.config.export_history.is_empty() {
+            self.flash_status("NO EXPORT HISTORY.");
+            return;
+        }
+        let items = self
+            .config
+            .export_history
+            .iter()
+            .map(|entry| PickerItem {
+                title: format!("{} {}", entry.date, entry.format.to_ascii_uppercase()),
+                detail: entry.path.chars().take(42).collect(),
+                keywords: format!("export history {} {}", entry.date, entry.path),
+                action: PickerAction::ShowInfo {
+                    title: "Export Record".to_string(),
+                    text: [
+                        format!("When   : {}", entry.timestamp),
+                        format!("Date   : {}", entry.date),
+                        format!("Format : {}", entry.format),
+                        format!("Path   : {}", entry.path),
+                    ]
+                    .join("\n"),
+                },
+            })
+            .collect::<Vec<_>>();
+        self.open_picker_overlay(PickerOverlay::new(
+            "Export History",
+            items,
+            "No exports recorded yet.",
+        ));
+    }
+
+    fn open_adjacent_favorite(&mut self, delta: isize) {
+        let favorites = self.favorite_dates().into_iter().collect::<Vec<_>>();
+        if favorites.is_empty() {
+            self.flash_status("NO FAVORITES.");
+            return;
+        }
+
+        let current_idx = favorites
+            .iter()
+            .position(|date| *date == self.selected_date)
+            .map(|idx| idx as isize)
+            .unwrap_or(if delta < 0 {
+                favorites.len() as isize
+            } else {
+                -1
+            });
+
+        let next_idx = current_idx + delta;
+        if !(0..favorites.len() as isize).contains(&next_idx) {
+            self.flash_status("NO MORE FAVORITES.");
+            return;
+        }
+
+        self.open_date(favorites[next_idx as usize]);
+        self.flash_status("FAVORITE OPENED.");
+    }
+
+    fn open_random_saved_entry(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+        let dates = match vault.list_entry_dates() {
+            Ok(dates) => dates,
+            Err(error) => {
+                self.flash_status(&format!("INDEX FAILED: {error}"));
+                return;
+            }
+        };
+        if dates.is_empty() {
+            self.flash_status("NO SAVED ENTRIES.");
+            return;
+        }
+        let index = (Local::now().timestamp_subsec_nanos() as usize) % dates.len();
+        self.open_date(dates[index]);
+        self.flash_status("RANDOM ENTRY.");
     }
 
     fn build_command_palette_items(&self) -> Vec<PickerItem> {
@@ -3356,6 +3910,86 @@ impl App {
         self.open_info_overlay("Quick Start", help::render_quickstart_guide());
     }
 
+    fn open_help_topics_overlay(&mut self) {
+        let items = vec![
+            (
+                "Quick Start",
+                "Daily use in five minutes",
+                help::render_quickstart_guide(),
+            ),
+            ("Docs Hub", "Top-level guide map", help::render_docs_hub()),
+            (
+                "Setup",
+                "Install and first-run setup",
+                help::render_setup_guide(
+                    &config::config_file_path()
+                        .unwrap_or_else(|_| PathBuf::from("~/.config/bsj/config.json")),
+                    &default_vault_path(),
+                    &logging::log_file_path(),
+                ),
+            ),
+            (
+                "Sync",
+                "Folder, S3, and WebDAV guidance",
+                help::render_sync_guide(),
+            ),
+            (
+                "Backup",
+                "Backup and restore workflow",
+                help::render_backup_restore_guide(),
+            ),
+            (
+                "Macros",
+                "Macro definitions and built-ins",
+                help::render_macro_guide(),
+            ),
+            (
+                "Privacy",
+                "Data handling and trust model",
+                help::render_privacy_guide(),
+            ),
+            (
+                "Terminal",
+                "Terminal.app and iTerm2 usage",
+                help::render_terminal_guide(),
+            ),
+            (
+                "Troubleshooting",
+                "Recovery and problem solving",
+                help::render_troubleshooting_guide(),
+            ),
+            (
+                "Product",
+                "Feature and value overview",
+                help::render_product_guide(),
+            ),
+            ("Datasheet", "Capability snapshot", help::render_datasheet()),
+            ("FAQ", "Common objections and answers", help::render_faq()),
+            ("Support", "How to get help", help::render_support()),
+            (
+                "Distribution",
+                "Packaging and release notes",
+                help::render_distribution_guide(),
+            ),
+        ]
+        .into_iter()
+        .map(|(title, detail, text)| PickerItem {
+            title: title.to_string(),
+            detail: detail.to_string(),
+            keywords: format!("guide help docs {title} {detail}"),
+            action: PickerAction::ShowInfo {
+                title: title.to_string(),
+                text,
+            },
+        })
+        .collect::<Vec<_>>();
+        self.open_picker_overlay(PickerOverlay::new(
+            "Help Topics",
+            items,
+            "No guide topics available.",
+        ));
+    }
+
     fn open_first_run_guide_overlay(&mut self) {
         let lines = vec![
             "WELCOME TO BLUESCREEN JOURNAL".to_string(),
@@ -3365,8 +3999,10 @@ impl App {
             "2. Press F2 for your first encrypted saved revision.".to_string(),
             "3. Use EDIT -> Entry Metadata for tags, people, project, and mood.".to_string(),
             "4. Use GO -> Open Calendar or Index Timeline to move through time.".to_string(),
-            "5. Use TOOLS -> Sync Center before trusting a new sync target.".to_string(),
-            "6. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
+            "5. Use EDIT for line tools, time stamps, and quick writing helpers.".to_string(),
+            "6. Use GO favorites and random jump once you have some history.".to_string(),
+            "7. Use TOOLS -> Sync Center before trusting a new sync target.".to_string(),
+            "8. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
             String::new(),
             "The app autosaves encrypted drafts, but manual Save creates history.".to_string(),
             "F1 opens the cheatsheet. Esc opens the full DOS-style menu bar.".to_string(),
@@ -3521,11 +4157,23 @@ impl App {
         };
         match vault.review_summary(Local::now().date_naive()) {
             Ok(review) => {
+                let all_index_entries = vault.list_index_entries(42).unwrap_or_default();
+                let recent_entries = all_index_entries
+                    .iter()
+                    .take(5)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let mood_counts = top_mood_counts(
+                    all_index_entries
+                        .iter()
+                        .filter_map(|entry| entry.metadata.mood),
+                );
                 let mut lines = vec![
                     format!("Total entries : {}", review.total_entries),
                     format!("Streak        : {} day(s)", review.streak_days),
                     format!("This week     : {}", review.entries_this_week),
                     format!("This month    : {}", review.entries_this_month),
+                    format!("Favorites     : {}", self.favorite_dates().len()),
                     String::new(),
                     "On This Day".to_string(),
                 ];
@@ -3550,6 +4198,29 @@ impl App {
                 lines.push(String::new());
                 lines.push("Top Projects".to_string());
                 lines.extend(render_rank_lines(&review.top_projects));
+                lines.push(String::new());
+                lines.push("Mood Distribution".to_string());
+                if mood_counts.is_empty() {
+                    lines.push("  No moods tagged yet.".to_string());
+                } else {
+                    for (mood, count) in mood_counts {
+                        lines.push(format!("  {mood}: {count}"));
+                    }
+                }
+                lines.push(String::new());
+                lines.push("Recent Entries".to_string());
+                if recent_entries.is_empty() {
+                    lines.push("  No saved entries yet.".to_string());
+                } else {
+                    for entry in recent_entries {
+                        lines.push(format!(
+                            "  {}  {}  {}",
+                            entry.date.format("%Y-%m-%d"),
+                            entry.entry_number,
+                            entry.preview
+                        ));
+                    }
+                }
                 self.open_info_overlay("Review Mode", lines.join("\n"));
             }
             Err(error) => self.open_info_overlay("Review Mode", format!("Review failed: {error}")),
@@ -3671,6 +4342,34 @@ impl App {
         self.open_info_overlay("Backup Cleanup", output);
     }
 
+    fn open_backup_policy_overlay(&mut self) {
+        let mut lines = vec![
+            "Backup Policy".to_string(),
+            String::new(),
+            format!("Daily   : {}", self.config.backup_retention.daily),
+            format!("Weekly  : {}", self.config.backup_retention.weekly),
+            format!("Monthly : {}", self.config.backup_retention.monthly),
+        ];
+
+        if let Some(vault) = &self.vault {
+            match vault.list_backups() {
+                Ok(backups) => lines.push(format!("Current backups : {}", backups.len())),
+                Err(error) => lines.push(format!("Current backups : error ({error})")),
+            }
+            match vault.preview_backup_prune(&self.config.backup_retention) {
+                Ok(backups) => lines.push(format!("Would prune     : {}", backups.len())),
+                Err(error) => lines.push(format!("Would prune     : error ({error})")),
+            }
+        } else {
+            lines.push("Current backups : vault locked".to_string());
+        }
+
+        lines.push(String::new());
+        lines.push("FILE -> Backup Snapshot creates a new encrypted archive.".to_string());
+        lines.push("FILE -> Prune Old Backups applies this retention policy.".to_string());
+        self.open_info_overlay("Backup Policy", lines.join("\n"));
+    }
+
     fn open_restore_prompt(&mut self) {
         let Some(vault) = &self.vault else {
             self.flash_status("LOCKED.");
@@ -3704,6 +4403,27 @@ impl App {
         let integrity = self.integrity_status_label();
         let dirty = if self.dirty { "modified" } else { "clean" };
         let save_state = self.save_status_label();
+        let search_cache_summary = if let Some(vault) = &self.vault {
+            let cache = vault.search_cache_status();
+            if !cache.exists {
+                "missing".to_string()
+            } else if cache.valid {
+                format!(
+                    "encrypted {} entries",
+                    cache.entry_count.unwrap_or_default()
+                )
+            } else {
+                "invalid".to_string()
+            }
+        } else {
+            "locked".to_string()
+        };
+        let export_summary = self
+            .config
+            .export_history
+            .first()
+            .map(|entry| format!("{} {}", entry.date, entry.format.to_ascii_uppercase()))
+            .unwrap_or_else(|| "none".to_string());
 
         let (entry_count, conflict_count, backup_count) = if let Some(vault) = &self.vault {
             (
@@ -3766,14 +4486,97 @@ impl App {
             format!("Favorites   : {}", self.favorite_dates().len()),
             format!("Sync target : {sync_target}"),
             format!("Sync runs   : {}", self.config.sync_history.len()),
+            format!("Search cache: {search_cache_summary}"),
+            format!("Last export : {export_summary}"),
+            format!(
+                "Backup keep : d{} w{} m{}",
+                self.config.backup_retention.daily,
+                self.config.backup_retention.weekly,
+                self.config.backup_retention.monthly
+            ),
             format!("Logs        : {}", logging::log_file_path().display()),
             String::new(),
-            "Use FILE for export/backups, GO for dates/index, TOOLS for sync/verify/doctor."
+            "Use FILE for export/backups, GO for dates/index, TOOLS for sync/verify/admin."
                 .to_string(),
         ]
         .join("\n");
 
         self.open_info_overlay("Dashboard", output);
+    }
+
+    fn open_integrity_details_overlay(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+        match vault.verify_integrity() {
+            Ok(report) if report.ok => self.open_info_overlay(
+                "Integrity Details",
+                "Verify result: OK\n\nAll visible revision chains are intact.".to_string(),
+            ),
+            Ok(report) => {
+                let mut lines = vec![
+                    format!("Verify result: BROKEN ({})", report.issues.len()),
+                    String::new(),
+                ];
+                for issue in report.issues.iter().take(20) {
+                    let date = issue
+                        .date
+                        .map(|date| date.format("%Y-%m-%d").to_string())
+                        .unwrap_or_else(|| "vault".to_string());
+                    lines.push(format!("{date}: {}", issue.message));
+                }
+                self.open_info_overlay("Integrity Details", lines.join("\n"));
+            }
+            Err(error) => {
+                self.open_info_overlay("Integrity Details", format!("Verify failed: {error}"))
+            }
+        }
+    }
+
+    fn open_search_cache_status_overlay(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+
+        let cache = vault.search_cache_status();
+        let output = [
+            "Search Cache".to_string(),
+            String::new(),
+            format!("Path       : {}", cache.path.display()),
+            format!("Exists     : {}", if cache.exists { "yes" } else { "no" }),
+            format!("Valid      : {}", if cache.valid { "yes" } else { "no" }),
+            format!(
+                "Entries    : {}",
+                cache
+                    .entry_count
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|| "n/a".to_string())
+            ),
+            format!("Size       : {}", human_bytes(cache.size_bytes)),
+            format!(
+                "Modified   : {}",
+                cache
+                    .modified_at
+                    .map(|value| value.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                    .unwrap_or_else(|| "n/a".to_string())
+            ),
+            format!(
+                "In memory  : {}",
+                if self.search_index.is_some() {
+                    "yes"
+                } else {
+                    "no"
+                }
+            ),
+            format!(
+                "Issue      : {}",
+                cache.issue.unwrap_or_else(|| "none".to_string())
+            ),
+        ]
+        .join("\n");
+        self.open_info_overlay("Search Cache", output);
     }
 
     fn open_adjacent_saved_entry(&mut self, delta: isize) {
@@ -3819,8 +4622,12 @@ impl App {
             MenuAction::CommandPalette => self.open_command_palette(),
             MenuAction::Save => self.save_current_date(),
             MenuAction::Export => self.open_export_prompt(),
+            MenuAction::QuickExportText => self.quick_export_current(ExportFormatUi::PlainText),
+            MenuAction::QuickExportMarkdown => self.quick_export_current(ExportFormatUi::Markdown),
+            MenuAction::ExportHistory => self.open_export_history_overlay(),
             MenuAction::BackupHistory => self.open_backup_history_overlay(),
             MenuAction::BackupCleanupPreview => self.open_backup_cleanup_preview_overlay(),
+            MenuAction::BackupPolicy => self.open_backup_policy_overlay(),
             MenuAction::BackupPruneNow => self.prune_backups_now(),
             MenuAction::Backup => self.create_backup_now(),
             MenuAction::RestoreBackup => self.open_restore_prompt(),
@@ -3846,8 +4653,100 @@ impl App {
             MenuAction::ToggleFavorite => self.toggle_favorite_current_date(),
             MenuAction::ToggleReveal => self.toggle_reveal_codes(viewport_height),
             MenuAction::ToggleTypewriter => self.toggle_typewriter_mode(),
+            MenuAction::DuplicateLine => {
+                self.buffer.duplicate_current_line();
+                self.finish_buffer_menu_edit(viewport_height, "LINE DUPLICATED.");
+            }
+            MenuAction::DeleteLine => {
+                self.buffer.delete_current_line();
+                self.finish_buffer_menu_edit(viewport_height, "LINE DELETED.");
+            }
+            MenuAction::MoveLineUp => {
+                self.buffer.move_line_up();
+                self.finish_buffer_menu_edit(viewport_height, "LINE MOVED UP.");
+            }
+            MenuAction::MoveLineDown => {
+                self.buffer.move_line_down();
+                self.finish_buffer_menu_edit(viewport_height, "LINE MOVED DOWN.");
+            }
+            MenuAction::InsertTimeStamp => self.insert_text_snippet(
+                &format!("{}\n", self.current_time_string()),
+                viewport_height,
+                "TIME INSERTED.",
+            ),
+            MenuAction::InsertDateStamp => self.insert_text_snippet(
+                &format!("{}\n", self.selected_date.format("%Y-%m-%d")),
+                viewport_height,
+                "DATE INSERTED.",
+            ),
+            MenuAction::InsertDateTimeStamp => self.insert_text_snippet(
+                &format!("{}\n", self.current_timestamp_string()),
+                viewport_height,
+                "TIMESTAMP INSERTED.",
+            ),
+            MenuAction::InsertDivider => self.insert_text_snippet(
+                "----------------------------------------\n",
+                viewport_height,
+                "DIVIDER INSERTED.",
+            ),
+            MenuAction::InsertBlankAbove => {
+                self.buffer.insert_blank_line_above();
+                self.finish_buffer_menu_edit(viewport_height, "LINE OPENED ABOVE.");
+            }
+            MenuAction::InsertBlankBelow => {
+                self.buffer.insert_blank_line_below();
+                self.finish_buffer_menu_edit(viewport_height, "LINE OPENED BELOW.");
+            }
+            MenuAction::JumpTop => {
+                self.buffer.move_to_top();
+                self.ensure_cursor_visible(viewport_height);
+                self.flash_status("TOP OF ENTRY.");
+            }
+            MenuAction::JumpBottom => {
+                self.buffer.move_to_bottom();
+                self.ensure_cursor_visible(viewport_height);
+                self.flash_status("BOTTOM OF ENTRY.");
+            }
+            MenuAction::InsertStatsStamp => self.insert_text_snippet(
+                &format!("[stats {}]\n", self.document_stats_label()),
+                viewport_height,
+                "STATS INSERTED.",
+            ),
+            MenuAction::InsertMetadataStamp => self.insert_text_snippet(
+                &self.metadata_stamp(),
+                viewport_height,
+                "METADATA INSERTED.",
+            ),
             MenuAction::GlobalSearch => self.open_search_overlay(),
             MenuAction::SearchHistory => self.open_search_history_overlay(),
+            MenuAction::SearchScopeToday => {
+                let mut search = SearchOverlay::new(self.find_query.clone());
+                search.apply_today_scope(self.selected_date);
+                self.maybe_live_run_global_search(&mut search);
+                self.menu = None;
+                self.overlay = Some(Overlay::Search(search));
+            }
+            MenuAction::SearchScopeMonth => {
+                let mut search = SearchOverlay::new(self.find_query.clone());
+                search.apply_month_scope(self.selected_date);
+                self.maybe_live_run_global_search(&mut search);
+                self.menu = None;
+                self.overlay = Some(Overlay::Search(search));
+            }
+            MenuAction::SearchScopeAll => {
+                let mut search = SearchOverlay::new(self.find_query.clone());
+                search.clear_filters();
+                self.maybe_live_run_global_search(&mut search);
+                self.menu = None;
+                self.overlay = Some(Overlay::Search(search));
+            }
+            MenuAction::SearchClearFilters => {
+                self.open_search_overlay();
+                if let Some(Overlay::Search(search)) = &mut self.overlay {
+                    search.clear_filters();
+                    self.flash_status("SEARCH FILTERS CLEARED.");
+                }
+            }
             MenuAction::FindNext => {
                 if self.find_query.is_some() {
                     self.select_next_find_match(viewport_height);
@@ -3881,9 +4780,13 @@ impl App {
                 self.flash_status("NEXT PARAGRAPH.");
             }
             MenuAction::RebuildSearchIndex => self.rebuild_search_index(),
+            MenuAction::SearchCacheStatus => self.open_search_cache_status_overlay(),
             MenuAction::Dates => self.open_date_picker(),
             MenuAction::RecentEntries => self.open_recent_entries_overlay(),
             MenuAction::FavoriteEntries => self.open_favorite_entries_overlay(),
+            MenuAction::PreviousFavorite => self.open_adjacent_favorite(-1),
+            MenuAction::NextFavorite => self.open_adjacent_favorite(1),
+            MenuAction::RandomEntry => self.open_random_saved_entry(),
             MenuAction::PreviousEntry => self.open_adjacent_saved_entry(-1),
             MenuAction::NextEntry => self.open_adjacent_saved_entry(1),
             MenuAction::Today => {
@@ -3893,9 +4796,15 @@ impl App {
             MenuAction::Index => self.open_index_overlay(),
             MenuAction::Sync => self.begin_sync(),
             MenuAction::Verify => self.verify_integrity_now(),
+            MenuAction::IntegrityDetails => self.open_integrity_details_overlay(),
             MenuAction::SettingsSummary => self.open_settings_summary_overlay(),
             MenuAction::ReviewPrompts => self.open_review_prompts_overlay(),
             MenuAction::SyncHistory => self.open_sync_history_overlay(),
+            MenuAction::SessionReset => {
+                self.session_started_at = Instant::now();
+                self.flash_status("SESSION RESET.");
+            }
+            MenuAction::HelpTopics => self.open_help_topics_overlay(),
             MenuAction::ToggleKeychainMemory => self.toggle_keychain_memory(),
             MenuAction::QuickStart => self.open_quickstart_overlay(),
             MenuAction::EditSetting(field) => self.open_setting_prompt(field),
@@ -4293,9 +5202,7 @@ impl App {
             }
             PickerAction::InsertText(text) => {
                 self.buffer.insert_text(&text);
-                self.dirty = true;
-                self.ensure_cursor_visible(viewport_height);
-                self.flash_status("TEXT INSERTED.");
+                self.finish_buffer_menu_edit(viewport_height, "TEXT INSERTED.");
             }
             PickerAction::ShowInfo { title, text } => self.open_info_overlay(title, text),
         }
@@ -4466,6 +5373,10 @@ impl App {
                 }
             }
             SettingField::DeviceNickname => "DEVICE NAME SET.",
+            SettingField::Clock12h => "CLOCK FORMAT SET.",
+            SettingField::ShowSeconds => "CLOCK SECONDS SET.",
+            SettingField::ShowRuler => "RULER SET.",
+            SettingField::ShowFooterLegend => "FOOTER LEGEND SET.",
             SettingField::DailyWordGoal => {
                 if self.config.daily_word_goal.is_some() {
                     "WORD GOAL SET."
@@ -4509,6 +5420,7 @@ impl App {
 
         match secure_fs::atomic_write_restricted(&path, rendered.as_bytes()) {
             Ok(()) => {
+                self.record_export_history(prompt.format, &path);
                 let file_name = path
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -5359,6 +6271,10 @@ fn wipe_entry_metadata(metadata: &mut EntryMetadata) {
     metadata.mood = None;
 }
 
+fn zeroize_entry_metadata(metadata: &mut EntryMetadata) {
+    wipe_entry_metadata(metadata);
+}
+
 fn render_rank_lines(items: &[(String, usize)]) -> Vec<String> {
     if items.is_empty() {
         return vec!["  No data yet.".to_string()];
@@ -5367,6 +6283,80 @@ fn render_rank_lines(items: &[(String, usize)]) -> Vec<String> {
         .iter()
         .map(|(label, count)| format!("  {:<18} {}", label, count))
         .collect()
+}
+
+fn top_mood_counts<I>(moods: I) -> Vec<(u8, usize)>
+where
+    I: IntoIterator<Item = u8>,
+{
+    let mut counts = std::collections::BTreeMap::<u8, usize>::new();
+    for mood in moods {
+        *counts.entry(mood).or_insert(0) += 1;
+    }
+    let mut pairs = counts.into_iter().collect::<Vec<_>>();
+    pairs.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    pairs
+}
+
+pub(crate) fn index_row_flags(entry: &IndexEntry, favorite_dates: &BTreeSet<NaiveDate>) -> String {
+    let favorite = if favorite_dates.contains(&entry.date) {
+        '*'
+    } else {
+        '-'
+    };
+    let conflict = if entry.has_conflict { '!' } else { '-' };
+    let tags = if entry.metadata.tags.is_empty() {
+        '-'
+    } else {
+        '#'
+    };
+    let people = if entry.metadata.people.is_empty() {
+        '-'
+    } else {
+        '@'
+    };
+    let project = if entry.metadata.project.is_some() {
+        'P'
+    } else {
+        '-'
+    };
+    let mood = entry
+        .metadata
+        .mood
+        .map(|mood| char::from_digit(mood as u32, 10).unwrap_or('M'))
+        .unwrap_or('-');
+    format!("{favorite}{conflict}{tags}{people}{project}{mood}")
+}
+
+pub(crate) fn index_detail_summary(
+    entry: &IndexEntry,
+    favorite_dates: &BTreeSet<NaiveDate>,
+) -> String {
+    let mut parts = vec![
+        if favorite_dates.contains(&entry.date) {
+            "FAVORITE".to_string()
+        } else {
+            "STANDARD".to_string()
+        },
+        if entry.has_conflict {
+            "CONFLICT".to_string()
+        } else {
+            "CLEAN".to_string()
+        },
+    ];
+    if !entry.metadata.tags.is_empty() {
+        parts.push(format!("tags={}", entry.metadata.tags.join(",")));
+    }
+    if !entry.metadata.people.is_empty() {
+        parts.push(format!("people={}", entry.metadata.people.join(",")));
+    }
+    if let Some(project) = entry.metadata.project.as_deref() {
+        parts.push(format!("project={project}"));
+    }
+    if let Some(mood) = entry.metadata.mood {
+        parts.push(format!("mood={mood}"));
+    }
+    parts.join(" | ")
 }
 
 fn macro_key_matches(spec: &str, key: &KeyEvent) -> bool {
@@ -5475,19 +6465,70 @@ fn index_matches_filter(entry: &IndexEntry, needle: &str) -> bool {
 
     let date = entry.date.format("%Y-%m-%d").to_string();
     let preview = entry.preview.to_ascii_lowercase();
+    let tags = entry.metadata.tags.join(" ").to_ascii_lowercase();
+    let people = entry.metadata.people.join(" ").to_ascii_lowercase();
+    let project = entry
+        .metadata
+        .project
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mood = entry
+        .metadata
+        .mood
+        .map(|mood| mood.to_string())
+        .unwrap_or_default();
     date.to_ascii_lowercase().contains(needle)
         || entry.entry_number.to_ascii_lowercase().contains(needle)
         || preview.contains(needle)
+        || tags.contains(needle)
+        || people.contains(needle)
+        || project.contains(needle)
+        || mood.contains(needle)
         || (entry.has_conflict && "conflict".contains(needle))
+}
+
+fn previous_entry_date(
+    entry_dates: &BTreeSet<NaiveDate>,
+    selected: NaiveDate,
+) -> Option<NaiveDate> {
+    entry_dates.range(..selected).next_back().copied()
+}
+
+fn next_entry_date(entry_dates: &BTreeSet<NaiveDate>, selected: NaiveDate) -> Option<NaiveDate> {
+    entry_dates
+        .range(selected.succ_opt().unwrap_or(selected)..)
+        .next()
+        .copied()
+}
+
+fn previous_entry_month(
+    entry_dates: &BTreeSet<NaiveDate>,
+    selected: NaiveDate,
+) -> Option<NaiveDate> {
+    let current_month = (selected.year(), selected.month());
+    entry_dates
+        .iter()
+        .rev()
+        .find(|date| (date.year(), date.month()) < current_month)
+        .copied()
+}
+
+fn next_entry_month(entry_dates: &BTreeSet<NaiveDate>, selected: NaiveDate) -> Option<NaiveDate> {
+    let current_month = (selected.year(), selected.month());
+    entry_dates
+        .iter()
+        .find(|date| (date.year(), date.month()) > current_month)
+        .copied()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        App, DatePicker, ExportPrompt, IndexState, MenuAction, MenuId, Overlay, PickerAction,
-        PickerItem, PickerOverlay, SearchField, SearchJump, SearchOverlay, SyncPhase, SyncRequest,
-        SyncStatusOverlay, default_export_path, format_reveal_codes, macro_key_matches,
-        parse_optional_overlay_date, resolve_recovery_text,
+        App, DatePicker, ExportFormatUi, ExportPrompt, IndexState, MenuAction, MenuId, Overlay,
+        PickerAction, PickerItem, PickerOverlay, SearchField, SearchJump, SearchOverlay, SyncPhase,
+        SyncRequest, SyncStatusOverlay, default_export_path, format_reveal_codes,
+        macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
     };
     use crate::{
         search::{SearchDocument, SearchIndex, SearchResult, Snippet},
@@ -5497,6 +6538,7 @@ mod tests {
     use chrono::{Duration, NaiveDate};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use secrecy::SecretString;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -5529,9 +6571,10 @@ mod tests {
                 entry_number: format!("{offset:07}"),
                 preview: format!("Entry {offset}"),
                 has_conflict: false,
+                metadata: EntryMetadata::default(),
             })
             .collect();
-        let index = IndexState::new(items, date + Duration::days(5));
+        let index = IndexState::new(items, date + Duration::days(5), Default::default());
         assert_eq!(index.window(5), (3, 8));
     }
 
@@ -5658,6 +6701,23 @@ mod tests {
     }
 
     #[test]
+    fn search_scope_presets_update_overlay_dates() {
+        let today = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut overlay = SearchOverlay::new(None);
+        overlay.apply_today_scope(today);
+        assert_eq!(overlay.from_input, "2026-03-16");
+        assert_eq!(overlay.to_input, "2026-03-16");
+
+        overlay.apply_month_scope(today);
+        assert_eq!(overlay.from_input, "2026-03-01");
+        assert_eq!(overlay.to_input, "2026-03-16");
+
+        overlay.clear_filters();
+        assert!(overlay.from_input.is_empty());
+        assert!(overlay.to_input.is_empty());
+    }
+
+    #[test]
     fn overlay_date_parser_accepts_blank_and_valid_dates() {
         assert_eq!(
             parse_optional_overlay_date("from", "").expect("blank"),
@@ -5717,15 +6777,22 @@ mod tests {
                 entry_number: "0000001".to_string(),
                 preview: "Quiet morning".to_string(),
                 has_conflict: false,
+                metadata: EntryMetadata::default(),
             },
             IndexEntry {
                 date: selected + Duration::days(1),
                 entry_number: "0000002".to_string(),
                 preview: "Conflict review".to_string(),
                 has_conflict: true,
+                metadata: EntryMetadata {
+                    tags: vec!["work".to_string()],
+                    people: Vec::new(),
+                    project: None,
+                    mood: Some(7),
+                },
             },
         ];
-        let mut index = IndexState::new(items, selected);
+        let mut index = IndexState::new(items, selected, Default::default());
         index.push_filter_char('c', selected);
         index.push_filter_char('o', selected);
 
@@ -5742,19 +6809,75 @@ mod tests {
                 entry_number: "0000002".to_string(),
                 preview: "Later".to_string(),
                 has_conflict: false,
+                metadata: EntryMetadata::default(),
             },
             IndexEntry {
                 date: selected,
                 entry_number: "0000001".to_string(),
                 preview: "Earlier".to_string(),
                 has_conflict: false,
+                metadata: EntryMetadata::default(),
             },
         ];
-        let mut index = IndexState::new(items, selected + Duration::days(1));
+        let mut index = IndexState::new(items, selected + Duration::days(1), Default::default());
         index.toggle_sort(selected + Duration::days(1));
 
         assert_eq!(index.items.first().map(|entry| entry.date), Some(selected));
         assert!(index.sort_oldest_first);
+    }
+
+    #[test]
+    fn index_state_can_filter_to_favorites_only() {
+        let selected = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let items = vec![
+            IndexEntry {
+                date: selected,
+                entry_number: "0000001".to_string(),
+                preview: "Starred".to_string(),
+                has_conflict: false,
+                metadata: EntryMetadata::default(),
+            },
+            IndexEntry {
+                date: selected + Duration::days(1),
+                entry_number: "0000002".to_string(),
+                preview: "Plain".to_string(),
+                has_conflict: false,
+                metadata: EntryMetadata::default(),
+            },
+        ];
+        let mut favorites = std::collections::BTreeSet::new();
+        favorites.insert(selected);
+        let mut index = IndexState::new(items, selected, favorites);
+        index.toggle_favorites_only(selected);
+
+        assert_eq!(index.items.len(), 1);
+        assert_eq!(index.items[0].date, selected);
+    }
+
+    #[test]
+    fn index_state_can_filter_to_conflicts_only() {
+        let selected = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let items = vec![
+            IndexEntry {
+                date: selected,
+                entry_number: "0000001".to_string(),
+                preview: "Clean".to_string(),
+                has_conflict: false,
+                metadata: EntryMetadata::default(),
+            },
+            IndexEntry {
+                date: selected + Duration::days(1),
+                entry_number: "0000002".to_string(),
+                preview: "Conflict".to_string(),
+                has_conflict: true,
+                metadata: EntryMetadata::default(),
+            },
+        ];
+        let mut index = IndexState::new(items, selected, Default::default());
+        index.toggle_conflicts_only(selected);
+
+        assert_eq!(index.items.len(), 1);
+        assert!(index.items[0].has_conflict);
     }
 
     #[test]
@@ -5892,6 +7015,17 @@ mod tests {
             app.search_history,
             vec!["mood".to_string(), "weather".to_string()]
         );
+    }
+
+    #[test]
+    fn record_export_history_dedupes_by_path() {
+        let mut app = App::with_initial_date(None);
+        let path = PathBuf::from("/tmp/export.txt");
+        app.record_export_history(ExportFormatUi::PlainText, &path);
+        app.record_export_history(ExportFormatUi::PlainText, &path);
+
+        assert_eq!(app.config.export_history.len(), 1);
+        assert_eq!(app.config.export_history[0].path, "/tmp/export.txt");
     }
 
     #[test]

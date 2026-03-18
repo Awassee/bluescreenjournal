@@ -28,8 +28,12 @@ Read and update supported settings:
 ```bash
 bsj settings get vault_path
 bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync
+bsj settings set clock_12h true
+bsj settings set show_ruler false
 bsj settings set backup_retention.daily 14
 ```
+
+Most of these settings are also editable from inside the TUI under `SETUP`.
 
 ## config.json
 
@@ -53,6 +57,22 @@ Editable keys:
   - type: string
   - default: `This Mac`
   - purpose: nickname stored in `devices/<deviceId>.json`
+- `clock_12h`
+  - type: boolean
+  - default: `false`
+  - purpose: switch the header clock to `AM/PM`
+- `show_seconds`
+  - type: boolean
+  - default: `false`
+  - purpose: include seconds in the header clock
+- `show_ruler`
+  - type: boolean
+  - default: `true`
+  - purpose: show or hide the DOS-style ruler above the editor
+- `show_footer_legend`
+  - type: boolean
+  - default: `true`
+  - purpose: show or hide the function-key legend in the footer
 - `backup_retention.daily`
   - type: integer
   - default: `7`
@@ -72,6 +92,9 @@ Readable but app-managed:
 
 Also present in `config.json`:
 
+- `export_history`
+  - type: array
+  - purpose: recent plaintext export destinations and formats for in-product recall
 - `macros`
   - type: array
   - purpose: key bindings for template insertion or internal commands

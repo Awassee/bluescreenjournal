@@ -35,6 +35,8 @@ It gives you:
 - encrypted-at-rest journal content, drafts, backups, and sync blobs
 - append-only revisions so intentional saves create history instead of overwriting it
 - menu-driven discovery so the app still feels learnable without memorizing every function key
+- real editor commands for line movement, stamps, and structural writing work
+- in-product review and admin surfaces so daily use stays inside the TUI
 
 ## Product snapshot
 
@@ -57,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.6
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.8
 ```
 
 Install from source instead of the prebuilt release:
@@ -131,15 +133,19 @@ The app is direct by design:
 | --- | --- | --- |
 | Full-screen editor | Opens directly into the current entry | Removes friction between launch and writing |
 | Menu-driven TUI | Keeps all major commands discoverable in-product | Makes the app usable without memorizing everything |
+| Writing commands | Adds duplicate/move/delete line tools plus date/time, divider, stats, and metadata stamps | Makes the editor feel like a complete journaling workstation |
 | Append-only revisions | Every manual save creates a new revision file | Preserves history and supports safer recovery |
 | Encrypted autosave drafts | Autosaves per-date draft state without making revision spam | Protects unsaved work without plaintext leakage |
 | Crash recovery | Prompts to recover a newer draft | Prevents accidental loss after interruption |
 | Stable entry numbers | Computes `ENTRY NO.` from epoch date and entry date | Keeps numbering deterministic across machines |
 | Real index and calendar | Browse saved dates as a journal, not just as files | Faster recall and better chronological navigation |
+| Favorite and random navigation | Jump by favorites, recents, and random saved entries | Makes larger journals easier to roam |
 | In-entry find and replace | Incremental find and retro `Y/N/A/Q` replace flow | Keeps editing fast inside the writing surface |
 | Global search | Searches saved entries after unlock without disk plaintext index | Fast retrieval without leaving search residue on disk |
+| Search presets and cache status | Adds today/month/all scopes plus encrypted cache inspection | Makes search faster to aim and easier to trust |
 | Encrypted sync | Syncs encrypted revision blobs to folder, S3, or WebDAV targets | Lets you use cloud storage without uploading plaintext |
 | Integrity verify | Checks revision hashchains | Detects missing or tampered history |
+| Review and dashboard surfaces | Show streaks, mood distribution, backup policy, sync preview, and doctor output | Keeps operational awareness inside the product |
 | Reveal Codes | Shows metadata inline in a retro-friendly way | Gives structural visibility without cluttering normal view |
 | Closing Thought | Dedicated final line field for each entry | Encourages deliberate endings and cleaner exports |
 | Encrypted backup and restore | Creates encrypted snapshots with retention support | Gives offline recovery without plaintext archives |
@@ -186,10 +192,13 @@ The menu bar is the primary discoverability surface.
 - arrows move between menus and menu items
 - `Enter` runs the selected command
 - function keys remain as direct shortcuts
-- `FILE` includes save, export, backup snapshot, backup history, lock, and quit
-- `TOOLS` includes sync, integrity verify, and an in-product doctor report
-- `SETUP` includes a live settings summary plus editable vault/sync/device/retention values
-- `HELP` includes the key sheet and a quick-start guide inside the TUI
+- `FILE` includes save, quick export, export history, backup policy, backup snapshot, restore, lock, and quit
+- `EDIT` includes line tools, stamps, metadata, reveal, and writing-mode toggles
+- `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
+- `GO` includes recents, favorites, random entry jump, calendar, and index timeline
+- `TOOLS` includes sync, integrity details, review mode, prompts, dashboard, updates, and doctor output
+- `SETUP` includes a live settings summary plus editable vault/sync/device/retention/clock/display values
+- `HELP` includes the key sheet, quick-start guide, and searchable guide topics inside the TUI
 
 Primary keys:
 
@@ -207,6 +216,13 @@ Primary keys:
 - `F12` lock
 - `Ctrl+S` save fallback
 - `Ctrl+F` find fallback
+
+Additional screen-level controls:
+
+- search overlay: `T` today, `M` month, `A` all time, `C` clear filters
+- date picker: type `YYYY-MM-DD`, use `[` and `]` for saved-day jumps, `<` and `>` for months with entries
+- index overlay: type to filter, `Shift+S` sort, `Shift+F` favorites only, `Shift+C` conflicts only
+- command palette: `Ctrl+K`
 
 ## Security model
 

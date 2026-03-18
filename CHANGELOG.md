@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.8
+
+- added a large writing-tools pass with line duplication, deletion, line movement, blank-line insertion, divider insertion, and date/time/stat/metadata stamps
+- added quick export actions, export history, and a backup policy surface inside the TUI
+- added favorite-to-favorite jumping, random saved-entry jumping, richer index filters, and saved-day/month jumps in the calendar
+- added search scope presets for today, this month, and all time, plus encrypted cache status reporting
+- added new display/settings controls for 12-hour clock mode, seconds, ruler visibility, and footer legend visibility
+- expanded review, dashboard, help, and quickstart surfaces so more of the product is self-describing in the app itself
+
 ## v0.1.7
 
 - added a command palette so major in-product actions are reachable from one searchable overlay

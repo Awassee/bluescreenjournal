@@ -227,6 +227,14 @@ pub fn render_settings_report(
         "typewriter_mode",
         config.typewriter_mode.to_string(),
     );
+    push_row(&mut output, "clock_12h", config.clock_12h.to_string());
+    push_row(&mut output, "show_seconds", config.show_seconds.to_string());
+    push_row(&mut output, "show_ruler", config.show_ruler.to_string());
+    push_row(
+        &mut output,
+        "show_footer_legend",
+        config.show_footer_legend.to_string(),
+    );
     push_row(
         &mut output,
         "daily_word_goal",
@@ -278,6 +286,11 @@ pub fn render_settings_report(
         &mut output,
         "favorite_dates",
         config.favorite_dates.len().to_string(),
+    );
+    push_row(
+        &mut output,
+        "export_history",
+        config.export_history.len().to_string(),
     );
     push_row(
         &mut output,
@@ -633,12 +646,17 @@ mod tests {
             local_device_id: Some("abc123".to_string()),
             device_nickname: "QA Mac".to_string(),
             typewriter_mode: true,
+            clock_12h: true,
+            show_seconds: true,
+            show_ruler: true,
+            show_footer_legend: true,
             daily_word_goal: Some(600),
             remember_passphrase_in_keychain: true,
             first_run_coach_completed: true,
             last_sync: None,
             sync_history: Vec::new(),
             favorite_dates: vec!["2026-03-17".to_string()],
+            export_history: Vec::new(),
             backup_retention: BackupRetentionConfig {
                 daily: 7,
                 weekly: 4,

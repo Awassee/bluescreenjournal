@@ -212,12 +212,88 @@ impl TextBuffer {
             .min(line_len_chars(&self.lines[self.cursor_row]));
     }
 
+    pub fn duplicate_current_line(&mut self) {
+        let line = self.lines[self.cursor_row].clone();
+        self.lines.insert(self.cursor_row + 1, line);
+        self.cursor_row += 1;
+        self.cursor_col = self
+            .cursor_col
+            .min(line_len_chars(&self.lines[self.cursor_row]));
+    }
+
+    pub fn delete_current_line(&mut self) {
+        if self.lines.len() == 1 {
+            self.lines[0].zeroize();
+            self.lines[0].clear();
+            self.cursor_row = 0;
+            self.cursor_col = 0;
+            return;
+        }
+
+        let removed = self.lines.remove(self.cursor_row);
+        let mut removed = removed;
+        removed.zeroize();
+        if self.cursor_row >= self.lines.len() {
+            self.cursor_row = self.lines.len() - 1;
+        }
+        self.cursor_col = self
+            .cursor_col
+            .min(line_len_chars(&self.lines[self.cursor_row]));
+    }
+
+    pub fn move_line_up(&mut self) {
+        if self.cursor_row == 0 {
+            return;
+        }
+        self.lines.swap(self.cursor_row, self.cursor_row - 1);
+        self.cursor_row -= 1;
+        self.cursor_col = self
+            .cursor_col
+            .min(line_len_chars(&self.lines[self.cursor_row]));
+    }
+
+    pub fn move_line_down(&mut self) {
+        if self.cursor_row + 1 >= self.lines.len() {
+            return;
+        }
+        self.lines.swap(self.cursor_row, self.cursor_row + 1);
+        self.cursor_row += 1;
+        self.cursor_col = self
+            .cursor_col
+            .min(line_len_chars(&self.lines[self.cursor_row]));
+    }
+
+    pub fn insert_blank_line_above(&mut self) {
+        self.lines.insert(self.cursor_row, String::new());
+        self.cursor_col = 0;
+    }
+
+    pub fn insert_blank_line_below(&mut self) {
+        self.cursor_row += 1;
+        self.lines.insert(self.cursor_row, String::new());
+        self.cursor_col = 0;
+    }
+
     pub fn move_to_line_start(&mut self) {
         self.cursor_col = 0;
     }
 
     pub fn move_to_line_end(&mut self) {
         self.cursor_col = line_len_chars(&self.lines[self.cursor_row]);
+    }
+
+    pub fn move_to_top(&mut self) {
+        self.cursor_row = 0;
+        self.cursor_col = self
+            .cursor_col
+            .min(line_len_chars(&self.lines[self.cursor_row]));
+    }
+
+    pub fn move_to_bottom(&mut self) {
+        self.cursor_row = self.lines.len().saturating_sub(1);
+        self.cursor_col = self
+            .cursor_col
+            .min(line_len_chars(&self.lines[self.cursor_row]));
     }
 
     pub fn page_up(&mut self, rows: usize) {
@@ -443,5 +519,64 @@ mod tests {
         assert_eq!(buf.cursor(), (3, 1));
         buf.move_paragraph_down();
         assert_eq!(buf.cursor(), (6, 1));
+    }
+
+    #[test]
+    fn duplicate_current_line_inserts_copy_below() {
+        let mut buf = TextBuffer::from_text("one\ntwo");
+        buf.set_cursor(0, 2);
+        buf.duplicate_current_line();
+        assert_eq!(buf.to_text(), "one\none\ntwo");
+        assert_eq!(buf.cursor(), (1, 2));
+    }
+
+    #[test]
+    fn delete_current_line_keeps_buffer_non_empty() {
+        let mut buf = TextBuffer::from_text("one\ntwo\nthree");
+        buf.set_cursor(1, 1);
+        buf.delete_current_line();
+        assert_eq!(buf.to_text(), "one\nthree");
+        assert_eq!(buf.cursor(), (1, 1));
+    }
+
+    #[test]
+    fn move_line_up_swaps_with_previous_line() {
+        let mut buf = TextBuffer::from_text("one\ntwo\nthree");
+        buf.set_cursor(1, 2);
+        buf.move_line_up();
+        assert_eq!(buf.to_text(), "two\none\nthree");
+        assert_eq!(buf.cursor(), (0, 2));
+    }
+
+    #[test]
+    fn move_line_down_swaps_with_next_line() {
+        let mut buf = TextBuffer::from_text("one\ntwo\nthree");
+        buf.set_cursor(1, 2);
+        buf.move_line_down();
+        assert_eq!(buf.to_text(), "one\nthree\ntwo");
+        assert_eq!(buf.cursor(), (2, 2));
+    }
+
+    #[test]
+    fn blank_line_insertions_place_cursor_on_new_line() {
+        let mut buf = TextBuffer::from_text("one\ntwo");
+        buf.set_cursor(1, 1);
+        buf.insert_blank_line_above();
+        assert_eq!(buf.to_text(), "one\n\ntwo");
+        assert_eq!(buf.cursor(), (1, 0));
+
+        buf.insert_blank_line_below();
+        assert_eq!(buf.to_text(), "one\n\n\ntwo");
+        assert_eq!(buf.cursor(), (2, 0));
+    }
+
+    #[test]
+    fn move_to_top_and_bottom_jump_to_buffer_extremes() {
+        let mut buf = TextBuffer::from_text("one\ntwo\nthree");
+        buf.set_cursor(1, 2);
+        buf.move_to_bottom();
+        assert_eq!(buf.cursor(), (2, 2));
+        buf.move_to_top();
+        assert_eq!(buf.cursor(), (0, 2));
     }
 }

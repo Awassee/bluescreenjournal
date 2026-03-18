@@ -3,6 +3,13 @@
   "sync_target_path": "/Users/you/Library/Mobile Documents/com~apple~CloudDocs/BlueScreenJournal",
   "local_device_id": null,
   "device_nickname": "This Mac",
+  "typewriter_mode": false,
+  "clock_12h": false,
+  "show_seconds": false,
+  "show_ruler": true,
+  "show_footer_legend": true,
+  "daily_word_goal": 500,
+  "remember_passphrase_in_keychain": false,
   "backup_retention": {
     "daily": 7,
     "weekly": 4,

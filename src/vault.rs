@@ -143,6 +143,7 @@ pub struct IndexEntry {
     pub entry_number: String,
     pub preview: String,
     pub has_conflict: bool,
+    pub metadata: EntryMetadata,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,6 +185,17 @@ pub struct IntegrityIssue {
 pub struct IntegrityReport {
     pub ok: bool,
     pub issues: Vec<IntegrityIssue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchCacheStatus {
+    pub path: PathBuf,
+    pub exists: bool,
+    pub size_bytes: u64,
+    pub modified_at: Option<DateTime<Utc>>,
+    pub entry_count: Option<usize>,
+    pub valid: bool,
+    pub issue: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -636,8 +648,60 @@ impl UnlockedVault {
                 entry_number: entry.entry_number,
                 preview: truncate_chars(&entry.preview, preview_chars),
                 has_conflict: entry.has_conflict,
+                metadata: entry.metadata,
             })
             .collect())
+    }
+
+    pub fn search_cache_status(&self) -> SearchCacheStatus {
+        let path = search_cache_path(&self.root);
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                return SearchCacheStatus {
+                    path,
+                    exists: false,
+                    size_bytes: 0,
+                    modified_at: None,
+                    entry_count: None,
+                    valid: false,
+                    issue: None,
+                };
+            }
+        };
+
+        let size_bytes = metadata.len();
+        let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
+
+        let (entry_count, valid, issue) = match fs::read(&path)
+            .map_err(VaultError::from)
+            .and_then(|bytes| RevisionFile::parse(&bytes))
+            .and_then(|encrypted| {
+                decrypt_payload(&self.key, &encrypted, cache_aad_string().as_bytes())
+            })
+            .and_then(|plaintext| {
+                serde_json::from_slice::<SearchCachePayload>(&plaintext).map_err(VaultError::from)
+            }) {
+            Ok(payload) if payload.kind == "search-cache" => {
+                (Some(payload.entries.len()), true, None)
+            }
+            Ok(payload) => (
+                Some(payload.entries.len()),
+                false,
+                Some(format!("unexpected cache kind '{}'", payload.kind)),
+            ),
+            Err(error) => (None, false, Some(error.to_string())),
+        };
+
+        SearchCacheStatus {
+            path,
+            exists: true,
+            size_bytes,
+            modified_at,
+            entry_count,
+            valid,
+            issue,
+        }
     }
 
     pub fn load_search_documents(&self) -> VaultResult<Vec<SearchDocument>> {
