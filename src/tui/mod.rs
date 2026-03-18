@@ -188,9 +188,9 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let hint = if app.menu().is_some() {
-        "ARROWS MOVE  ENTER OPEN  ESC CLOSE"
+        "LEFT/RIGHT MENU  UP/DOWN ITEM  ENTER SELECT  ESC CLOSE"
     } else {
-        "ESC MENUS  CTRL+K COMMANDS"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H QUICK MENU"
     };
     let left_width = spans
         .iter()
@@ -396,7 +396,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     }
     let context = format!(
-        "{} {} {} {}",
+        "Mode: {} | {} | {} | {}",
         app.footer_mode_label(),
         app.footer_dirty_label(),
         app.footer_context_label(),
@@ -408,12 +408,8 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     } else {
         format!("{context} | {status}")
     };
-    let strip = if app.show_footer_legend_enabled() {
-        "EscMenu F1Hl F2Sv F3Dt F4Fd F5Sr F6Rp F7Ix F8Sy F9Cl F10Qt F11Rv F12Lk"
-    } else {
-        "Ctrl+K COMMANDS"
-    };
-    let content = join_left_right(area.width as usize, &left, strip);
+    let strip = footer_legend(app, area.width as usize);
+    let content = join_left_right(area.width as usize, &left, &strip);
     frame.render_widget(
         Paragraph::new(Line::from(content)).style(
             screen_style()
@@ -422,6 +418,34 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         ),
         area,
     );
+}
+
+fn footer_legend(app: &App, width: usize) -> String {
+    if !app.show_footer_legend_enabled() {
+        return "Ctrl+K Commands".to_string();
+    }
+
+    if app.menu().is_some() {
+        if width >= 96 {
+            return "Menu: Left/Right switch | Up/Down move | Enter select | Esc close".to_string();
+        }
+        return "Menu: Arrows move | Enter select | Esc close".to_string();
+    }
+
+    if app.overlay().is_some() {
+        if width >= 90 {
+            return "Esc close prompt | Enter confirm | F1 keys | Ctrl+K commands".to_string();
+        }
+        return "Esc close | Enter confirm | F1 keys".to_string();
+    }
+
+    if width >= 120 {
+        "Esc Menus | Alt+F/E/S/G/T/U/H menu | F1 Help | F2 Save | F5 Search | F10 Quit".to_string()
+    } else if width >= 90 {
+        "Esc Menus | Alt+F/E/S/G/T/U/H | F1 Help | F2 Save | F10 Quit".to_string()
+    } else {
+        "Esc Menus | F1 Help | F2 Save | F10 Quit".to_string()
+    }
 }
 
 fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
@@ -658,7 +682,7 @@ fn draw_unlock_overlay(
 fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
         Line::from("Classic 80x25 workspace. Type immediately when no menu or prompt is open."),
-        Line::from("Esc opens menus. Arrows move. Enter selects. Ctrl+K = commands."),
+        Line::from("Esc opens menus. Alt+F/E/S/G/T/U/H jumps menus. Ctrl+K = commands."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
         Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),

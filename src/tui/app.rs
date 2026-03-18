@@ -1843,12 +1843,12 @@ impl App {
     }
 
     pub fn footer_dirty_label(&self) -> &'static str {
-        if self.dirty { "MOD" } else { "VIEW" }
+        if self.dirty { "Unsaved" } else { "Saved" }
     }
 
     pub fn cursor_status_label(&self) -> String {
         let (row, col) = self.buffer.cursor();
-        format!("LN {:>3} COL {:>3}", row + 1, col + 1)
+        format!("Line {}, Col {}", row + 1, col + 1)
     }
 
     pub fn footer_context_label(&self) -> String {
@@ -1858,7 +1858,7 @@ impl App {
                 return menu.selected_menu.title().to_string();
             }
             return format!(
-                "{} {}/{}",
+                "{} menu {}/{}",
                 menu.selected_menu.title(),
                 menu.selected_item + 1,
                 items.len()
@@ -1968,11 +1968,11 @@ impl App {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
             "Esc opens menus for FILE / EDIT / SEARCH / GO / TOOLS / SETUP / HELP",
+            "Alt+F / E / S / G / T / U / H opens a specific menu directly.",
             "F2 saves an encrypted revision. Autosave writes an encrypted draft.",
             "EDIT adds line tools, stamps, divider inserts, and quick writing ops.",
             "GO adds favorites, random jumps, calendar saved-date hops, and the index.",
             "SEARCH adds presets, cache status, and live filters. TOOLS adds review/admin.",
-            "F1 shows help. Ctrl+K opens the command palette.",
         ]
     }
 
@@ -2576,6 +2576,11 @@ impl App {
             return;
         }
 
+        if let Some(menu) = Self::menu_hotkey(&key) {
+            self.open_menu(menu);
+            return;
+        }
+
         if key.code == KeyCode::Esc || Self::is_ctrl_char(&key, 'g') {
             self.open_menu(MenuId::File);
             return;
@@ -2704,7 +2709,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Some(target_menu) = MenuId::from_hotkey(ch) {
                     menu.jump_to_menu(target_menu, self);
                 }
@@ -6394,6 +6399,16 @@ impl App {
             && matches!(key.code, KeyCode::Char(input) if input.eq_ignore_ascii_case(&ch))
     }
 
+    fn menu_hotkey(key: &KeyEvent) -> Option<MenuId> {
+        if !key.modifiers.contains(KeyModifiers::ALT) {
+            return None;
+        }
+        let KeyCode::Char(ch) = key.code else {
+            return None;
+        };
+        MenuId::from_hotkey(ch)
+    }
+
     fn is_text_input_key(key: &KeyEvent) -> bool {
         key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT
     }
@@ -7030,6 +7045,22 @@ mod tests {
         assert!(matches!(
             app.menu(),
             Some(menu) if menu.selected_menu == MenuId::File
+        ));
+    }
+
+    #[test]
+    fn alt_letter_opens_target_menu_when_editor_is_active() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT)),
+            20,
+        );
+
+        assert!(matches!(
+            app.menu(),
+            Some(menu) if menu.selected_menu == MenuId::Search
         ));
     }
 
