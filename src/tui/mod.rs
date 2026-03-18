@@ -10,7 +10,7 @@ use crate::tui::{
     },
     buffer::MatchPos,
 };
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, Local, NaiveDate};
 use crossterm::{
     cursor,
     event::{self},
@@ -276,7 +276,11 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
     if show_reveal {
         constraints.push(Constraint::Length(1));
     }
-    let show_closing = area.height > u16::from(show_reveal) + 1;
+    let show_ruler = area.height > u16::from(show_reveal) + 2;
+    if show_ruler {
+        constraints.push(Constraint::Length(1));
+    }
+    let show_closing = area.height > u16::from(show_reveal) + u16::from(show_ruler) + 1;
     constraints.push(Constraint::Min(1));
     if show_closing {
         constraints.push(Constraint::Length(1));
@@ -295,6 +299,18 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
             )))
             .style(screen_style().add_modifier(Modifier::BOLD)),
             chunks[0],
+        );
+        chunk_index += 1;
+    }
+
+    if show_ruler {
+        frame.render_widget(
+            Paragraph::new(Line::from(ruler_spans(
+                app.buffer().cursor().1,
+                chunks[chunk_index].width as usize,
+            )))
+            .style(screen_style().add_modifier(Modifier::DIM)),
+            chunks[chunk_index],
         );
         chunk_index += 1;
     }
@@ -371,10 +387,11 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     }
     let context = format!(
-        "{} {} {}",
+        "{} {} {} {}",
         app.footer_mode_label(),
         app.footer_dirty_label(),
-        app.footer_context_label()
+        app.footer_context_label(),
+        app.document_stats_label()
     );
     let status = app.status_text().unwrap_or("");
     let left = if status.is_empty() {
@@ -602,14 +619,15 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("| F10 Quit        F11 Reveal     F12 Lock            |"),
         Line::from("| Ctrl+S Save     Ctrl+F Find                         |"),
         Line::from("|                                                    |"),
+        Line::from("| Editor shows a ruler and live L/W/C document stats |"),
         Line::from("| Arrows move cursor | PgUp/PgDn scroll              |"),
         Line::from("| Find updates as you type | Search runs on Enter    |"),
-        Line::from("| Calendar: Arrows move | PgUp/PgDn month            |"),
-        Line::from("| Index: Up/Down/PgUp/PgDn | Enter opens date        |"),
+        Line::from("| Calendar: type YYYY-MM-DD for direct jump          |"),
+        Line::from("| Index: type to filter, S toggles newest/oldest     |"),
         Line::from("| Search: Tab fields | Enter search/open result      |"),
         Line::from("| Sync: F8 runs encrypted sync and shows results     |"),
         Line::from("| FILE menu also exports current entry + backups     |"),
-        Line::from("| TOOLS menu includes Doctor report + Verify         |"),
+        Line::from("| TOOLS menu includes Dashboard, Doctor, Verify      |"),
         Line::from("| SETUP menu includes a live settings summary        |"),
         Line::from("| Closing Thought lives above footer | F9 edits it   |"),
         Line::from("| Reveal shows DATE / ENTRY / TAG / MOOD / CLOSE     |"),
@@ -646,6 +664,9 @@ fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePick
             if picker.has_entry(date) {
                 style = style.add_modifier(Modifier::BOLD);
             }
+            if date == Local::now().date_naive() {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            }
             if date == picker.selected_date {
                 style = style.add_modifier(Modifier::REVERSED);
             }
@@ -655,8 +676,16 @@ fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePick
     }
 
     lines.push(Line::from("Bold = saved day  Reverse = selected"));
+    lines.push(Line::from(format!(
+        "Jump: {}",
+        if picker.jump_input.trim().is_empty() {
+            "[type YYYY-MM-DD]".to_string()
+        } else {
+            picker.jump_input.clone()
+        }
+    )));
     lines.push(Line::from("Arrows move  PgUp/PgDn month  T today"));
-    lines.push(Line::from("Home first day  End last day  Enter open"));
+    lines.push(Line::from("Home/End month bounds  Enter open"));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
@@ -736,6 +765,19 @@ fn draw_search_overlay(
     }
 
     lines.push(Line::from(""));
+    if let Some(result) = search.selected_result() {
+        lines.push(Line::from(format!(
+            "Selected: {} entry {} line {} col {}",
+            result.date.format("%Y-%m-%d"),
+            result.entry_number,
+            result.row + 1,
+            result.start_col + 1
+        )));
+        lines.push(Line::from(format!(
+            "Match   : {}",
+            truncate_to_width(&result.matched_text, area.width.saturating_sub(10) as usize)
+        )));
+    }
     lines.push(Line::from("Tab fields  Enter search/open  Home/End jump"));
     lines.push(Line::from("Up/Down/PgUp/PgDn move results  Esc close"));
     if let Some(error) = &search.error {
@@ -918,14 +960,27 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
                 .map(|entry| entry.date.format("%Y-%m-%d").to_string())
                 .unwrap_or_else(|| "none".to_string())
         )),
+        Line::from(format!(
+            "Filter: {}  Sort: {}",
+            if index.filter_input.trim().is_empty() {
+                "[all]".to_string()
+            } else {
+                truncate_to_width(&index.filter_input, area.width.saturating_sub(18) as usize)
+            },
+            if index.sort_oldest_first {
+                "OLDEST"
+            } else {
+                "NEWEST"
+            }
+        )),
         Line::from("DATE         ENTRY NO  CF        PREVIEW"),
         Line::from("----------------------------------------"),
     ];
 
     if index.items.is_empty() {
-        lines.push(Line::from("No saved entries."));
+        lines.push(Line::from("No saved entries match the current filter."));
     } else {
-        let visible_rows = area.height.saturating_sub(5) as usize;
+        let visible_rows = area.height.saturating_sub(6) as usize;
         let (start, end) = index.window(visible_rows);
         let preview_width = area.width.saturating_sub(31) as usize;
         for (offset, entry) in index.items[start..end].iter().enumerate() {
@@ -948,7 +1003,10 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from("Up/Down/PgUp/PgDn move  Home/End jump  T today"));
+    lines.push(Line::from(
+        "Type to filter  Backspace clear  S sort  T today",
+    ));
+    lines.push(Line::from("Up/Down/PgUp/PgDn move  Home/End jump"));
     lines.push(Line::from("Enter open  Esc close"));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
@@ -1163,6 +1221,26 @@ fn weekday_label(day: chrono::Weekday) -> &'static str {
         chrono::Weekday::Fri => "Fr",
         chrono::Weekday::Sat => "Sa",
     }
+}
+
+fn ruler_spans(cursor_col: usize, width: usize) -> Vec<Span<'static>> {
+    let mut spans = Vec::with_capacity(width);
+    for idx in 0..width {
+        let column = idx + 1;
+        let marker = if column % 10 == 0 {
+            char::from(b'0' + ((column / 10) % 10) as u8)
+        } else if column % 5 == 0 {
+            '+'
+        } else {
+            '.'
+        };
+        let mut style = screen_style();
+        if idx == cursor_col.min(width.saturating_sub(1)) {
+            style = style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
+        }
+        spans.push(Span::styled(marker.to_string(), style));
+    }
+    spans
 }
 
 fn centered_line(width: usize, text: &str) -> Line<'static> {
