@@ -32,7 +32,7 @@ That bootstrap installer:
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.5
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.6
 ```
 
 ## Release Bundle Layout
@@ -61,7 +61,7 @@ dist/
         bsj-search.png
         ...
       releases/
-        v0.1.5.md
+        v0.1.6.md
       SETUP_GUIDE.md
       PRODUCT_GUIDE.md
       DATASHEET.md
@@ -266,7 +266,7 @@ Release workflow:
 Release automation flow:
 
 ```bash
-git tag v0.1.5
+git tag v0.1.6
 git push origin main --tags
 ```
 

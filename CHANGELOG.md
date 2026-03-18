@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.6
+
+- added a DOS-style writing ruler with live cursor position emphasis
+- added live document stats in the footer
+- added a status dashboard and backup cleanup preview inside the TUI
+- added typed date jump in the calendar overlay
+- added live filter and sort controls for the real index view
+- made global search rerun live as query and date filters change
+- expanded selected-result detail in the search overlay
+
 ## v0.1.5
 
 - added troubleshooting, sync, backup/restore, terminal, privacy, and macro operator guides
