@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.15
+
+- fixed bundled installer PATH setup so installs now persist `bsj` into shell startup files automatically
+- added shell-specific PATH persistence coverage for zsh (`.zprofile` and `.zshrc`) and bash (`.bash_profile` and `.bashrc`)
+- expanded installer smoke tests to validate PATH persistence in isolated homes and to cover both direct and bootstrap install paths
+- fixed smoke archive auto-selection to use the newest versioned archive instead of stale `latest` aliases
+
 ## v0.1.14
 
 - fixed installer `set -u` failures when no install override arguments are forwarded to the bundled installer

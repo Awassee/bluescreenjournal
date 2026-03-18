@@ -143,16 +143,25 @@ if [[ "$UNIVERSAL" -eq 1 ]]; then
     exit 1
   }
 
-  build_binary_for_target "aarch64-apple-darwin"
+  TMP_ROOT="${TMPDIR:-/tmp}"
+  mkdir -p "$TMP_ROOT"
+  UNIVERSAL_STAGING_DIR="$(mktemp -d "$TMP_ROOT/bsj-universal-bin.XXXXXX")"
+  X86_STAGING_BINARY="$UNIVERSAL_STAGING_DIR/${NAME}-x86_64-apple-darwin"
+
   build_binary_for_target "x86_64-apple-darwin"
+  install -m 755 "$ROOT_DIR/target/x86_64-apple-darwin/release/$NAME" "$X86_STAGING_BINARY"
+  rm -rf "$ROOT_DIR/target/x86_64-apple-darwin"
+
+  build_binary_for_target "aarch64-apple-darwin"
 
   UNIVERSAL_DIR="$ROOT_DIR/target/universal-apple-darwin/release"
   mkdir -p "$UNIVERSAL_DIR"
   BINARY_PATH="$UNIVERSAL_DIR/$NAME"
   lipo -create \
+    "$X86_STAGING_BINARY" \
     "$ROOT_DIR/target/aarch64-apple-darwin/release/$NAME" \
-    "$ROOT_DIR/target/x86_64-apple-darwin/release/$NAME" \
     -output "$BINARY_PATH"
+  rm -rf "$UNIVERSAL_STAGING_DIR"
 
   BUILD_TARGET="universal-apple-darwin"
   BUNDLE_TARGETS=("aarch64-apple-darwin" "x86_64-apple-darwin")
