@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.16
+
+- improved installer completion messaging to be menu-first and first-run friendly
+- clarified PATH guidance in installer output with clearer "open a new terminal or run now" wording
+- refreshed first-run in-app onboarding copy to prioritize simple menu-driven actions over command-style instructions
+- cleaned up top-level docs (`README`, `START_HERE`, `QUICKSTART`, `FAQ`) to make CLI diagnostics explicitly optional
+
 ## v0.1.15
 
 - fixed bundled installer PATH setup so installs now persist `bsj` into shell startup files automatically
