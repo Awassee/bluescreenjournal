@@ -141,6 +141,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
     let mut right_parts = vec![
         app.lock_status_label().to_string(),
         app.integrity_status_label(),
+        app.soundtrack_status_label().to_string(),
         app.word_goal_status_label(),
         app.session_status_label(),
         app.save_status_label(),
@@ -714,7 +715,7 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("EDIT   Lines, stamps, metadata, favorite, reveal, typewriter"),
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),
         Line::from("GO     Calendar, index, recents, favorites, random, today"),
-        Line::from("TOOLS  Sync, verify, review, dashboard, prompts, doctor"),
+        Line::from("TOOLS  Sync, soundtrack, verify, review, dashboard, prompts, doctor"),
         Line::from("Calendar: type YYYY-MM-DD, [ ] saved-day jump, < > entry months, T today"),
         Line::from("Index: type filter, S sort, Shift+F favorites, Shift+C conflicts"),
         Line::from("Search: Tab fields, Enter search/open, T/W/M/Y/A presets, Ctrl+R recall query"),

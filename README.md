@@ -176,6 +176,7 @@ The app is direct by design:
 ### Protect and move data
 
 - `F8` or `TOOLS -> Sync Vault` syncs encrypted blobs
+- `TOOLS -> Toggle Soundtrack` plays/stops the configured MIDI theme source
 - `TOOLS -> Verify Integrity` checks the revision chain
 - `bsj backup` creates an encrypted snapshot under `<vault>/backups/`
 - `bsj restore ... --into ...` restores a backup to another directory
@@ -196,7 +197,7 @@ The menu bar is the primary discoverability surface.
 - `EDIT` includes line tools, stamps, metadata, reveal, and writing-mode toggles
 - `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
-- `TOOLS` includes sync, integrity details, review mode, prompts, dashboard, updates, and doctor output
+- `TOOLS` includes sync, soundtrack toggle, integrity details, review mode, prompts, dashboard, updates, and doctor output
 - `SETUP` includes a live settings summary plus editable vault/sync/device/retention/clock/display values
 - `HELP` includes the key sheet, quick-start guide, and searchable guide topics inside the TUI
 
@@ -219,6 +220,7 @@ Primary keys:
 
 Additional screen-level controls:
 
+- soundtrack source defaults to `https://www.midi-karaoke.info/21b56501.mid` and can be changed in `SETUP -> Soundtrack URL/Path`
 - search overlay: `T` today, `M` month, `A` all time, `C` clear filters
 - date picker: type `YYYY-MM-DD`, use `[` and `]` for saved-day jumps, `<` and `>` for months with entries
 - index overlay: type to filter, `Shift+S` sort, `Shift+F` favorites only, `Shift+C` conflicts only

@@ -650,6 +650,7 @@ mod tests {
             show_seconds: true,
             show_ruler: true,
             show_footer_legend: true,
+            soundtrack_source: "https://example.com/theme.mid".to_string(),
             daily_word_goal: Some(600),
             remember_passphrase_in_keychain: true,
             first_run_coach_completed: true,

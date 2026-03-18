@@ -12,6 +12,7 @@ const READABLE_SETTING_KEYS: &[&str] = &[
     "show_seconds",
     "show_ruler",
     "show_footer_legend",
+    "soundtrack_source",
     "daily_word_goal",
     "remember_passphrase_in_keychain",
     "backup_retention.daily",
@@ -30,6 +31,7 @@ const EDITABLE_SETTING_KEYS: &[&str] = &[
     "show_seconds",
     "show_ruler",
     "show_footer_legend",
+    "soundtrack_source",
     "daily_word_goal",
     "remember_passphrase_in_keychain",
     "backup_retention.daily",
@@ -67,6 +69,8 @@ pub struct AppConfig {
     pub show_ruler: bool,
     #[serde(default = "default_show_footer_legend")]
     pub show_footer_legend: bool,
+    #[serde(default = "default_soundtrack_source")]
+    pub soundtrack_source: String,
     #[serde(default)]
     pub daily_word_goal: Option<usize>,
     #[serde(default)]
@@ -174,6 +178,7 @@ impl AppConfig {
                 show_seconds: false,
                 show_ruler: default_show_ruler(),
                 show_footer_legend: default_show_footer_legend(),
+                soundtrack_source: default_soundtrack_source(),
                 daily_word_goal: None,
                 remember_passphrase_in_keychain: false,
                 first_run_coach_completed: false,
@@ -231,6 +236,7 @@ pub fn get_setting_value(config: &AppConfig, key: &str) -> Result<String, String
         "show_seconds" => Ok(config.show_seconds.to_string()),
         "show_ruler" => Ok(config.show_ruler.to_string()),
         "show_footer_legend" => Ok(config.show_footer_legend.to_string()),
+        "soundtrack_source" => Ok(config.soundtrack_source.clone()),
         "daily_word_goal" => Ok(config
             .daily_word_goal
             .map(|goal| goal.to_string())
@@ -292,6 +298,10 @@ pub fn set_setting_value(config: &mut AppConfig, key: &str, value: &str) -> Resu
         "show_footer_legend" => {
             config.show_footer_legend = parse_bool_value(value, key)?;
             Ok(config.show_footer_legend.to_string())
+        }
+        "soundtrack_source" => {
+            config.soundtrack_source = value.trim().to_string();
+            Ok(config.soundtrack_source.clone())
         }
         "daily_word_goal" => {
             config.daily_word_goal = parse_optional_usize(value, key)?;
@@ -404,6 +414,10 @@ fn default_show_footer_legend() -> bool {
     true
 }
 
+fn default_soundtrack_source() -> String {
+    "https://www.midi-karaoke.info/21b56501.mid".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -437,6 +451,7 @@ mod tests {
             show_seconds: true,
             show_ruler: false,
             show_footer_legend: false,
+            soundtrack_source: "https://example.com/theme.mid".to_string(),
             daily_word_goal: Some(750),
             remember_passphrase_in_keychain: true,
             first_run_coach_completed: true,
@@ -478,6 +493,10 @@ mod tests {
             "false"
         );
         assert_eq!(
+            get_setting_value(&config, "soundtrack_source").expect("soundtrack source"),
+            "https://example.com/theme.mid"
+        );
+        assert_eq!(
             get_setting_value(&config, "daily_word_goal").expect("word goal"),
             "750"
         );
@@ -499,6 +518,7 @@ mod tests {
             show_seconds: false,
             show_ruler: true,
             show_footer_legend: true,
+            soundtrack_source: String::new(),
             daily_word_goal: None,
             remember_passphrase_in_keychain: false,
             first_run_coach_completed: false,
@@ -515,6 +535,12 @@ mod tests {
         set_setting_value(&mut config, "typewriter_mode", "true").expect("typewriter");
         set_setting_value(&mut config, "clock_12h", "true").expect("clock");
         set_setting_value(&mut config, "show_ruler", "false").expect("ruler");
+        set_setting_value(
+            &mut config,
+            "soundtrack_source",
+            "https://example.com/blue.mid",
+        )
+        .expect("soundtrack source");
         set_setting_value(&mut config, "daily_word_goal", "500").expect("word goal");
 
         assert_eq!(config.sync_target_path, Some(PathBuf::from("/tmp/remote")));
@@ -522,6 +548,7 @@ mod tests {
         assert!(config.typewriter_mode);
         assert!(config.clock_12h);
         assert!(!config.show_ruler);
+        assert_eq!(config.soundtrack_source, "https://example.com/blue.mid");
         assert_eq!(config.daily_word_goal, Some(500));
     }
 
@@ -537,6 +564,7 @@ mod tests {
             show_seconds: false,
             show_ruler: true,
             show_footer_legend: true,
+            soundtrack_source: String::new(),
             daily_word_goal: None,
             remember_passphrase_in_keychain: false,
             first_run_coach_completed: false,

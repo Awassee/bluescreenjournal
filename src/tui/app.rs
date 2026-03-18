@@ -21,6 +21,7 @@ use std::{
     collections::BTreeSet,
     env,
     path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
 use zeroize::Zeroize;
@@ -1019,6 +1020,7 @@ pub enum SettingField {
     ShowSeconds,
     ShowRuler,
     ShowFooterLegend,
+    SoundtrackSource,
     DailyWordGoal,
     BackupDaily,
     BackupWeekly,
@@ -1035,6 +1037,7 @@ impl SettingField {
             SettingField::ShowSeconds => "show_seconds",
             SettingField::ShowRuler => "show_ruler",
             SettingField::ShowFooterLegend => "show_footer_legend",
+            SettingField::SoundtrackSource => "soundtrack_source",
             SettingField::DailyWordGoal => "daily_word_goal",
             SettingField::BackupDaily => "backup_retention.daily",
             SettingField::BackupWeekly => "backup_retention.weekly",
@@ -1051,6 +1054,7 @@ impl SettingField {
             SettingField::ShowSeconds => "Show Seconds",
             SettingField::ShowRuler => "Show Ruler",
             SettingField::ShowFooterLegend => "Footer Legend",
+            SettingField::SoundtrackSource => "Soundtrack URL/Path",
             SettingField::DailyWordGoal => "Daily Word Goal",
             SettingField::BackupDaily => "Daily Backups",
             SettingField::BackupWeekly => "Weekly Backups",
@@ -1067,6 +1071,7 @@ impl SettingField {
             SettingField::ShowSeconds => "Show seconds in header clock (true/false):",
             SettingField::ShowRuler => "Show DOS ruler above editor (true/false):",
             SettingField::ShowFooterLegend => "Show function-key footer legend (true/false):",
+            SettingField::SoundtrackSource => "Set soundtrack URL or file path:",
             SettingField::DailyWordGoal => "Set daily word goal (blank clears):",
             SettingField::BackupDaily => "Keep daily backups:",
             SettingField::BackupWeekly => "Keep weekly backups:",
@@ -1083,6 +1088,9 @@ impl SettingField {
             SettingField::ShowSeconds => "Useful for tight writing sessions and save timing.",
             SettingField::ShowRuler => "Turns the WordPerfect-style ruler line on or off.",
             SettingField::ShowFooterLegend => "Hide when you want a cleaner writing footer.",
+            SettingField::SoundtrackSource => {
+                "Used by TOOLS -> Toggle Soundtrack. Leave blank to disable quick playback."
+            }
             SettingField::DailyWordGoal => "Shown as live progress in the footer and dashboard.",
             SettingField::BackupDaily
             | SettingField::BackupWeekly
@@ -1103,6 +1111,7 @@ impl SettingField {
             SettingField::ShowSeconds => config.show_seconds.to_string(),
             SettingField::ShowRuler => config.show_ruler.to_string(),
             SettingField::ShowFooterLegend => config.show_footer_legend.to_string(),
+            SettingField::SoundtrackSource => config.soundtrack_source.clone(),
             SettingField::DailyWordGoal => config
                 .daily_word_goal
                 .map(|goal| goal.to_string())
@@ -1120,6 +1129,13 @@ impl SettingField {
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "[unset]".to_string()),
+            SettingField::SoundtrackSource => {
+                if config.soundtrack_source.trim().is_empty() {
+                    "[unset]".to_string()
+                } else {
+                    config.soundtrack_source.clone()
+                }
+            }
             _ => self.current_input(config),
         }
     }
@@ -1337,6 +1353,7 @@ pub enum MenuAction {
     RestoreBackup,
     Dashboard,
     SyncCenter,
+    ToggleSoundtrack,
     ReviewMode,
     CheckUpdates,
     DoctorReport,
@@ -1638,11 +1655,19 @@ pub struct App {
     search_scope_to: String,
     document_stats: DocumentStats,
     menu_coach_shown: bool,
+    soundtrack_child: Option<Child>,
+    soundtrack_loop_enabled: bool,
 }
 
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        self.stop_soundtrack_playback();
     }
 }
 
@@ -1710,6 +1735,8 @@ impl App {
                 chars: 0,
             }),
             menu_coach_shown: false,
+            soundtrack_child: None,
+            soundtrack_loop_enabled: false,
         };
         app.try_keychain_auto_unlock();
         app
@@ -1822,6 +1849,14 @@ impl App {
             "DRAFT RECOVERED"
         } else {
             ""
+        }
+    }
+
+    pub fn soundtrack_status_label(&self) -> &'static str {
+        if self.soundtrack_loop_enabled {
+            "THEME ON"
+        } else {
+            "THEME OFF"
         }
     }
 
@@ -2427,6 +2462,17 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Toggle Soundtrack".to_string(),
+                    detail: if self.soundtrack_loop_enabled {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
+                    .to_string(),
+                    action: MenuAction::ToggleSoundtrack,
+                    enabled: !self.config.soundtrack_source.trim().is_empty(),
+                },
+                MenuItem {
                     label: "Verify Integrity".to_string(),
                     detail: self.integrity_status_label(),
                     action: MenuAction::Verify,
@@ -2501,6 +2547,7 @@ impl App {
                 self.setting_menu_item(SettingField::ShowSeconds),
                 self.setting_menu_item(SettingField::ShowRuler),
                 self.setting_menu_item(SettingField::ShowFooterLegend),
+                self.setting_menu_item(SettingField::SoundtrackSource),
                 self.setting_menu_item(SettingField::BackupDaily),
                 self.setting_menu_item(SettingField::BackupWeekly),
                 self.setting_menu_item(SettingField::BackupMonthly),
@@ -2552,6 +2599,16 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        self.reap_soundtrack_process();
+        if self.soundtrack_loop_enabled
+            && self.soundtrack_child.is_none()
+            && let Err(error) = self.start_soundtrack_playback()
+        {
+            log::warn!("soundtrack restart failed: {error}");
+            self.soundtrack_loop_enabled = false;
+            self.flash_status(&error);
+        }
+
         if self.pending_sync_request.is_some() {
             self.run_pending_sync();
         }
@@ -4781,6 +4838,11 @@ impl App {
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "[unset]".to_string());
+        let soundtrack_source = if self.config.soundtrack_source.trim().is_empty() {
+            "[unset]".to_string()
+        } else {
+            self.config.soundtrack_source.clone()
+        };
         let integrity = self.integrity_status_label();
         let dirty = if self.dirty { "modified" } else { "clean" };
         let save_state = self.save_status_label();
@@ -4866,6 +4928,10 @@ impl App {
             format!("Recents     : {}", self.recent_dates.len()),
             format!("Favorites   : {}", self.favorite_dates().len()),
             format!("Sync target : {sync_target}"),
+            format!(
+                "Soundtrack  : {} ({soundtrack_source})",
+                self.soundtrack_status_label()
+            ),
             format!("Sync runs   : {}", self.config.sync_history.len()),
             format!("Search cache: {search_cache_summary}"),
             format!("Last export : {export_summary}"),
@@ -5033,6 +5099,7 @@ impl App {
             MenuAction::RestoreBackup => self.open_restore_prompt(),
             MenuAction::Dashboard => self.open_dashboard_overlay(),
             MenuAction::SyncCenter => self.open_sync_center_overlay(),
+            MenuAction::ToggleSoundtrack => self.toggle_soundtrack_playback(),
             MenuAction::ReviewMode => self.open_review_overlay(),
             MenuAction::CheckUpdates => self.open_update_check_overlay(),
             MenuAction::DoctorReport => self.open_doctor_overlay(),
@@ -5326,6 +5393,8 @@ impl App {
         }
         log::info!("locking vault and clearing in-memory state");
         self.clear_sensitive_state();
+        self.soundtrack_loop_enabled = false;
+        self.stop_soundtrack_playback();
         self.vault = None;
         self.integrity_status = None;
         self.overlay = Some(Overlay::UnlockPrompt {
@@ -5333,6 +5402,72 @@ impl App {
             error: Some("Vault locked. Enter passphrase.".to_string()),
         });
         self.flash_status("LOCKED.");
+    }
+
+    fn soundtrack_source_for_playback(&self) -> Result<String, String> {
+        let trimmed = self.config.soundtrack_source.trim();
+        if trimmed.is_empty() {
+            return Err("SOUNDTRACK SOURCE NOT SET.".to_string());
+        }
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            return Ok(trimmed.to_string());
+        }
+        let path = expand_tilde(trimmed);
+        if !path.exists() {
+            return Err("SOUNDTRACK FILE NOT FOUND.".to_string());
+        }
+        Ok(path.display().to_string())
+    }
+
+    fn start_soundtrack_playback(&mut self) -> Result<(), String> {
+        self.reap_soundtrack_process();
+        if self.soundtrack_child.is_some() {
+            return Ok(());
+        }
+        let source = self.soundtrack_source_for_playback()?;
+        let child = Command::new("afplay")
+            .arg(&source)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("SOUNDTRACK START FAILED: {error}"))?;
+        self.soundtrack_child = Some(child);
+        Ok(())
+    }
+
+    fn stop_soundtrack_playback(&mut self) {
+        if let Some(mut child) = self.soundtrack_child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    fn reap_soundtrack_process(&mut self) {
+        if let Some(child) = &mut self.soundtrack_child
+            && let Ok(Some(_)) = child.try_wait()
+        {
+            self.soundtrack_child = None;
+        }
+    }
+
+    fn toggle_soundtrack_playback(&mut self) {
+        if self.soundtrack_loop_enabled {
+            self.soundtrack_loop_enabled = false;
+            self.stop_soundtrack_playback();
+            self.flash_status("SOUNDTRACK OFF.");
+            return;
+        }
+
+        match self.start_soundtrack_playback() {
+            Ok(()) => {
+                self.soundtrack_loop_enabled = true;
+                self.flash_status("SOUNDTRACK ON.");
+            }
+            Err(error) => {
+                self.soundtrack_loop_enabled = false;
+                self.flash_status(&error);
+            }
+        }
     }
 
     fn set_closing_thought_from_input(&mut self, input: &str) {
@@ -5779,6 +5914,14 @@ impl App {
         }
 
         self.config = config;
+        if prompt.field == SettingField::SoundtrackSource && self.soundtrack_loop_enabled {
+            self.stop_soundtrack_playback();
+            if let Err(error) = self.start_soundtrack_playback() {
+                self.soundtrack_loop_enabled = false;
+                self.flash_status(&error);
+                return true;
+            }
+        }
         if prompt.field == SettingField::VaultPath {
             if self.vault.is_some() && self.dirty {
                 self.autosave_current_date();
@@ -5814,6 +5957,13 @@ impl App {
             SettingField::ShowSeconds => "CLOCK SECONDS SET.",
             SettingField::ShowRuler => "RULER SET.",
             SettingField::ShowFooterLegend => "FOOTER LEGEND SET.",
+            SettingField::SoundtrackSource => {
+                if self.config.soundtrack_source.trim().is_empty() {
+                    "SOUNDTRACK SOURCE CLEARED."
+                } else {
+                    "SOUNDTRACK SOURCE SET."
+                }
+            }
             SettingField::DailyWordGoal => {
                 if self.config.daily_word_goal.is_some() {
                     "WORD GOAL SET."
@@ -7677,6 +7827,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"Daily Word Goal".to_string()));
+        assert!(labels.contains(&"Soundtrack URL/Path".to_string()));
     }
 
     #[test]
@@ -7690,6 +7841,18 @@ mod tests {
 
         assert!(labels.contains(&"Command Palette".to_string()));
         assert!(labels.contains(&"Writing Prompts".to_string()));
+        assert!(labels.contains(&"Toggle Soundtrack".to_string()));
+    }
+
+    #[test]
+    fn soundtrack_toggle_requires_source() {
+        let mut app = App::with_initial_date(None);
+        app.config.soundtrack_source.clear();
+
+        app.toggle_soundtrack_playback();
+
+        assert!(!app.soundtrack_loop_enabled);
+        assert_eq!(app.status_text(), Some("SOUNDTRACK SOURCE NOT SET."));
     }
 
     #[test]
