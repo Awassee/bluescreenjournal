@@ -35,7 +35,9 @@ done
 
 if [[ -z "$ARCHIVE" ]]; then
   "$ROOT_DIR/scripts/package-release.sh"
-  ARCHIVE="$(find "$ROOT_DIR/dist" -maxdepth 1 -type f -name '*.tar.gz' | sort | tail -n 1)"
+  mapfile -t versioned_archives < <(find "$ROOT_DIR/dist" -maxdepth 1 -type f -name 'bsj-[0-9]*-*.tar.gz')
+  [[ "${#versioned_archives[@]}" -gt 0 ]] || { echo "No versioned archives found under $ROOT_DIR/dist" >&2; exit 1; }
+  ARCHIVE="$(ls -t "${versioned_archives[@]}" | head -n 1)"
 fi
 
 [[ -f "$ARCHIVE" ]] || { echo "Archive not found: $ARCHIVE" >&2; exit 1; }
@@ -45,13 +47,16 @@ mkdir -p "$TMP_ROOT"
 TMP_DIR="$(mktemp -d "$TMP_ROOT/bsj-dist-smoke.XXXXXX")"
 INSTALL_PREFIX="$TMP_DIR/install-root"
 BOOTSTRAP_PREFIX="$TMP_DIR/bootstrap-root"
+INSTALL_HOME="$TMP_DIR/install-home"
+BOOTSTRAP_HOME="$TMP_DIR/bootstrap-home"
 BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
+BOOTSTRAP_BASH_HOME="$TMP_DIR/bootstrap-home-bash"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 [[ -d "$BUNDLE_DIR" ]] || { echo "Bundle directory not found after extraction" >&2; exit 1; }
 
-"$BUNDLE_DIR/install.sh" --prebuilt --prefix "$INSTALL_PREFIX"
+HOME="$INSTALL_HOME" SHELL=/bin/zsh "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$INSTALL_PREFIX"
 "$INSTALL_PREFIX/bin/bsj" --help >/dev/null
 "$INSTALL_PREFIX/bin/bsj" guide setup >/dev/null
 "$INSTALL_PREFIX/bin/bsj" guide distribution >/dev/null
@@ -77,8 +82,10 @@ test -f "$INSTALL_PREFIX/share/bash-completion/completions/bsj"
 test -f "$INSTALL_PREFIX/share/zsh/site-functions/_bsj"
 test -f "$INSTALL_PREFIX/share/fish/vendor_completions.d/bsj.fish"
 "$ROOT_DIR/scripts/audit-release.sh" --binary "$INSTALL_PREFIX/bin/bsj"
+grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.zprofile"
+grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.zshrc"
 
-cat "$ROOT_DIR/install.sh" | bash -s -- --prebuilt --archive "$ARCHIVE" --prefix "$BOOTSTRAP_PREFIX"
+HOME="$BOOTSTRAP_HOME" SHELL=/bin/zsh bash -s -- --prebuilt --archive "$ARCHIVE" --prefix "$BOOTSTRAP_PREFIX" < "$ROOT_DIR/install.sh"
 "$BOOTSTRAP_PREFIX/bin/bsj" --help >/dev/null
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/README.md"
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/CHANGELOG.md"
@@ -94,13 +101,24 @@ test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/docs/TERMINAL_GUIDE.md"
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/docs/PRIVACY.md"
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/docs/assets/bsj-hero.gif"
 test -f "$BOOTSTRAP_PREFIX/share/man/man1/bsj.1"
+grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.zprofile"
+grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.zshrc"
 
 # Regression guard: exercise bootstrap install with no forwarded install args.
 mkdir -p "$BOOTSTRAP_NOARGS_HOME"
-cat "$ROOT_DIR/install.sh" | HOME="$BOOTSTRAP_NOARGS_HOME" bash -s -- --prebuilt --archive "$ARCHIVE"
+HOME="$BOOTSTRAP_NOARGS_HOME" SHELL=/bin/zsh bash -s -- --prebuilt --archive "$ARCHIVE" < "$ROOT_DIR/install.sh"
 "$BOOTSTRAP_NOARGS_HOME/.local/bin/bsj" --help >/dev/null
 test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/doc/bsj/README.md"
 test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/man/man1/bsj.1"
+grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.zprofile"
+grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.zshrc"
+
+# Bash profile fallback coverage.
+mkdir -p "$BOOTSTRAP_BASH_HOME"
+HOME="$BOOTSTRAP_BASH_HOME" SHELL=/bin/bash bash -s -- --prebuilt --archive "$ARCHIVE" < "$ROOT_DIR/install.sh"
+"$BOOTSTRAP_BASH_HOME/.local/bin/bsj" --help >/dev/null
+grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.bash_profile"
+grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.bashrc"
 
 cat <<EOF
 Smoke test passed:

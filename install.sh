@@ -214,9 +214,81 @@ make_temp_dir() {
 
 ensure_path_hint() {
   local path_entry="$1"
-  if [[ ":$PATH:" != *":$path_entry:"* ]]; then
-    warn "$path_entry is not on PATH."
-    printf "Add this line to ~/.zshrc:\n  export PATH=\"%s:\$PATH\"\n" "$path_entry"
+  if [[ ":$PATH:" == *":$path_entry:"* ]]; then
+    return
+  fi
+
+  warn "$path_entry is not on PATH in this shell."
+  persist_path_update "$path_entry"
+  printf "Run now in this terminal:\n  export PATH=\"%s:\$PATH\"\n" "$path_entry"
+}
+
+append_path_line_if_missing() {
+  local target_file="$1"
+  local marker="$2"
+  local line="$3"
+  local needle="$4"
+
+  if ! mkdir -p "$(dirname "$target_file")"; then
+    warn "Could not create shell config directory for $target_file"
+    return 1
+  fi
+  if ! touch "$target_file"; then
+    warn "Could not update shell config file $target_file"
+    return 1
+  fi
+  if grep -Fq "$needle" "$target_file"; then
+    return 1
+  fi
+
+  if [[ -s "$target_file" ]]; then
+    printf '\n' >> "$target_file"
+  fi
+  printf "%s\n%s\n" "$marker" "$line" >> "$target_file"
+  return 0
+}
+
+persist_path_update() {
+  local path_entry="$1"
+  local shell_name marker added existing target_file line
+  local -a target_files
+  shell_name="$(basename "${SHELL:-zsh}")"
+  marker="# Added by bsj installer"
+  added=0
+  existing=0
+
+  case "$shell_name" in
+    fish)
+      target_files=("$HOME/.config/fish/config.fish")
+      line="contains -- \"$path_entry\" \$PATH; or fish_add_path -m \"$path_entry\""
+      ;;
+    bash)
+      target_files=("$HOME/.bash_profile" "$HOME/.bashrc")
+      line="[[ \":\$PATH:\" != *\":$path_entry:\"* ]] && export PATH=\"$path_entry:\$PATH\""
+      ;;
+    *)
+      target_files=("$HOME/.zprofile" "$HOME/.zshrc")
+      line="[[ \":\$PATH:\" != *\":$path_entry:\"* ]] && export PATH=\"$path_entry:\$PATH\""
+      ;;
+  esac
+
+  for target_file in "${target_files[@]}"; do
+    if [[ -f "$target_file" ]] && grep -Fq "$path_entry" "$target_file"; then
+      existing=1
+      continue
+    fi
+    if append_path_line_if_missing "$target_file" "$marker" "$line" "$path_entry"; then
+      info "Added PATH update to $target_file"
+      added=1
+    fi
+  done
+
+  if [[ "$added" -eq 0 ]]; then
+    if [[ "$existing" -eq 1 ]]; then
+      info "PATH update already present in shell config."
+    else
+      warn "Could not write PATH update automatically."
+    fi
   fi
 }
 
