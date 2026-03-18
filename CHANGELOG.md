@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.12
+
+- optimized picker overlays by caching lowercase filter haystacks and filtered index lists instead of rebuilding them on every redraw and navigation event
+- optimized live document stats so footer and goal/status reporting reuse cached counts instead of reconstructing full entry text repeatedly
+- added direct zero-allocation buffer stats for lines, words, and characters to reduce hot-path editor overhead
+- refreshed the TUI tests around direct buffer replacement so stats stay correct after edits, loads, and recovery flows
+
 ## v0.1.11
 
 - fixed encrypted backup filename collisions that could overwrite a snapshot when two backups were created within the same second
