@@ -9,7 +9,7 @@ use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, Payload},
 };
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, Utc};
 use rand::{RngCore, rngs::OsRng};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -508,7 +508,16 @@ impl UnlockedVault {
     }
 
     pub fn create_backup(&self, retention: &BackupRetentionConfig) -> VaultResult<BackupSummary> {
-        let created_at = Utc::now();
+        let mut created_at = Utc::now();
+        let backup_dir = self.root.join("backups");
+        secure_fs::ensure_private_dir(&backup_dir)?;
+        let path = loop {
+            let candidate = backup_dir.join(backup_file_name(created_at));
+            if !candidate.exists() {
+                break candidate;
+            }
+            created_at += TimeDelta::nanoseconds(1);
+        };
         let archive_bytes = build_backup_archive(&self.root)?;
         let compressed = zstd::stream::encode_all(Cursor::new(archive_bytes), 3)?;
         let encrypted = encrypt_payload(
@@ -516,10 +525,6 @@ impl UnlockedVault {
             &compressed,
             backup_aad_string(created_at).as_bytes(),
         )?;
-
-        let backup_dir = self.root.join("backups");
-        secure_fs::ensure_private_dir(&backup_dir)?;
-        let path = backup_dir.join(backup_file_name(created_at));
         atomic_write(&path, &encrypted.to_bytes())?;
         let pruned = prune_backups(&backup_dir, retention)?;
         Ok(BackupSummary { path, pruned })
@@ -1721,11 +1726,11 @@ fn should_include_in_backup(relative: &Path) -> bool {
 }
 
 fn backup_file_name(created_at: DateTime<Utc>) -> String {
-    format!("backup-{}.bsjbak.enc", created_at.format("%Y%m%dT%H%M%SZ"))
+    format!("backup-{}.bsjbak.enc", backup_timestamp_token(created_at))
 }
 
 fn backup_aad_string(created_at: DateTime<Utc>) -> String {
-    format!("bsj:v1:backup:{}", created_at.format("%Y%m%dT%H%M%SZ"))
+    format!("bsj:v1:backup:{}", backup_timestamp_token(created_at))
 }
 
 fn parse_backup_timestamp(path: &Path) -> VaultResult<DateTime<Utc>> {
@@ -1737,9 +1742,24 @@ fn parse_backup_timestamp(path: &Path) -> VaultResult<DateTime<Utc>> {
         .strip_prefix("backup-")
         .and_then(|value| value.strip_suffix(".bsjbak.enc"))
         .ok_or_else(|| VaultError::InvalidFormat("invalid backup filename".to_string()))?;
-    chrono::NaiveDateTime::parse_from_str(timestamp, "%Y%m%dT%H%M%SZ")
+    parse_backup_timestamp_token(timestamp)
         .map(|value| value.and_utc())
         .map_err(|_| VaultError::InvalidFormat("invalid backup timestamp".to_string()))
+}
+
+fn backup_timestamp_token(created_at: DateTime<Utc>) -> String {
+    if created_at.timestamp_subsec_nanos() == 0 {
+        created_at.format("%Y%m%dT%H%M%SZ").to_string()
+    } else {
+        created_at.format("%Y%m%dT%H%M%S.%fZ").to_string()
+    }
+}
+
+fn parse_backup_timestamp_token(
+    timestamp: &str,
+) -> Result<chrono::NaiveDateTime, chrono::ParseError> {
+    chrono::NaiveDateTime::parse_from_str(timestamp, "%Y%m%dT%H%M%SZ")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(timestamp, "%Y%m%dT%H%M%S.%fZ"))
 }
 
 #[derive(Clone, Debug)]
@@ -1836,7 +1856,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> VaultResult<()> {
 mod tests {
     use super::*;
     use crate::config::BackupRetentionConfig;
-    use std::{thread::sleep, time::Duration};
+    use std::{path::Path, thread::sleep, time::Duration};
     use tempfile::tempdir;
 
     fn build_raw_tar_archive(
@@ -2467,6 +2487,47 @@ mod tests {
             })
             .expect("prune preview");
         assert!(!prune_preview.is_empty());
+    }
+
+    #[test]
+    fn create_backup_uses_unique_paths_for_rapid_calls() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+
+        let first = vault
+            .create_backup(&BackupRetentionConfig::default())
+            .expect("backup one")
+            .path;
+        let second = vault
+            .create_backup(&BackupRetentionConfig::default())
+            .expect("backup two")
+            .path;
+
+        assert_ne!(first, second);
+        assert!(second.exists());
+    }
+
+    #[test]
+    fn parse_backup_timestamp_accepts_legacy_and_fractional_names() {
+        let legacy = Path::new("backup-20260316T120000Z.bsjbak.enc");
+        let fractional = Path::new("backup-20260316T120000.123456789Z.bsjbak.enc");
+
+        let legacy_ts = parse_backup_timestamp(legacy).expect("legacy timestamp");
+        let fractional_ts = parse_backup_timestamp(fractional).expect("fractional timestamp");
+
+        assert_eq!(
+            legacy_ts.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2026-03-16 12:00:00"
+        );
+        assert_eq!(legacy_ts.timestamp_subsec_nanos(), 0);
+        assert_eq!(
+            fractional_ts.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2026-03-16 12:00:00"
+        );
+        assert_eq!(fractional_ts.timestamp_subsec_nanos(), 123_456_789);
     }
 
     #[test]

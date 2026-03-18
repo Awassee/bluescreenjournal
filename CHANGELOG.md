@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.11
+
+- fixed encrypted backup filename collisions that could overwrite a snapshot when two backups were created within the same second
+- made backup timestamp parsing backward-compatible with both legacy second-only names and new fractional-second names
+- added regression tests for rapid back-to-back backup creation and mixed backup timestamp parsing
+
 ## v0.1.10
 
 - made export history actionable by reopening a prefilled export prompt instead of a dead-end info screen
