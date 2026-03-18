@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.13
+
+- polished the global search overlay so live typing no longer steals focus into results
+- added quick search navigation shortcuts (`Ctrl+N`, `Ctrl+P`) plus fast clear/recall (`Ctrl+L`, `Ctrl+R`)
+- added new date scope presets for last 7 days and year-to-date
+- persisted search range filters between overlay opens
+- retained selected matches across reruns when the same result remains in the result set
+- improved search menu and overlay guidance to make range and navigation controls easier to discover
+
 ## v0.1.12
 
 - optimized picker overlays by caching lowercase filter haystacks and filtered index lists instead of rebuilding them on every redraw and navigation event

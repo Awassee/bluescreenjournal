@@ -1,6 +1,6 @@
 [package]
 name = "bsj"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 description = "Encrypted nostalgic blue-screen journaling TUI for macOS"
 readme = "README.md"
