@@ -1789,12 +1789,23 @@ impl App {
     }
 
     pub fn save_status_label(&self) -> String {
+        if self.dirty {
+            return match (self.last_save_kind, self.last_save_time) {
+                (Some(SaveKind::Autosaved), Some(time)) => {
+                    format!("UNSAVED | DRAFT {}", time.format("%H:%M:%S"))
+                }
+                _ => "UNSAVED CHANGES".to_string(),
+            };
+        }
+
         match (self.last_save_kind, self.last_save_time) {
-            (Some(SaveKind::Saved), Some(time)) => format!("SAVED {}", time.format("%H:%M:%S")),
-            (Some(SaveKind::Autosaved), Some(time)) => {
-                format!("AUTOSAVED {}", time.format("%H:%M:%S"))
+            (Some(SaveKind::Saved), Some(time)) => {
+                format!("REVISION SAVED {}", time.format("%H:%M:%S"))
             }
-            _ => "NOT SAVED".to_string(),
+            (Some(SaveKind::Autosaved), Some(time)) => {
+                format!("DRAFT AUTOSAVED {}", time.format("%H:%M:%S"))
+            }
+            _ => "READY".to_string(),
         }
     }
 
@@ -1844,8 +1855,12 @@ impl App {
         }
     }
 
-    pub fn footer_dirty_label(&self) -> &'static str {
-        if self.dirty { "Unsaved" } else { "Saved" }
+    pub fn footer_stats_label(&self) -> String {
+        if let Some(goal) = self.config.daily_word_goal {
+            format!("Words {}/{}", self.document_stats.words, goal)
+        } else {
+            format!("Words {}", self.document_stats.words)
+        }
     }
 
     pub fn cursor_status_label(&self) -> String {
@@ -1969,12 +1984,12 @@ impl App {
     pub fn empty_state_lines(&self) -> [&'static str; 7] {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
-            "Esc opens menus for FILE / EDIT / SEARCH / GO / TOOLS / SETUP / HELP",
-            "Alt+F / E / S / G / T / U / H opens a specific menu directly.",
-            "F2 saves an encrypted revision. Autosave writes an encrypted draft.",
-            "EDIT adds line tools, stamps, divider inserts, and quick writing ops.",
-            "GO adds favorites, random jumps, calendar saved-date hops, and the index.",
-            "SEARCH adds presets, cache status, and live filters. TOOLS adds review/admin.",
+            "F2 saves a revision. Header changes to 'REVISION SAVED <time>'.",
+            "Alt+Right next day  Alt+Left previous day",
+            "Alt+Down next saved entry  Alt+Up previous saved entry",
+            "Esc opens menus  Alt+F/E/S/G/T/U/H opens a menu directly",
+            "F3 calendar  F7 index  F5 search vault",
+            "F10 quit  F12 lock",
         ]
     }
 
@@ -2581,6 +2596,30 @@ impl App {
         if let Some(menu) = Self::menu_hotkey(&key) {
             self.open_menu(menu);
             return;
+        }
+
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            match key.code {
+                KeyCode::Left => {
+                    self.open_date(self.selected_date - ChronoDuration::days(1));
+                    self.flash_status(&format!("DATE {}.", self.selected_date.format("%Y-%m-%d")));
+                    return;
+                }
+                KeyCode::Right => {
+                    self.open_date(self.selected_date + ChronoDuration::days(1));
+                    self.flash_status(&format!("DATE {}.", self.selected_date.format("%Y-%m-%d")));
+                    return;
+                }
+                KeyCode::Up => {
+                    self.open_adjacent_saved_entry(-1);
+                    return;
+                }
+                KeyCode::Down => {
+                    self.open_adjacent_saved_entry(1);
+                    return;
+                }
+                _ => {}
+            }
         }
 
         if key.code == KeyCode::Esc || Self::is_ctrl_char(&key, 'g') {
@@ -4936,7 +4975,7 @@ impl App {
                 dates.first()
             } {
                 self.open_date(*target);
-                self.flash_status("DATE OPENED.");
+                self.flash_status(&format!("ENTRY {}.", target.format("%Y-%m-%d")));
             } else {
                 self.flash_status("NO SAVED ENTRIES.");
             }
@@ -4949,8 +4988,9 @@ impl App {
             return;
         }
 
-        self.open_date(dates[next_idx as usize]);
-        self.flash_status("DATE OPENED.");
+        let target = dates[next_idx as usize];
+        self.open_date(target);
+        self.flash_status(&format!("ENTRY {}.", target.format("%Y-%m-%d")));
     }
 
     fn perform_menu_action(&mut self, action: MenuAction, viewport_height: usize) {
@@ -5864,12 +5904,13 @@ impl App {
                 self.search_index = None;
                 self.wipe_merge_context();
                 self.refresh_integrity_status();
+                let saved_at = Local::now();
                 self.last_save_kind = Some(SaveKind::Saved);
-                self.last_save_time = Some(Local::now());
+                self.last_save_time = Some(saved_at);
                 self.load_selected_date();
                 self.last_save_kind = Some(SaveKind::Saved);
-                self.last_save_time = Some(Local::now());
-                self.flash_status("SAVED.");
+                self.last_save_time = Some(saved_at);
+                self.flash_status(&format!("REVISION SAVED {}.", saved_at.format("%H:%M:%S")));
             }
             Err(_) => {
                 log::warn!("manual save failed");

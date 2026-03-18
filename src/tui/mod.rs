@@ -191,8 +191,12 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let hint = if app.menu().is_some() {
         "LEFT/RIGHT MENU  UP/DOWN ITEM  ENTER SELECT  ESC CLOSE"
+    } else if area.width >= 130 {
+        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+LEFT/RIGHT DAY  ALT+UP/DOWN ENTRY"
+    } else if area.width >= 104 {
+        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+LEFT/RIGHT DAY"
     } else {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H QUICK MENU"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU"
     };
     let left_width = spans
         .iter()
@@ -398,11 +402,11 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let context = format!(
-        "Mode: {} | {} | {} | {}",
+        "{} | {} | {} | {}",
         app.footer_mode_label(),
-        app.footer_dirty_label(),
+        app.save_status_label(),
         app.footer_context_label(),
-        app.document_stats_label()
+        app.footer_stats_label(),
     );
     let status = app.status_text().unwrap_or("");
     let left = if status.is_empty() {
@@ -441,12 +445,14 @@ fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
         return "Esc close | Enter confirm | F1 keys".to_string();
     }
 
-    let legend = if width >= 120 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H menu | F1 Help | F2 Save | F5 Search | F10 Quit".to_string()
+    let legend = if width >= 130 {
+        "Esc Menus | Alt+F/E/S/G/T/U/H menu | Alt+Left/Right day | Alt+Up/Down entry | F2 Save | F10 Quit".to_string()
+    } else if width >= 108 {
+        "Esc Menus | Alt+F/E/S/G/T/U/H | Alt+Left/Right day | F2 Save | F10 Quit".to_string()
     } else if width >= 90 {
         "Esc Menus | Alt+F/E/S/G/T/U/H | F1 Help | F2 Save | F10 Quit".to_string()
     } else {
-        "Esc Menus | F1 Help | F2 Save | F10 Quit".to_string()
+        "Esc Menus | Alt+Left/Right day | F2 Save | F10 Quit".to_string()
     };
 
     if compact_mode && width >= 100 {
@@ -695,12 +701,12 @@ fn draw_unlock_overlay(
 fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
         Line::from("Classic 80x25 workspace. Type immediately when no menu or prompt is open."),
-        Line::from("Esc opens menus. Alt+F/E/S/G/T/U/H jumps menus. Ctrl+K = commands."),
+        Line::from("Esc menus. Alt+F/E/S/G/T/U/H menu. Ctrl+K = commands."),
+        Line::from("Alt+Left/Right day. Alt+Up/Down saved entry."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
         Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),
         Line::from("Ctrl+S Save  Ctrl+F Find"),
-        Line::from(""),
         Line::from("FILE   Save, export, backup, restore, lock, quit"),
         Line::from("EDIT   Lines, stamps, metadata, favorite, reveal, typewriter"),
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),
