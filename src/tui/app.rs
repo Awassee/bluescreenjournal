@@ -10778,7 +10778,7 @@ mod tests {
 
         type_editor_text(
             &mut app,
-            "target alpha session",
+            "alpha focus session",
             viewport_height,
             viewport_width,
         );
@@ -10796,12 +10796,7 @@ mod tests {
             viewport_height,
             viewport_width,
         );
-        type_editor_text(
-            &mut app,
-            "other beta session",
-            viewport_height,
-            viewport_width,
-        );
+        type_editor_text(&mut app, "other session", viewport_height, viewport_width);
         send_editor_key(
             &mut app,
             KeyCode::F(2),
@@ -10817,7 +10812,7 @@ mod tests {
             viewport_height,
             viewport_width,
         );
-        for ch in "target".chars() {
+        for ch in "alpha".chars() {
             send_editor_key(
                 &mut app,
                 KeyCode::Char(ch),
@@ -12135,6 +12130,7 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
         let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.config.opening_line_template = "JOURNAL ENTRY [TODAYSDATE]".to_string();
         let viewport_height = 20;
         let viewport_width = 80;
 
@@ -12179,6 +12175,7 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let date = NaiveDate::from_ymd_opt(2026, 3, 19).expect("date");
         let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.config.opening_line_template = "JOURNAL ENTRY [TODAYSDATE]".to_string();
         app.overlay = None;
         app.buffer = TextBuffer::from_text("Menu quick save entry");
         app.buffer
