@@ -74,6 +74,15 @@ Local install from a checkout:
 ./install.sh
 ```
 
+Uninstall options:
+
+```bash
+./install.sh --uninstall
+./install.sh --factory-reset
+```
+
+`./install.sh` now opens an interactive installer menu in a local terminal session, including uninstall and full factory-reset actions.
+
 What the installer does:
 
 - downloads the latest public release bundle automatically when needed

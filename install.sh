@@ -9,6 +9,8 @@ else
 fi
 
 MODE="auto"
+ACTION="install"
+ACTION_EXPLICIT=0
 PREFIX="${BSJ_INSTALL_PREFIX:-}"
 BIN_DIR="${BSJ_INSTALL_BIN_DIR:-}"
 DOC_DIR="${BSJ_INSTALL_DOC_DIR:-}"
@@ -20,6 +22,12 @@ GITHUB_REPO="${BSJ_INSTALL_REPO:-Awassee/bluescreenjournal}"
 RELEASE_VERSION="${BSJ_INSTALL_VERSION:-latest}"
 ARCHIVE_SOURCE="${BSJ_INSTALL_ARCHIVE:-}"
 SKIP_CHECKSUM=0
+ASSUME_YES=0
+ORIGINAL_ARG_COUNT=$#
+declare -a UNINSTALL_TARGETS
+declare -a DATA_TARGETS
+declare -a KEYCHAIN_VAULT_PATHS
+declare -a CONFIG_TARGETS
 
 if [[ -t 1 ]]; then
   BLUE="$(printf '\033[34m')"
@@ -61,6 +69,7 @@ Usage:
   ./install.sh [--source|--prebuilt] [--prefix PATH] [--bin-dir PATH] [--doc-dir PATH] [--man-dir PATH]
                [--bash-completion-dir PATH] [--zsh-completion-dir PATH] [--fish-completion-dir PATH]
                [--repo OWNER/REPO] [--version TAG] [--archive PATH_OR_URL] [--skip-checksum]
+               [--uninstall|--factory-reset] [--yes]
   ./install.sh --help
 
 Modes:
@@ -73,6 +82,11 @@ Bootstrap options:
   --version TAG       Release tag to install, defaults to latest
   --archive PATH_OR_URL  Install from a specific .tar.gz bundle instead of GitHub Releases
   --skip-checksum     Skip .sha256 verification for downloaded archives
+  --yes, -y           Skip interactive confirmations for uninstall/factory-reset
+
+Reset options:
+  --uninstall         Remove bsj binaries/docs/completions. Keeps journal vault data.
+  --factory-reset     Remove bsj install plus config/logs/keychain and local vault data.
 
 Install location options:
   --prefix PATH   Install prefix for prebuilt installs or cargo --root for source installs
@@ -100,6 +114,8 @@ Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.16
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
+  ./install.sh --uninstall
+  ./install.sh --factory-reset
 EOF
 }
 
@@ -115,6 +131,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --prebuilt)
       MODE="prebuilt"
+      shift
+      ;;
+    --uninstall)
+      [[ "$ACTION" == "install" ]] || die "Choose either --uninstall or --factory-reset, not both."
+      ACTION="uninstall"
+      ACTION_EXPLICIT=1
+      shift
+      ;;
+    --factory-reset)
+      [[ "$ACTION" == "install" ]] || die "Choose either --uninstall or --factory-reset, not both."
+      ACTION="factory_reset"
+      ACTION_EXPLICIT=1
+      shift
+      ;;
+    --yes|-y)
+      ASSUME_YES=1
       shift
       ;;
     --prefix)
@@ -210,6 +242,413 @@ make_temp_dir() {
   local temp_root="${TMPDIR:-/tmp}"
   mkdir -p "$temp_root"
   mktemp -d "$temp_root/${label}.XXXXXX"
+}
+
+tty_input_available() {
+  [[ -r /dev/tty ]] || [[ -t 0 ]]
+}
+
+read_line_interactive() {
+  local prompt="$1"
+  if [[ -r /dev/tty ]]; then
+    printf "%s" "$prompt" > /dev/tty
+    IFS= read -r REPLY < /dev/tty || return 1
+    return 0
+  fi
+  if [[ -t 0 ]]; then
+    printf "%s" "$prompt"
+    IFS= read -r REPLY || return 1
+    return 0
+  fi
+  return 1
+}
+
+confirm_yes_no() {
+  local prompt="$1"
+  local normalized
+  if [[ "$ASSUME_YES" -eq 1 ]]; then
+    return 0
+  fi
+  read_line_interactive "$prompt" || die "Cannot prompt for confirmation in non-interactive mode. Re-run with --yes."
+  normalized="$(printf "%s" "$REPLY" | tr '[:upper:]' '[:lower:]')"
+  [[ "$normalized" == "y" || "$normalized" == "yes" ]]
+}
+
+confirm_phrase() {
+  local prompt="$1"
+  local expected="$2"
+  if [[ "$ASSUME_YES" -eq 1 ]]; then
+    return 0
+  fi
+  read_line_interactive "$prompt" || die "Cannot prompt for confirmation in non-interactive mode. Re-run with --yes."
+  [[ "$REPLY" == "$expected" ]]
+}
+
+maybe_prompt_action_menu() {
+  local selection normalized
+  if [[ "$ACTION_EXPLICIT" -eq 1 || "$ORIGINAL_ARG_COUNT" -ne 0 ]]; then
+    return
+  fi
+  if ! tty_input_available; then
+    return
+  fi
+
+  if [[ -w /dev/tty ]]; then
+    cat > /dev/tty <<'EOF'
+
+BlueScreen Journal Installer
+  1) Install / Update
+  2) Uninstall app files (keep journal data)
+  3) Factory reset (remove app + settings + local journal data)
+  q) Quit
+EOF
+  else
+    cat <<'EOF'
+
+BlueScreen Journal Installer
+  1) Install / Update
+  2) Uninstall app files (keep journal data)
+  3) Factory reset (remove app + settings + local journal data)
+  q) Quit
+EOF
+  fi
+
+  while true; do
+    read_line_interactive "Select an option [1-3,q]: " || die "Failed to read installer menu selection."
+    selection="$REPLY"
+    normalized="$(printf "%s" "$selection" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized" in
+      ""|1)
+        ACTION="install"
+        return
+        ;;
+      2)
+        ACTION="uninstall"
+        ACTION_EXPLICIT=1
+        return
+        ;;
+      3)
+        ACTION="factory_reset"
+        ACTION_EXPLICIT=1
+        return
+        ;;
+      q|quit|exit)
+        info "Installer canceled."
+        exit 0
+        ;;
+      *)
+        warn "Please choose 1, 2, 3, or q."
+        ;;
+    esac
+  done
+}
+
+expand_home_path() {
+  local path_value="$1"
+  if [[ "$path_value" == "~" ]]; then
+    printf "%s" "$HOME"
+  elif [[ "$path_value" == "~/"* ]]; then
+    printf "%s/%s" "$HOME" "${path_value:2}"
+  else
+    printf "%s" "$path_value"
+  fi
+}
+
+is_dangerous_delete_target() {
+  local target="$1"
+  local normalized="${target%/}"
+  [[ -n "$normalized" ]] || return 0
+  case "$normalized" in
+    "/"|"/Users"|"/Users/$USER"|"$HOME"|".")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+json_value_from_file() {
+  local file_path="$1"
+  local key="$2"
+  sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*/\1/p" "$file_path" | head -n 1
+}
+
+json_unescape() {
+  local value="$1"
+  printf "%s" "$value" | sed 's#\\/#/#g; s#\\\\#\\#g'
+}
+
+add_unique_path_entry() {
+  local value="$1"
+  shift
+  local existing
+  for existing in "$@"; do
+    [[ "$existing" == "$value" ]] && return 1
+  done
+  return 0
+}
+
+collect_uninstall_targets() {
+  UNINSTALL_TARGETS=()
+  local prefix resolved_path
+  local -a prefix_candidates
+  prefix_candidates=()
+
+  if [[ -n "$PREFIX" ]]; then
+    prefix_candidates+=("$(expand_home_path "$PREFIX")")
+  fi
+  prefix_candidates+=("$HOME/.local")
+  prefix_candidates+=("${CARGO_HOME:-$HOME/.cargo}")
+
+  for prefix in "${prefix_candidates[@]}"; do
+    if add_unique_path_entry "$prefix/bin/bsj" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$prefix/bin/bsj")
+    fi
+    if add_unique_path_entry "$prefix/share/doc/bsj" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$prefix/share/doc/bsj")
+    fi
+    if add_unique_path_entry "$prefix/share/man/man1/bsj.1" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$prefix/share/man/man1/bsj.1")
+    fi
+    if add_unique_path_entry "$prefix/share/bsj" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$prefix/share/bsj")
+    fi
+    if add_unique_path_entry "$prefix/share/bash-completion/completions/bsj" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$prefix/share/bash-completion/completions/bsj")
+    fi
+    if add_unique_path_entry "$prefix/share/zsh/site-functions/_bsj" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$prefix/share/zsh/site-functions/_bsj")
+    fi
+    if add_unique_path_entry "$prefix/share/fish/vendor_completions.d/bsj.fish" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$prefix/share/fish/vendor_completions.d/bsj.fish")
+    fi
+  done
+
+  if [[ -n "$BIN_DIR" ]]; then
+    resolved_path="$(expand_home_path "$BIN_DIR")/bsj"
+    if add_unique_path_entry "$resolved_path" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$resolved_path")
+    fi
+  fi
+  if [[ -n "$DOC_DIR" ]]; then
+    resolved_path="$(expand_home_path "$DOC_DIR")"
+    if [[ "$(basename "$resolved_path")" == "bsj" ]]; then
+      if add_unique_path_entry "$resolved_path" "${UNINSTALL_TARGETS[@]-}"; then
+        UNINSTALL_TARGETS+=("$resolved_path")
+      fi
+    else
+      for doc_name in README.md LICENSE CHANGELOG.md SUPPORT.md SECURITY.md CONTRIBUTING.md ROADMAP.md; do
+        if add_unique_path_entry "$resolved_path/$doc_name" "${UNINSTALL_TARGETS[@]-}"; then
+          UNINSTALL_TARGETS+=("$resolved_path/$doc_name")
+        fi
+      done
+      if add_unique_path_entry "$resolved_path/docs" "${UNINSTALL_TARGETS[@]-}"; then
+        UNINSTALL_TARGETS+=("$resolved_path/docs")
+      fi
+    fi
+  fi
+  if [[ -n "$MAN_DIR" ]]; then
+    resolved_path="$(expand_home_path "$MAN_DIR")/bsj.1"
+    if add_unique_path_entry "$resolved_path" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$resolved_path")
+    fi
+  fi
+  if [[ -n "$BASH_COMPLETION_DIR" ]]; then
+    resolved_path="$(expand_home_path "$BASH_COMPLETION_DIR")/bsj"
+    if add_unique_path_entry "$resolved_path" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$resolved_path")
+    fi
+  fi
+  if [[ -n "$ZSH_COMPLETION_DIR" ]]; then
+    resolved_path="$(expand_home_path "$ZSH_COMPLETION_DIR")/_bsj"
+    if add_unique_path_entry "$resolved_path" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$resolved_path")
+    fi
+  fi
+  if [[ -n "$FISH_COMPLETION_DIR" ]]; then
+    resolved_path="$(expand_home_path "$FISH_COMPLETION_DIR")/bsj.fish"
+    if add_unique_path_entry "$resolved_path" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$resolved_path")
+    fi
+  fi
+
+  if command -v bsj >/dev/null 2>&1; then
+    resolved_path="$(command -v bsj)"
+    if [[ -n "$resolved_path" ]] && add_unique_path_entry "$resolved_path" "${UNINSTALL_TARGETS[@]-}"; then
+      UNINSTALL_TARGETS+=("$resolved_path")
+    fi
+  fi
+}
+
+collect_data_targets() {
+  DATA_TARGETS=()
+  KEYCHAIN_VAULT_PATHS=()
+  CONFIG_TARGETS=()
+
+  local config_file resolved_path raw_value vault_value sync_value
+  local -a config_candidates
+  config_candidates=(
+    "$HOME/Library/Application Support/bsj/config.json"
+    "${XDG_CONFIG_HOME:-$HOME/.config}/bsj/config.json"
+  )
+
+  if add_unique_path_entry "$HOME/Documents/BlueScreenJournal" "${DATA_TARGETS[@]-}"; then
+    DATA_TARGETS+=("$HOME/Documents/BlueScreenJournal")
+  fi
+  if add_unique_path_entry "$HOME/Documents/BlueScreenJournal" "${KEYCHAIN_VAULT_PATHS[@]-}"; then
+    KEYCHAIN_VAULT_PATHS+=("$HOME/Documents/BlueScreenJournal")
+  fi
+
+  for config_file in "${config_candidates[@]}"; do
+    if [[ ! -f "$config_file" ]]; then
+      continue
+    fi
+    if add_unique_path_entry "$(dirname "$config_file")" "${CONFIG_TARGETS[@]-}"; then
+      CONFIG_TARGETS+=("$(dirname "$config_file")")
+    fi
+
+    raw_value="$(json_value_from_file "$config_file" "vault_path" || true)"
+    if [[ -n "$raw_value" ]]; then
+      vault_value="$(json_unescape "$raw_value")"
+      resolved_path="$(expand_home_path "$vault_value")"
+      if add_unique_path_entry "$resolved_path" "${DATA_TARGETS[@]-}"; then
+        DATA_TARGETS+=("$resolved_path")
+      fi
+      if add_unique_path_entry "$resolved_path" "${KEYCHAIN_VAULT_PATHS[@]-}"; then
+        KEYCHAIN_VAULT_PATHS+=("$resolved_path")
+      fi
+    fi
+
+    raw_value="$(json_value_from_file "$config_file" "sync_target_path" || true)"
+    if [[ -n "$raw_value" ]]; then
+      sync_value="$(json_unescape "$raw_value")"
+      resolved_path="$(expand_home_path "$sync_value")"
+      if add_unique_path_entry "$resolved_path" "${DATA_TARGETS[@]-}"; then
+        DATA_TARGETS+=("$resolved_path")
+      fi
+    fi
+  done
+
+  if add_unique_path_entry "$HOME/Library/Application Support/bsj" "${CONFIG_TARGETS[@]-}"; then
+    CONFIG_TARGETS+=("$HOME/Library/Application Support/bsj")
+  fi
+  if add_unique_path_entry "${XDG_CONFIG_HOME:-$HOME/.config}/bsj" "${CONFIG_TARGETS[@]-}"; then
+    CONFIG_TARGETS+=("${XDG_CONFIG_HOME:-$HOME/.config}/bsj")
+  fi
+  if add_unique_path_entry "$HOME/Library/Logs/bsj" "${CONFIG_TARGETS[@]-}"; then
+    CONFIG_TARGETS+=("$HOME/Library/Logs/bsj")
+  fi
+}
+
+remove_path_if_exists() {
+  local target="$1"
+  if [[ -e "$target" || -L "$target" ]]; then
+    rm -rf "$target"
+    info "Removed: $target"
+    REMOVED_COUNT=$((REMOVED_COUNT + 1))
+  fi
+}
+
+remove_path_safely_if_exists() {
+  local target="$1"
+  if is_dangerous_delete_target "$target"; then
+    warn "Skipping unsafe delete target: $target"
+    return
+  fi
+  remove_path_if_exists "$target"
+}
+
+remove_keychain_passphrase_for_vault() {
+  local vault_path="$1"
+  local digest account
+
+  command -v security >/dev/null 2>&1 || return
+  command -v shasum >/dev/null 2>&1 || return
+  digest="$(printf "%s" "$vault_path" | shasum -a 256 | awk '{print $1}')"
+  [[ -n "$digest" ]] || return
+  account="vault-${digest:0:16}"
+
+  if security delete-generic-password -a "$account" -s "com.awassee.bsj.passphrase" >/dev/null 2>&1; then
+    info "Removed Keychain item for vault path: $vault_path"
+  fi
+}
+
+run_uninstall() {
+  local target
+  collect_uninstall_targets
+
+  cat <<EOF
+
+Uninstall mode (keep journal data):
+  - removes bsj binaries/docs/completions/man files
+  - keeps vault data under ~/Documents/BlueScreenJournal (or your custom vault path)
+EOF
+
+  if ! confirm_yes_no "Proceed with uninstall? [y/N]: "; then
+    info "Canceled uninstall."
+    exit 0
+  fi
+
+  REMOVED_COUNT=0
+  for target in "${UNINSTALL_TARGETS[@]-}"; do
+    remove_path_if_exists "$target"
+  done
+
+  printf "%sUninstall complete.%s Removed %s path(s).\n" "$GREEN$BOLD" "$RESET" "$REMOVED_COUNT"
+  cat <<'EOF'
+Data was preserved.
+To fully wipe data for a fresh setup, run:
+  ./install.sh --factory-reset
+EOF
+}
+
+run_factory_reset() {
+  local target
+  collect_uninstall_targets
+  collect_data_targets
+
+  cat <<EOF
+
+Factory reset mode:
+  - removes bsj binaries/docs/completions/man files
+  - removes bsj config and logs
+  - removes local vault data paths and local sync target path from config (if set)
+  - removes saved passphrase entries from macOS Keychain for discovered vault paths
+EOF
+
+  printf "Data paths to remove:\n"
+  for target in "${DATA_TARGETS[@]-}"; do
+    printf "  - %s\n" "$target"
+  done
+  printf "Config/log paths to remove:\n"
+  for target in "${CONFIG_TARGETS[@]-}"; do
+    printf "  - %s\n" "$target"
+  done
+
+  if ! confirm_phrase "Type ERASE to continue: " "ERASE"; then
+    info "Canceled factory reset."
+    exit 0
+  fi
+
+  REMOVED_COUNT=0
+  for target in "${UNINSTALL_TARGETS[@]-}"; do
+    remove_path_if_exists "$target"
+  done
+  for target in "${CONFIG_TARGETS[@]-}"; do
+    remove_path_safely_if_exists "$target"
+  done
+  for target in "${DATA_TARGETS[@]-}"; do
+    remove_path_safely_if_exists "$target"
+  done
+  for target in "${KEYCHAIN_VAULT_PATHS[@]-}"; do
+    remove_keychain_passphrase_for_vault "$target"
+  done
+
+  printf "%sFactory reset complete.%s Removed %s path(s).\n" "$GREEN$BOLD" "$RESET" "$REMOVED_COUNT"
+  cat <<'EOF'
+You can now run the installer again for a clean first-run setup.
+EOF
 }
 
 ensure_path_hint() {
@@ -657,14 +1096,41 @@ Next steps:
 EOF
 }
 
-case "$(pick_mode)" in
-  prebuilt)
-    install_prebuilt
+maybe_prompt_action_menu
+
+if [[ "$ACTION" != "install" ]]; then
+  if [[ "$MODE" != "auto" ]]; then
+    warn "--source/--prebuilt is ignored for uninstall modes."
+  fi
+  if [[ -n "$ARCHIVE_SOURCE" ]]; then
+    warn "--archive is ignored for uninstall modes."
+  fi
+  if [[ "$SKIP_CHECKSUM" -eq 1 ]]; then
+    warn "--skip-checksum is ignored for uninstall modes."
+  fi
+fi
+
+case "$ACTION" in
+  install)
+    case "$(pick_mode)" in
+      prebuilt)
+        install_prebuilt
+        ;;
+      source)
+        install_from_source
+        ;;
+      *)
+        die "Unsupported installer mode"
+        ;;
+    esac
     ;;
-  source)
-    install_from_source
+  uninstall)
+    run_uninstall
+    ;;
+  factory_reset)
+    run_factory_reset
     ;;
   *)
-    die "Unsupported installer mode"
+    die "Unsupported installer action"
     ;;
 esac
