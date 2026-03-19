@@ -13,6 +13,7 @@ const READABLE_SETTING_KEYS: &[&str] = &[
     "show_ruler",
     "show_footer_legend",
     "soundtrack_source",
+    "opening_line_template",
     "daily_word_goal",
     "remember_passphrase_in_keychain",
     "backup_retention.daily",
@@ -32,6 +33,7 @@ const EDITABLE_SETTING_KEYS: &[&str] = &[
     "show_ruler",
     "show_footer_legend",
     "soundtrack_source",
+    "opening_line_template",
     "daily_word_goal",
     "remember_passphrase_in_keychain",
     "backup_retention.daily",
@@ -71,6 +73,8 @@ pub struct AppConfig {
     pub show_footer_legend: bool,
     #[serde(default = "default_soundtrack_source")]
     pub soundtrack_source: String,
+    #[serde(default = "default_opening_line_template")]
+    pub opening_line_template: String,
     #[serde(default)]
     pub daily_word_goal: Option<usize>,
     #[serde(default)]
@@ -179,6 +183,7 @@ impl AppConfig {
                 show_ruler: default_show_ruler(),
                 show_footer_legend: default_show_footer_legend(),
                 soundtrack_source: default_soundtrack_source(),
+                opening_line_template: default_opening_line_template(),
                 daily_word_goal: None,
                 remember_passphrase_in_keychain: false,
                 first_run_coach_completed: false,
@@ -237,6 +242,7 @@ pub fn get_setting_value(config: &AppConfig, key: &str) -> Result<String, String
         "show_ruler" => Ok(config.show_ruler.to_string()),
         "show_footer_legend" => Ok(config.show_footer_legend.to_string()),
         "soundtrack_source" => Ok(config.soundtrack_source.clone()),
+        "opening_line_template" => Ok(config.opening_line_template.clone()),
         "daily_word_goal" => Ok(config
             .daily_word_goal
             .map(|goal| goal.to_string())
@@ -302,6 +308,10 @@ pub fn set_setting_value(config: &mut AppConfig, key: &str, value: &str) -> Resu
         "soundtrack_source" => {
             config.soundtrack_source = value.trim().to_string();
             Ok(config.soundtrack_source.clone())
+        }
+        "opening_line_template" => {
+            config.opening_line_template = value.trim().to_string();
+            Ok(config.opening_line_template.clone())
         }
         "daily_word_goal" => {
             config.daily_word_goal = parse_optional_usize(value, key)?;
@@ -418,6 +428,10 @@ fn default_soundtrack_source() -> String {
     "https://www.midi-karaoke.info/21b56501.mid".to_string()
 }
 
+fn default_opening_line_template() -> String {
+    "JOURNAL ENTRY {DATE}".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -452,6 +466,7 @@ mod tests {
             show_ruler: false,
             show_footer_legend: false,
             soundtrack_source: "https://example.com/theme.mid".to_string(),
+            opening_line_template: "SEAN'S JOURNAL ENTRY {DATE}".to_string(),
             daily_word_goal: Some(750),
             remember_passphrase_in_keychain: true,
             first_run_coach_completed: true,
@@ -497,6 +512,10 @@ mod tests {
             "https://example.com/theme.mid"
         );
         assert_eq!(
+            get_setting_value(&config, "opening_line_template").expect("opening line template"),
+            "SEAN'S JOURNAL ENTRY {DATE}"
+        );
+        assert_eq!(
             get_setting_value(&config, "daily_word_goal").expect("word goal"),
             "750"
         );
@@ -519,6 +538,7 @@ mod tests {
             show_ruler: true,
             show_footer_legend: true,
             soundtrack_source: String::new(),
+            opening_line_template: "JOURNAL ENTRY {DATE}".to_string(),
             daily_word_goal: None,
             remember_passphrase_in_keychain: false,
             first_run_coach_completed: false,
@@ -541,6 +561,12 @@ mod tests {
             "https://example.com/blue.mid",
         )
         .expect("soundtrack source");
+        set_setting_value(
+            &mut config,
+            "opening_line_template",
+            "SEAN'S JOURNAL ENTRY [TODAYSDATE]",
+        )
+        .expect("opening line template");
         set_setting_value(&mut config, "daily_word_goal", "500").expect("word goal");
 
         assert_eq!(config.sync_target_path, Some(PathBuf::from("/tmp/remote")));
@@ -549,6 +575,10 @@ mod tests {
         assert!(config.clock_12h);
         assert!(!config.show_ruler);
         assert_eq!(config.soundtrack_source, "https://example.com/blue.mid");
+        assert_eq!(
+            config.opening_line_template,
+            "SEAN'S JOURNAL ENTRY [TODAYSDATE]"
+        );
         assert_eq!(config.daily_word_goal, Some(500));
     }
 
@@ -565,6 +595,7 @@ mod tests {
             show_ruler: true,
             show_footer_legend: true,
             soundtrack_source: String::new(),
+            opening_line_template: "JOURNAL ENTRY {DATE}".to_string(),
             daily_word_goal: None,
             remember_passphrase_in_keychain: false,
             first_run_coach_completed: false,

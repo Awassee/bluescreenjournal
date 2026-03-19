@@ -188,6 +188,7 @@ The app is direct by design:
 | Integrity verify | Checks revision hashchains | Detects missing or tampered history |
 | Review and dashboard surfaces | Show streaks, mood distribution, backup policy, sync preview, and doctor output | Keeps operational awareness inside the product |
 | Reveal Codes | Shows metadata inline in a retro-friendly way | Gives structural visibility without cluttering normal view |
+| Opening Line Template | Auto-seeds a configurable header line on blank entry pages | Gives each entry a consistent, personal starting line |
 | Closing Thought | Dedicated final line field for each entry | Encourages deliberate endings and cleaner exports |
 | Encrypted backup and restore | Creates encrypted snapshots with retention support | Gives offline recovery without plaintext archives |
 | Lock command | Wipes unlocked state and returns to passphrase prompt | Safer on visible or shared terminals |
@@ -242,7 +243,7 @@ The menu bar is the primary discoverability surface.
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
 - `TOOLS` includes sync, soundtrack source + toggle, integrity details, review mode, prompts, dashboard, updates, and doctor output
 - `TOOLS -> Check for Updates` now offers an in-app install action that runs the installer in the background
-- `SETUP` includes a live settings summary plus editable vault/sync/device/retention/clock/display values
+- `SETUP` includes a live settings summary plus editable vault/sync/device/opening-line/retention/clock/display values
 - `HELP` includes About (version/credits), the key sheet, quick-start guide, and searchable guide topics inside the TUI
 
 Primary keys:

@@ -8,6 +8,7 @@
   "show_seconds": false,
   "show_ruler": true,
   "show_footer_legend": true,
+  "opening_line_template": "JOURNAL ENTRY {DATE}",
   "daily_word_goal": 500,
   "remember_passphrase_in_keychain": false,
   "backup_retention": {

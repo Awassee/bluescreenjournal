@@ -87,6 +87,9 @@ test -f "$INSTALL_PREFIX/share/fish/vendor_completions.d/bsj.fish"
 "$ROOT_DIR/scripts/audit-release.sh" --binary "$INSTALL_PREFIX/bin/bsj"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.zprofile"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.zshrc"
+grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.bash_profile"
+grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.bashrc"
+grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.config/fish/config.fish"
 
 HOME="$BOOTSTRAP_HOME" SHELL=/bin/zsh bash -s -- --prebuilt --archive "$ARCHIVE" --prefix "$BOOTSTRAP_PREFIX" < "$ROOT_DIR/install.sh"
 "$BOOTSTRAP_PREFIX/bin/bsj" --help >/dev/null
@@ -106,6 +109,9 @@ test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/docs/assets/bsj-hero.gif"
 test -f "$BOOTSTRAP_PREFIX/share/man/man1/bsj.1"
 grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.zprofile"
 grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.zshrc"
+grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.bash_profile"
+grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.bashrc"
+grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.config/fish/config.fish"
 
 # Regression guard: exercise bootstrap install with no forwarded install args.
 mkdir -p "$BOOTSTRAP_NOARGS_HOME"
@@ -115,6 +121,9 @@ test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/doc/bsj/README.md"
 test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/man/man1/bsj.1"
 grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.zprofile"
 grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.zshrc"
+grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.bash_profile"
+grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.bashrc"
+grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.config/fish/config.fish"
 
 # Bash profile fallback coverage.
 mkdir -p "$BOOTSTRAP_BASH_HOME"
@@ -122,6 +131,9 @@ HOME="$BOOTSTRAP_BASH_HOME" SHELL=/bin/bash bash -s -- --prebuilt --archive "$AR
 "$BOOTSTRAP_BASH_HOME/.local/bin/bsj" --help >/dev/null
 grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.bash_profile"
 grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.bashrc"
+grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.zprofile"
+grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.zshrc"
+grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.config/fish/config.fish"
 
 cat <<EOF
 Smoke test passed:

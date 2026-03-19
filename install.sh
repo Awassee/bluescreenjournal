@@ -307,13 +307,22 @@ make_temp_dir() {
 }
 
 tty_input_available() {
-  [[ -r /dev/tty ]] || [[ -t 0 ]]
+  if ! [[ -t 0 || -t 1 || -t 2 ]]; then
+    return 1
+  fi
+  if ! [[ -r /dev/tty && -w /dev/tty ]]; then
+    return 1
+  fi
+  if ! (: > /dev/tty) >/dev/null 2>&1; then
+    return 1
+  fi
+  return 0
 }
 
 read_line_interactive() {
   local prompt="$1"
-  if [[ -r /dev/tty ]]; then
-    printf "%s" "$prompt" > /dev/tty
+  if tty_input_available; then
+    printf "%s" "$prompt" > /dev/tty || return 1
     IFS= read -r REPLY < /dev/tty || return 1
     return 0
   fi
@@ -932,6 +941,8 @@ ensure_path_hint() {
 
   warn "Install finished, but this shell cannot find bsj yet ($path_entry is not on PATH)."
   persist_path_update "$path_entry"
+  export PATH="$path_entry:$PATH"
+  info "Added $path_entry to PATH for this installer session."
   printf "Open a new terminal window, or run this now:\n  export PATH=\"%s:\$PATH\"\n" "$path_entry"
 }
 
@@ -984,29 +995,15 @@ append_path_line_if_missing() {
 
 persist_path_update() {
   local path_entry="$1"
-  local shell_name marker added existing target_file line
-  local -a target_files
-  shell_name="$(basename "${SHELL:-zsh}")"
+  local marker added existing target_file line
+  local -a shell_target_files
   marker="# Added by bsj installer"
   added=0
   existing=0
 
-  case "$shell_name" in
-    fish)
-      target_files=("$HOME/.config/fish/config.fish")
-      line="contains -- \"$path_entry\" \$PATH; or fish_add_path -m \"$path_entry\""
-      ;;
-    bash)
-      target_files=("$HOME/.bash_profile" "$HOME/.bashrc")
-      line="[[ \":\$PATH:\" != *\":$path_entry:\"* ]] && export PATH=\"$path_entry:\$PATH\""
-      ;;
-    *)
-      target_files=("$HOME/.zprofile" "$HOME/.zshrc")
-      line="[[ \":\$PATH:\" != *\":$path_entry:\"* ]] && export PATH=\"$path_entry:\$PATH\""
-      ;;
-  esac
-
-  for target_file in "${target_files[@]}"; do
+  line="[[ \":\$PATH:\" != *\":$path_entry:\"* ]] && export PATH=\"$path_entry:\$PATH\""
+  shell_target_files=("$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc")
+  for target_file in "${shell_target_files[@]}"; do
     if [[ -f "$target_file" ]] && grep -Fq "$path_entry" "$target_file"; then
       existing=1
       continue
@@ -1017,6 +1014,15 @@ persist_path_update() {
     fi
   done
 
+  target_file="$HOME/.config/fish/config.fish"
+  line="contains -- \"$path_entry\" \$PATH; or fish_add_path -m \"$path_entry\""
+  if [[ -f "$target_file" ]] && grep -Fq "$path_entry" "$target_file"; then
+    existing=1
+  elif append_path_line_if_missing "$target_file" "$marker" "$line" "$path_entry"; then
+    info "Added PATH update to $target_file"
+    added=1
+  fi
+
   if [[ "$added" -eq 0 ]]; then
     if [[ "$existing" -eq 1 ]]; then
       info "PATH update already present in shell config."
@@ -1024,6 +1030,77 @@ persist_path_update() {
       warn "Could not write PATH update automatically."
     fi
   fi
+}
+
+print_post_install_summary() {
+  local installed_bin="$1"
+  local help_ref="$2"
+
+  cat <<EOF
+
+Install complete.
+
+Start writing:
+  $installed_bin
+
+First launch starts the setup wizard automatically.
+In the app, press Esc to open menus (FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP).
+Need key reminders? Press F1 for the keyboard cheat sheet.
+
+Reference:
+  $help_ref
+
+Troubleshooting:
+  ./install.sh --doctor
+  ./install.sh --repair-path
+EOF
+}
+
+maybe_prompt_post_install_menu() {
+  local installed_bin="$1"
+  local help_ref="$2"
+  local selection normalized
+
+  if ! tty_input_available; then
+    print_post_install_summary "$installed_bin" "$help_ref"
+    return
+  fi
+
+  while true; do
+    cat <<EOF
+
+Post-install menu
+  1) Launch BlueScreen Journal now (recommended)
+  2) Print Quickstart guide
+  3) Show command help
+  4) Repair PATH integration now
+  5) Exit installer
+EOF
+    read_line_interactive "Select [1-5]: " || return
+    selection="$REPLY"
+    normalized="$(printf "%s" "$selection" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized" in
+      ""|1)
+        "$installed_bin"
+        return
+        ;;
+      2)
+        "$installed_bin" guide quickstart || true
+        ;;
+      3)
+        "$installed_bin" --help | sed -n '1,80p'
+        ;;
+      4)
+        run_path_repair
+        ;;
+      5|q|quit|exit)
+        return
+        ;;
+      *)
+        warn "Please choose 1-5."
+        ;;
+    esac
+  done
 }
 
 common_install_args() {
@@ -1316,20 +1393,10 @@ install_prebuilt() {
   printf "%sInstalled examples:%s %s\n" "$GREEN$BOLD" "$RESET" "$final_example_dir"
   printf "%sInstalled man page:%s %s\n" "$GREEN$BOLD" "$RESET" "$final_man_dir/bsj.1"
 
+  persist_path_update "$final_bin_dir"
   ensure_path_hint "$final_bin_dir"
   print_install_version_summary "$final_bin_dir/bsj"
-
-  cat <<EOF
-
-Next steps:
-  1. Launch BlueScreen Journal: $final_bin_dir/bsj
-  2. First launch starts the setup wizard automatically.
-  3. In the app, press Esc to open menus (FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP).
-  4. Need key reminders? Press F1 for the keyboard cheat sheet.
-  5. Optional CLI reference: man $final_man_dir/bsj.1
-  6. Troubleshoot install issues: ./install.sh --doctor
-  7. Repair PATH integration:   ./install.sh --repair-path
-EOF
+  maybe_prompt_post_install_menu "$final_bin_dir/bsj" "man $final_man_dir/bsj.1"
 }
 
 ensure_xcode_cli_tools() {
@@ -1381,20 +1448,10 @@ install_from_source() {
   printf "%sConfig dir:%s %s\n" "$GREEN$BOLD" "$RESET" "$config_dir"
   install_completion_files "$ROOT_DIR" "$bsj_bin" "$cargo_root"
 
+  persist_path_update "$cargo_bin_dir"
   ensure_path_hint "$cargo_bin_dir"
   print_install_version_summary "$bsj_bin"
-
-  cat <<EOF
-
-Next steps:
-  1. Launch BlueScreen Journal: $bsj_bin
-  2. First launch starts the setup wizard automatically.
-  3. In the app, press Esc to open menus (FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP).
-  4. Need key reminders? Press F1 for the keyboard cheat sheet.
-  5. Optional CLI reference: $bsj_bin --help
-  6. Troubleshoot install issues: ./install.sh --doctor
-  7. Repair PATH integration:   ./install.sh --repair-path
-EOF
+  maybe_prompt_post_install_menu "$bsj_bin" "$bsj_bin --help"
 }
 
 maybe_prompt_action_menu

@@ -1044,6 +1044,7 @@ pub enum SettingField {
     ShowRuler,
     ShowFooterLegend,
     SoundtrackSource,
+    OpeningLineTemplate,
     DailyWordGoal,
     BackupDaily,
     BackupWeekly,
@@ -1061,6 +1062,7 @@ impl SettingField {
             SettingField::ShowRuler => "show_ruler",
             SettingField::ShowFooterLegend => "show_footer_legend",
             SettingField::SoundtrackSource => "soundtrack_source",
+            SettingField::OpeningLineTemplate => "opening_line_template",
             SettingField::DailyWordGoal => "daily_word_goal",
             SettingField::BackupDaily => "backup_retention.daily",
             SettingField::BackupWeekly => "backup_retention.weekly",
@@ -1078,6 +1080,7 @@ impl SettingField {
             SettingField::ShowRuler => "Show Ruler",
             SettingField::ShowFooterLegend => "Footer Legend",
             SettingField::SoundtrackSource => "Soundtrack URL/Path",
+            SettingField::OpeningLineTemplate => "Opening Line Template",
             SettingField::DailyWordGoal => "Daily Word Goal",
             SettingField::BackupDaily => "Daily Backups",
             SettingField::BackupWeekly => "Weekly Backups",
@@ -1095,6 +1098,7 @@ impl SettingField {
             SettingField::ShowRuler => "Show DOS ruler above editor (true/false):",
             SettingField::ShowFooterLegend => "Show function-key footer legend (true/false):",
             SettingField::SoundtrackSource => "Set soundtrack URL or file path:",
+            SettingField::OpeningLineTemplate => "Set opening line template (blank disables):",
             SettingField::DailyWordGoal => "Set daily word goal (blank clears):",
             SettingField::BackupDaily => "Keep daily backups:",
             SettingField::BackupWeekly => "Keep weekly backups:",
@@ -1113,6 +1117,9 @@ impl SettingField {
             SettingField::ShowFooterLegend => "Hide when you want a cleaner writing footer.",
             SettingField::SoundtrackSource => {
                 "Used by TOOLS -> Toggle Soundtrack. Leave blank to disable quick playback."
+            }
+            SettingField::OpeningLineTemplate => {
+                "Auto-seeds blank entry pages. Tokens: {DATE} {DATE_LONG} {TIME} {ENTRY_NO} {DEVICE} [TODAYSDATE]."
             }
             SettingField::DailyWordGoal => "Shown as live progress in the footer and dashboard.",
             SettingField::BackupDaily
@@ -1135,6 +1142,7 @@ impl SettingField {
             SettingField::ShowRuler => config.show_ruler.to_string(),
             SettingField::ShowFooterLegend => config.show_footer_legend.to_string(),
             SettingField::SoundtrackSource => config.soundtrack_source.clone(),
+            SettingField::OpeningLineTemplate => config.opening_line_template.clone(),
             SettingField::DailyWordGoal => config
                 .daily_word_goal
                 .map(|goal| goal.to_string())
@@ -1157,6 +1165,13 @@ impl SettingField {
                     "[unset]".to_string()
                 } else {
                     config.soundtrack_source.clone()
+                }
+            }
+            SettingField::OpeningLineTemplate => {
+                if config.opening_line_template.trim().is_empty() {
+                    "[disabled]".to_string()
+                } else {
+                    config.opening_line_template.clone()
                 }
             }
             _ => self.current_input(config),
@@ -1398,6 +1413,7 @@ pub enum MenuAction {
     InsertTimeStamp,
     InsertDateStamp,
     InsertDateTimeStamp,
+    InsertOpeningLine,
     InsertDivider,
     InsertBlankAbove,
     InsertBlankBelow,
@@ -2074,9 +2090,10 @@ impl App {
         self.config.remember_passphrase_in_keychain
     }
 
-    pub fn empty_state_lines(&self) -> [&'static str; 8] {
+    pub fn empty_state_lines(&self) -> [&'static str; 9] {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
+            "Blank entry pages can auto-seed an opening line template.",
             "F2 saves a revision. Header changes to 'REVISION SAVED <time>'.",
             "Type **save** on its own line, then Enter for quick save + clean next entry page.",
             "Alt+Right next day  Alt+N next blank new entry",
@@ -2294,6 +2311,12 @@ impl App {
                     label: "Insert Date+Time".to_string(),
                     detail: "STAMP".to_string(),
                     action: MenuAction::InsertDateTimeStamp,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Insert Opening Line".to_string(),
+                    detail: "HEADER".to_string(),
+                    action: MenuAction::InsertOpeningLine,
                     enabled: true,
                 },
                 MenuItem {
@@ -2617,6 +2640,7 @@ impl App {
                 self.setting_menu_item(SettingField::ShowRuler),
                 self.setting_menu_item(SettingField::ShowFooterLegend),
                 self.setting_menu_item(SettingField::SoundtrackSource),
+                self.setting_menu_item(SettingField::OpeningLineTemplate),
                 self.setting_menu_item(SettingField::BackupDaily),
                 self.setting_menu_item(SettingField::BackupWeekly),
                 self.setting_menu_item(SettingField::BackupMonthly),
@@ -3753,6 +3777,7 @@ impl App {
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.refresh_find_matches();
+                self.seed_opening_line_for_blank_editor();
                 self.pending_conflict = state.conflict.clone();
                 if let Some(draft_text) = state.recovery_draft_text {
                     self.pending_recovery_closing = Some(state.recovery_draft_closing_thought);
@@ -3773,6 +3798,7 @@ impl App {
                 self.scroll_row = 0;
                 self.dirty = false;
                 self.refresh_find_matches();
+                self.seed_opening_line_for_blank_editor();
                 self.flash_status("LOAD FAILED.");
             }
         }
@@ -3966,6 +3992,58 @@ impl App {
         } else {
             Local::now().format("%Y-%m-%d %H:%M").to_string()
         }
+    }
+
+    fn is_editor_blank(&self) -> bool {
+        self.buffer.to_text().trim().is_empty()
+    }
+
+    fn render_opening_line_for_selected_date(&self) -> Option<String> {
+        let template = self.config.opening_line_template.trim();
+        if template.is_empty() {
+            return None;
+        }
+
+        let mut line = template.to_string();
+        let entry_no = self.entry_number_label();
+        let date_short = self.selected_date.format("%Y-%m-%d").to_string();
+        let date_long = self.selected_date.format("%A, %B %d, %Y").to_string();
+        let time = self.header_time_label();
+        let device = self.config.device_nickname.clone();
+
+        line = line.replace("{DATE}", &date_short);
+        line = line.replace("{DATE_LONG}", &date_long);
+        line = line.replace("{TIME}", &time);
+        line = line.replace("{ENTRY_NO}", &entry_no);
+        line = line.replace("{DEVICE}", &device);
+        line = line.replace("[TODAYSDATE]", &date_short);
+        line = line.replace("[ENTRYNO]", &entry_no);
+        line = line.replace("[TIME]", &time);
+        line = line.replace("[DEVICE]", &device);
+        line = line.replace('\n', " ");
+
+        let normalized = line.trim().to_string();
+        if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized)
+        }
+    }
+
+    fn seed_opening_line_for_blank_editor(&mut self) -> bool {
+        let Some(opening_line) = self.render_opening_line_for_selected_date() else {
+            return false;
+        };
+        if !self.is_editor_blank() {
+            return false;
+        }
+        self.buffer.wipe();
+        self.buffer.insert_text(&opening_line);
+        self.buffer.insert_newline();
+        self.refresh_document_stats();
+        self.refresh_find_matches();
+        self.scroll_row = 0;
+        true
     }
 
     fn metadata_stamp(&self) -> String {
@@ -4525,11 +4603,12 @@ impl App {
             "2. Save with F2 or FILE -> Save Entry.".to_string(),
             "3. Type **save** on its own line, then Enter for quick save + clean next same-day page."
                 .to_string(),
-            "4. Press Esc to open menus if you don't remember keys.".to_string(),
-            "5. Press Alt+N to jump to the next blank new-entry date.".to_string(),
-            "6. Use GO -> Open Calendar or Index Timeline for older entries.".to_string(),
-            "7. Use SEARCH -> Search Vault to find older entries fast.".to_string(),
-            "8. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
+            "4. SETUP -> Opening Line Template controls the persistent header line.".to_string(),
+            "5. Press Esc to open menus if you don't remember keys.".to_string(),
+            "6. Press Alt+N to jump to the next blank new-entry date.".to_string(),
+            "7. Use GO -> Open Calendar or Index Timeline for older entries.".to_string(),
+            "8. Use SEARCH -> Search Vault to find older entries fast.".to_string(),
+            "9. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
             String::new(),
             "The app autosaves encrypted drafts, but manual Save creates history.".to_string(),
             "F1 opens the key cheatsheet. HELP has first-run and operator guides.".to_string(),
@@ -5400,6 +5479,17 @@ impl App {
                 viewport_height,
                 "TIMESTAMP INSERTED.",
             ),
+            MenuAction::InsertOpeningLine => {
+                if let Some(opening_line) = self.render_opening_line_for_selected_date() {
+                    self.insert_text_snippet(
+                        &format!("{opening_line}\n"),
+                        viewport_height,
+                        "OPENING LINE INSERTED.",
+                    );
+                } else {
+                    self.flash_status("OPENING LINE DISABLED.");
+                }
+            }
             MenuAction::InsertDivider => self.insert_text_snippet(
                 "----------------------------------------\n",
                 viewport_height,
@@ -6226,6 +6316,15 @@ impl App {
                 return true;
             }
         }
+
+        if prompt.field == SettingField::OpeningLineTemplate
+            && !self.dirty
+            && self.is_editor_blank()
+        {
+            self.seed_opening_line_for_blank_editor();
+            self.ensure_cursor_visible(self.last_viewport_height);
+        }
+
         if prompt.field == SettingField::VaultPath {
             if self.vault.is_some() && self.dirty {
                 self.autosave_current_date();
@@ -6266,6 +6365,13 @@ impl App {
                     "SOUNDTRACK SOURCE CLEARED."
                 } else {
                     "SOUNDTRACK SOURCE SET."
+                }
+            }
+            SettingField::OpeningLineTemplate => {
+                if self.config.opening_line_template.trim().is_empty() {
+                    "OPENING LINE DISABLED."
+                } else {
+                    "OPENING LINE TEMPLATE SET."
                 }
             }
             SettingField::DailyWordGoal => {
@@ -6434,6 +6540,7 @@ impl App {
         // Quick-save transitions to a fresh same-day page so prior text is not left on screen.
         self.buffer.wipe();
         self.dirty = false;
+        self.seed_opening_line_for_blank_editor();
         self.refresh_document_stats();
         self.refresh_find_matches();
         self.ensure_cursor_visible(viewport_height);
@@ -8816,6 +8923,7 @@ mod tests {
         assert!(labels.contains(&"Sync Folder"));
         assert!(labels.contains(&"Device Name"));
         assert!(labels.contains(&"Daily Backups"));
+        assert!(labels.contains(&"Opening Line Template"));
     }
 
     #[test]
@@ -8831,6 +8939,18 @@ mod tests {
         assert!(labels.contains(&"Export Current".to_string()));
         assert!(labels.contains(&"Backup History".to_string()));
         assert!(labels.contains(&"Backup Cleanup Preview".to_string()));
+    }
+
+    #[test]
+    fn edit_menu_lists_insert_opening_line_action() {
+        let app = App::with_initial_date(None);
+        let labels = app
+            .menu_items(MenuId::Edit)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"Insert Opening Line".to_string()));
     }
 
     #[test]
@@ -8856,8 +8976,11 @@ mod tests {
         );
 
         assert_eq!(app.status_text(), Some("QUICK SAVED. NEW ENTRY READY."));
-        assert_eq!(app.buffer.to_text(), "");
-        assert_eq!(app.buffer.cursor(), (0, 0));
+        assert_eq!(
+            app.buffer.to_text(),
+            format!("JOURNAL ENTRY {}\n", date.format("%Y-%m-%d"))
+        );
+        assert_eq!(app.buffer.cursor(), (1, 0));
         assert!(!app.dirty);
         assert_eq!(app.selected_date, date);
         assert!(app.save_status_label().starts_with("REVISION SAVED "));
@@ -8888,8 +9011,11 @@ mod tests {
         app.perform_menu_action(MenuAction::QuickSaveNext, 20);
 
         assert_eq!(app.status_text(), Some("QUICK SAVED. NEW ENTRY READY."));
-        assert_eq!(app.buffer.to_text(), "");
-        assert_eq!(app.buffer.cursor(), (0, 0));
+        assert_eq!(
+            app.buffer.to_text(),
+            format!("JOURNAL ENTRY {}\n", date.format("%Y-%m-%d"))
+        );
+        assert_eq!(app.buffer.cursor(), (1, 0));
         assert!(!app.dirty);
         assert_eq!(app.selected_date, date);
 
@@ -8924,6 +9050,40 @@ mod tests {
         assert!(is_quick_save_command_line("**save**"));
         assert!(is_quick_save_command_line("  **SAVE**  "));
         assert!(!is_quick_save_command_line("save"));
+    }
+
+    #[test]
+    fn blank_entry_page_seeds_opening_line_template_with_variables() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.config.opening_line_template =
+            "SEAN'S JOURNAL ENTRY [TODAYSDATE] NO {ENTRY_NO}".to_string();
+
+        app.load_selected_date();
+
+        let expected = format!(
+            "SEAN'S JOURNAL ENTRY {} NO {}\n",
+            date.format("%Y-%m-%d"),
+            app.entry_number_label()
+        );
+        assert_eq!(app.buffer.to_text(), expected);
+        assert_eq!(app.buffer.cursor(), (1, 0));
+        assert!(!app.dirty);
+    }
+
+    #[test]
+    fn opening_line_template_can_be_disabled_for_blank_pages() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 21).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.config.opening_line_template.clear();
+
+        app.prepare_next_same_day_entry(20);
+
+        assert_eq!(app.buffer.to_text(), "");
+        assert_eq!(app.buffer.cursor(), (0, 0));
+        assert!(!app.dirty);
     }
 
     #[test]

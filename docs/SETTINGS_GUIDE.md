@@ -73,6 +73,19 @@ Editable keys:
   - type: boolean
   - default: `true`
   - purpose: show or hide the function-key legend in the footer
+- `soundtrack_source`
+  - type: string URL/path
+  - default: `https://www.midi-karaoke.info/21b56501.mid`
+  - purpose: soundtrack source used by `TOOLS -> Toggle Soundtrack`
+- `opening_line_template`
+  - type: string template (blank disables)
+  - default: `JOURNAL ENTRY {DATE}`
+  - purpose: auto-seeds a persistent opening line on blank entry pages
+  - tokens: `{DATE}`, `{DATE_LONG}`, `{TIME}`, `{ENTRY_NO}`, `{DEVICE}`, `[TODAYSDATE]`
+- `daily_word_goal`
+  - type: integer or `null`
+  - default: `null`
+  - purpose: progress target shown in the footer/dashboard
 - `backup_retention.daily`
   - type: integer
   - default: `7`

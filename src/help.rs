@@ -237,6 +237,20 @@ pub fn render_settings_report(
     );
     push_row(
         &mut output,
+        "soundtrack_source",
+        config.soundtrack_source.clone(),
+    );
+    push_row(
+        &mut output,
+        "opening_line_template",
+        if config.opening_line_template.trim().is_empty() {
+            "(disabled)".to_string()
+        } else {
+            config.opening_line_template.clone()
+        },
+    );
+    push_row(
+        &mut output,
         "daily_word_goal",
         config
             .daily_word_goal
@@ -651,6 +665,7 @@ mod tests {
             show_ruler: true,
             show_footer_legend: true,
             soundtrack_source: "https://example.com/theme.mid".to_string(),
+            opening_line_template: "SEAN'S JOURNAL ENTRY {DATE}".to_string(),
             daily_word_goal: Some(600),
             remember_passphrase_in_keychain: true,
             first_run_coach_completed: true,
@@ -708,6 +723,7 @@ mod tests {
         assert!(report.contains("BSJ_PASSPHRASE"));
         assert!(report.contains("set"));
         assert!(report.contains("insert_template"));
+        assert!(report.contains("opening_line_template"));
         assert!(report.contains("present (32 hex chars)"));
         assert!(!report.contains("TODAY\n"));
     }
