@@ -6,6 +6,7 @@ mod logging;
 mod platform;
 mod search;
 mod secure_fs;
+mod spellcheck;
 mod sync;
 mod sysop;
 mod tui;
@@ -30,7 +31,7 @@ use std::{
     version = env!("CARGO_PKG_VERSION"),
     about = "BlueScreen Journal",
     long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, a menu-driven TUI, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.",
-    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj spellcheck --date 2026-03-16\n  bsj spellcheck --range last7 --count-only\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
 )]
 struct Cli {
     #[arg(
@@ -117,6 +118,27 @@ enum Command {
         save_preset: Option<String>,
         #[arg(long, help = "Delete a saved preset by name and exit")]
         delete_preset: Option<String>,
+    },
+    /// Spellcheck saved entries without writing plaintext indexes
+    Spellcheck {
+        #[arg(long, help = "Spellcheck one specific date (YYYY-MM-DD)")]
+        date: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, value_enum, help = "Quick date range preset")]
+        range: Option<DateRangeArg>,
+        #[arg(long, help = "Print results as JSON")]
+        json: bool,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Maximum misspellings to print (0 = all)"
+        )]
+        limit: usize,
+        #[arg(long, help = "Print only the misspelling count")]
+        count_only: bool,
     },
     /// Show writing analytics (streak, recency, and top metadata)
     Review {
@@ -705,6 +727,51 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Command::Spellcheck {
+            date,
+            from,
+            to,
+            range,
+            json,
+            limit,
+            count_only,
+        }) => {
+            let date = match parse_optional_date_arg("date", date.as_deref()) {
+                Ok(date) => date,
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(2);
+                }
+            };
+            let from = match parse_optional_date_arg("from", from.as_deref()) {
+                Ok(date) => date,
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(2);
+                }
+            };
+            let to = match parse_optional_date_arg("to", to.as_deref()) {
+                Ok(date) => date,
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(2);
+                }
+            };
+
+            if let Err(error) = run_cli_spellcheck(SpellcheckCliArgs {
+                date,
+                from,
+                to,
+                range,
+                json_output: json,
+                limit,
+                count_only,
+            }) {
+                log::error!("spellcheck failed: {error}");
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
         Some(Command::Review {
             top,
             on_this_day,
@@ -980,6 +1047,124 @@ struct SearchCliArgs {
     list_presets: bool,
     save_preset: Option<String>,
     delete_preset: Option<String>,
+}
+
+#[derive(Debug)]
+struct SpellcheckCliArgs {
+    date: Option<NaiveDate>,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    range: Option<DateRangeArg>,
+    json_output: bool,
+    limit: usize,
+    count_only: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SpellcheckCliHit {
+    date: String,
+    entry_number: String,
+    row: usize,
+    col: usize,
+    word: String,
+    suggestions: Vec<String>,
+}
+
+fn run_cli_spellcheck(args: SpellcheckCliArgs) -> Result<(), String> {
+    log::info!("running CLI spellcheck");
+    if args.date.is_some() && (args.from.is_some() || args.to.is_some() || args.range.is_some()) {
+        return Err("--date cannot be combined with --from/--to/--range".to_string());
+    }
+
+    let (from, to) = if let Some(date) = args.date {
+        (Some(date), Some(date))
+    } else {
+        let (range_from, range_to) = args
+            .range
+            .map(|range| resolve_range_bounds(range, Local::now().date_naive()))
+            .map_or((None, None), |(from, to)| (Some(from), Some(to)));
+        (args.from.or(range_from), args.to.or(range_to))
+    };
+
+    if let (Some(from), Some(to)) = (from, to)
+        && from > to
+    {
+        return Err("--from cannot be after --to".to_string());
+    }
+
+    let config = config::AppConfig::load_or_default();
+    let vault = unlock_cli_vault(&config)?;
+    let documents = vault
+        .load_search_documents()
+        .map_err(|error| format!("failed to read entries: {error}"))?;
+    let checker = spellcheck::SpellChecker::load();
+    let session_words = HashSet::new();
+
+    let mut hits = Vec::<SpellcheckCliHit>::new();
+    for document in documents {
+        if !search::matches_date_filter(document.date, from, to) {
+            continue;
+        }
+        for hit in checker.check_text(&document.body, &session_words) {
+            hits.push(SpellcheckCliHit {
+                date: document.date.format("%Y-%m-%d").to_string(),
+                entry_number: document.entry_number.clone(),
+                row: hit.row + 1,
+                col: hit.start_col + 1,
+                word: hit.word,
+                suggestions: hit.suggestions,
+            });
+        }
+    }
+
+    hits.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then_with(|| left.row.cmp(&right.row))
+            .then_with(|| left.col.cmp(&right.col))
+    });
+
+    if args.limit > 0 && hits.len() > args.limit {
+        hits.truncate(args.limit);
+    }
+
+    if args.count_only {
+        if args.json_output {
+            println!("{}", serde_json::json!({ "count": hits.len() }));
+        } else {
+            println!("{}", hits.len());
+        }
+        return Ok(());
+    }
+
+    if hits.is_empty() {
+        if args.json_output {
+            println!("[]");
+        } else {
+            println!("No spelling issues found.");
+        }
+        return Ok(());
+    }
+
+    if args.json_output {
+        let payload = serde_json::to_string_pretty(&hits)
+            .map_err(|error| format!("failed to serialize spellcheck JSON: {error}"))?;
+        println!("{payload}");
+    } else {
+        for hit in hits {
+            let suggestion = hit
+                .suggestions
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "(no suggestion)".to_string());
+            println!(
+                "{}:{}:{}  {}  -> {}",
+                hit.date, hit.row, hit.col, hit.word, suggestion
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn run_cli_search(args: SearchCliArgs) -> Result<(), String> {
@@ -4174,6 +4359,63 @@ mod tests {
                 assert!(summary);
             }
             _ => panic!("expected search command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_spellcheck_date_and_output_flags() {
+        let cli = Cli::parse_from([
+            "bsj",
+            "spellcheck",
+            "--date",
+            "2026-03-18",
+            "--json",
+            "--limit",
+            "25",
+            "--count-only",
+        ]);
+        match cli.command {
+            Some(Command::Spellcheck {
+                date,
+                from,
+                to,
+                json,
+                limit,
+                count_only,
+                ..
+            }) => {
+                assert_eq!(date.as_deref(), Some("2026-03-18"));
+                assert_eq!(from, None);
+                assert_eq!(to, None);
+                assert!(json);
+                assert_eq!(limit, 25);
+                assert!(count_only);
+            }
+            _ => panic!("expected spellcheck command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_spellcheck_range_flags() {
+        let cli = Cli::parse_from([
+            "bsj",
+            "spellcheck",
+            "--from",
+            "2026-03-01",
+            "--to",
+            "2026-03-19",
+            "--range",
+            "last30",
+        ]);
+        match cli.command {
+            Some(Command::Spellcheck {
+                from, to, range, ..
+            }) => {
+                assert_eq!(from.as_deref(), Some("2026-03-01"));
+                assert_eq!(to.as_deref(), Some("2026-03-19"));
+                assert!(matches!(range, Some(DateRangeArg::Last30)));
+            }
+            _ => panic!("expected spellcheck command"),
         }
     }
 

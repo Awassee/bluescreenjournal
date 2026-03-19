@@ -22,12 +22,14 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with optional folder/S3/WebDAV encrypted sync
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v1.2.1
+## New in v1.3.0
 
-- upgraded GitHub workflows to current action majors and switched release publishing to `gh release` CLI
-- added `scripts/manual-smoke-gui-terminals.sh` to run published installer checks in Terminal.app and iTerm2
-- added scoped [v1.3 milestone plan](docs/V1_3_PLAN.md) with issues and acceptance criteria
-- refreshed stable install/docs surfaces to publish `v1.2.1` as current stable
+- added spellcheck engine + menu-first correction picker (`EDIT -> Spellcheck Entry`)
+- added `bsj spellcheck` CLI with `--date`, `--from/--to`, `--range`, `--json`, and `--count-only`
+- added `FILE -> Save Receipt` for explicit persisted-state confirmation
+- added `HELP -> Daily Flow Coach` for write/save/next flow guidance
+- added deep-archive backward-jump confirmation to reduce accidental old-entry opens
+- added scoped UX checklist and regression tests for spellcheck/save/archive flows
 
 ## Screenshots
 
@@ -76,7 +78,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.2.1.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.3.0.md) |
 
 ## Turnkey install
 
@@ -89,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.2.1
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.3.0
 ```
 
 Install from source instead of the prebuilt release:
@@ -190,6 +192,7 @@ The app is direct by design:
 | Real index and calendar | Browse saved dates as a journal, not just as files | Faster recall and better chronological navigation |
 | Favorite and random navigation | Jump by favorites, recents, and random saved entries | Makes larger journals easier to roam |
 | In-entry find and replace | Incremental find and retro `Y/N/A/Q` replace flow | Keeps editing fast inside the writing surface |
+| In-entry spellcheck | Suggests corrections, typo auto-fix, and temporary session ignore words | Catches low-signal mistakes without breaking writing momentum |
 | Global search | Searches saved entries after unlock without disk plaintext index | Fast retrieval without leaving search residue on disk |
 | Search presets and cache status | Adds today/month/all scopes plus encrypted cache inspection | Makes search faster to aim and easier to trust |
 | Encrypted sync | Syncs encrypted revision blobs to folder, S3, or WebDAV targets | Lets you use cloud storage without uploading plaintext |
@@ -221,6 +224,10 @@ The app is direct by design:
 
 - `F4` or `EDIT -> Find in Entry` searches inside the current entry
 - `F6` or `EDIT -> Replace in Entry` runs replace confirmation in a retro style
+- `Ctrl+Shift+F` or `EDIT -> Spellcheck Entry` opens correction picker
+- `EDIT -> Auto-Fix Common Typos` applies safe typo corrections
+- `bsj spellcheck --date YYYY-MM-DD` checks one saved entry from CLI
+- `bsj spellcheck --range last7 --count-only` gives fast typo-count signal
 - `F5` or `SEARCH -> Search Vault` searches across saved entries
 - `SEARCH -> Saved Presets` reopens named query+range presets
 - in Search overlay: `Ctrl+Shift+B` saves current query as a preset and `Ctrl+1..9` loads preset slots
@@ -366,6 +373,9 @@ bsj search "focus" --match-mode any --sort relevance --hits-per-entry 5
 bsj search "focus" --range last7 --summary
 bsj search "mood:7" --json --context 40
 bsj search "ship" --count-only
+bsj spellcheck --date 2026-03-16
+bsj spellcheck --range last7 --count-only
+bsj spellcheck --from 2026-03-01 --to 2026-03-31 --json --limit 50
 bsj review --range last30 --goal 750 --json --min-count 2
 bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata
 bsj timeline --range last30 --group-by week
@@ -409,8 +419,9 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v1.2.1.md)
+- [Release Notes](docs/releases/v1.3.0.md)
 - [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
+- [v1.3 UX Checklist](docs/V1_3_UX_CHECKLIST.md)
 - [Next 10 Feature Pack](docs/FEATURES_NEXT10.md)
 - [Feature Pass v1.0.3 (Archive)](docs/FEATURE_PASS_VNEXT.md)
 - [SYSOP Features](docs/SYSOP_FEATURES.md)

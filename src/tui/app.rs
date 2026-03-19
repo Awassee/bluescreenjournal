@@ -8,7 +8,9 @@ use crate::{
     help::{self, EnvironmentSettings},
     logging, platform,
     search::{SearchIndex, SearchQuery, SearchResult},
-    secure_fs, sync, sysop,
+    secure_fs,
+    spellcheck::{self, SpellChecker, SpellHit},
+    sync, sysop,
     tui::{
         buffer::{BufferStats, MatchPos, TextBuffer},
         calendar,
@@ -20,7 +22,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use secrecy::SecretString;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     env,
     fs::{self, File},
     io::Read,
@@ -42,6 +44,8 @@ const SOUNDTRACK_MIDI_MIN_SECONDS: f64 = 1.0;
 const SAVE_REMINDER_INTERVAL: Duration = Duration::from_secs(60);
 const SAVE_REMINDER_WARN_AFTER: Duration = Duration::from_secs(90);
 const SPRINT_DEFAULT_MINUTES: u16 = 25;
+const ARCHIVE_CONFIRM_WINDOW: Duration = Duration::from_secs(4);
+const ARCHIVE_CONFIRM_OLDER_THAN_DAYS: i64 = 14;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Overlay {
@@ -614,6 +618,19 @@ pub enum PickerAction {
         title: String,
         text: String,
     },
+    SpellApply {
+        row: usize,
+        start_col: usize,
+        end_col: usize,
+        original: String,
+        replacement: String,
+    },
+    SpellJump {
+        row: usize,
+        col: usize,
+        word: String,
+    },
+    SpellIgnoreWord(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -793,6 +810,17 @@ impl PickerOverlay {
                 PickerAction::ShowInfo { title, text } => {
                     title.zeroize();
                     text.zeroize();
+                }
+                PickerAction::SpellApply {
+                    original,
+                    replacement,
+                    ..
+                } => {
+                    original.zeroize();
+                    replacement.zeroize();
+                }
+                PickerAction::SpellJump { word, .. } | PickerAction::SpellIgnoreWord(word) => {
+                    word.zeroize();
                 }
             }
         }
@@ -1529,6 +1557,7 @@ pub enum MenuAction {
     SaveAndNextDay,
     SaveAndLock,
     QuickSaveNext,
+    SaveReceipt,
     Export,
     QuickExportText,
     QuickExportMarkdown,
@@ -1566,6 +1595,12 @@ pub enum MenuAction {
     Find,
     ClearFind,
     Replace,
+    SpellcheckEntry,
+    SpellcheckSummary,
+    SpellcheckNext,
+    SpellcheckPrevious,
+    SpellcheckAutoFixTypos,
+    SpellcheckIgnoreCursorWord,
     SearchPinnedQueries,
     SearchPresets,
     SaveSearchPreset,
@@ -1639,6 +1674,7 @@ pub enum MenuAction {
     ToggleKeychainMemory,
     FirstRunTour,
     QuickStart,
+    DailyFlowCoach,
     EditSetting(SettingField),
     Help,
 }
@@ -1840,8 +1876,42 @@ impl From<BufferStats> for DocumentStats {
     }
 }
 
+#[derive(Clone, Debug)]
+struct SaveReceipt {
+    saved_at: DateTime<Local>,
+    date: NaiveDate,
+    entry_number: String,
+    lines: usize,
+    words: usize,
+    chars: usize,
+}
+
+impl SaveReceipt {
+    fn to_lines(&self) -> Vec<String> {
+        vec![
+            format!(
+                "Saved at      : {}",
+                self.saved_at.format("%Y-%m-%d %H:%M:%S")
+            ),
+            format!("Entry date    : {}", self.date.format("%Y-%m-%d")),
+            format!("Entry number  : {}", self.entry_number),
+            format!(
+                "Snapshot stats: {} line(s), {} word(s), {} char(s)",
+                self.lines, self.words, self.chars
+            ),
+            String::new(),
+            "Save confidence flow:".to_string(),
+            "1. REVISION SAVED appears in header/footer.".to_string(),
+            "2. Use File -> Save Receipt to confirm what was persisted.".to_string(),
+            "3. Type **save** + Enter for quick next same-day page.".to_string(),
+        ]
+    }
+}
+
 pub struct App {
     config: AppConfig,
+    spell_checker: SpellChecker,
+    spell_session_words: HashSet<String>,
     buffer: TextBuffer,
     closing_thought: Option<String>,
     entry_metadata: EntryMetadata,
@@ -1889,6 +1959,8 @@ pub struct App {
     menu_coach_shown: bool,
     soundtrack_child: Option<Child>,
     soundtrack_loop_enabled: bool,
+    last_save_receipt: Option<SaveReceipt>,
+    pending_archive_confirm: Option<(NaiveDate, Instant)>,
 }
 
 impl Default for App {
@@ -1927,6 +1999,8 @@ impl App {
 
         let mut app = Self {
             config,
+            spell_checker: SpellChecker::load(),
+            spell_session_words: HashSet::new(),
             buffer: initial_buffer,
             closing_thought: None,
             entry_metadata: EntryMetadata::default(),
@@ -1983,6 +2057,8 @@ impl App {
             menu_coach_shown: false,
             soundtrack_child: None,
             soundtrack_loop_enabled: false,
+            last_save_receipt: None,
+            pending_archive_confirm: None,
         };
         app.try_keychain_auto_unlock();
         app
@@ -2423,7 +2499,7 @@ impl App {
             "Old entries are intentional: open archive dates through Calendar or Index.",
             "Esc or Ctrl+O opens menus  Alt+F/E/S/G/T/U/H jumps sections.",
             "Ctrl+O/E/W/Y/T/U/L also opens top menus when function keys are blocked.",
-            "? or Ctrl+/ opens key help instantly.  F5 searches the unlocked vault.",
+            "? or Ctrl+/ opens help instantly.  Ctrl+Shift+F runs spellcheck.",
             "F10 quit  F12 lock  Ctrl+K command palette",
         ]
     }
@@ -2521,6 +2597,12 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Save Receipt".to_string(),
+                    detail: "CONFIRM".to_string(),
+                    action: MenuAction::SaveReceipt,
+                    enabled: self.last_save_receipt.is_some(),
+                },
+                MenuItem {
                     label: "Export Current".to_string(),
                     detail: "TXT/MD".to_string(),
                     action: MenuAction::Export,
@@ -2610,6 +2692,42 @@ impl App {
                     label: "Replace in Entry".to_string(),
                     detail: "F6".to_string(),
                     action: MenuAction::Replace,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Spellcheck Entry".to_string(),
+                    detail: "CTRL+SHIFT+F".to_string(),
+                    action: MenuAction::SpellcheckEntry,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Spellcheck Summary".to_string(),
+                    detail: "REPORT".to_string(),
+                    action: MenuAction::SpellcheckSummary,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Next Misspelling".to_string(),
+                    detail: "JUMP".to_string(),
+                    action: MenuAction::SpellcheckNext,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Previous Misspelling".to_string(),
+                    detail: "JUMP".to_string(),
+                    action: MenuAction::SpellcheckPrevious,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Auto-Fix Common Typos".to_string(),
+                    detail: "SAFE".to_string(),
+                    action: MenuAction::SpellcheckAutoFixTypos,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Add Word At Cursor".to_string(),
+                    detail: "SESSION".to_string(),
+                    action: MenuAction::SpellcheckIgnoreCursorWord,
                     enabled: true,
                 },
                 MenuItem {
@@ -3190,6 +3308,12 @@ impl App {
                     enabled: true,
                 },
                 MenuItem {
+                    label: "Daily Flow Coach".to_string(),
+                    detail: "GUIDE".to_string(),
+                    action: MenuAction::DailyFlowCoach,
+                    enabled: true,
+                },
+                MenuItem {
                     label: "First-Run Tour".to_string(),
                     detail: "2 MIN".to_string(),
                     action: MenuAction::FirstRunTour,
@@ -3433,6 +3557,10 @@ impl App {
         }
         if Self::is_ctrl_shift_char(&key, 'a') {
             self.open_ai_coach_overlay();
+            return;
+        }
+        if Self::is_ctrl_shift_char(&key, 'f') {
+            self.open_spellcheck_overlay();
             return;
         }
         if Self::is_ctrl_shift_char(&key, 's') {
@@ -4699,8 +4827,34 @@ impl App {
         if self.dirty {
             self.autosave_current_date();
         }
+        self.pending_archive_confirm = None;
         self.selected_date = date;
         self.load_selected_date();
+    }
+
+    fn requires_archive_confirmation(&mut self, target: NaiveDate) -> bool {
+        if target >= self.selected_date {
+            self.pending_archive_confirm = None;
+            return false;
+        }
+        let today = Local::now().date_naive();
+        let threshold = today - ChronoDuration::days(ARCHIVE_CONFIRM_OLDER_THAN_DAYS);
+        if target >= threshold {
+            self.pending_archive_confirm = None;
+            return false;
+        }
+
+        let now = Instant::now();
+        if let Some((pending_date, expires_at)) = self.pending_archive_confirm {
+            if now <= expires_at && pending_date == target {
+                self.pending_archive_confirm = None;
+                return false;
+            }
+        }
+
+        self.pending_archive_confirm = Some((target, now + ARCHIVE_CONFIRM_WINDOW));
+        self.flash_status("ARCHIVE DATE: REPEAT COMMAND TO OPEN.");
+        true
     }
 
     fn open_date_picker(&mut self) {
@@ -4779,6 +4933,242 @@ impl App {
     fn open_picker_overlay(&mut self, overlay: PickerOverlay) {
         self.menu = None;
         self.overlay = Some(Overlay::Picker(overlay));
+    }
+
+    fn spell_hits_for_current_entry(&self) -> Vec<SpellHit> {
+        let lines = (0..self.buffer.line_count())
+            .filter_map(|row| self.buffer.line(row).map(|line| (row, line)));
+        self.spell_checker
+            .check_lines(lines, &self.spell_session_words)
+    }
+
+    fn open_spellcheck_overlay(&mut self) {
+        let hits = self.spell_hits_for_current_entry();
+        if hits.is_empty() {
+            self.flash_status("SPELLCHECK CLEAN.");
+            return;
+        }
+
+        let mut items = hits
+            .into_iter()
+            .take(300)
+            .map(|hit| {
+                let location = format!("L{} C{}", hit.row + 1, hit.start_col + 1);
+                if let Some(replacement) = hit.suggestions.first().cloned() {
+                    PickerItem {
+                        title: format!("{} -> {}", hit.word, replacement),
+                        detail: location.clone(),
+                        keywords: format!("spell {} {} {}", hit.word, replacement, location),
+                        action: PickerAction::SpellApply {
+                            row: hit.row,
+                            start_col: hit.start_col,
+                            end_col: hit.end_col,
+                            original: hit.word,
+                            replacement,
+                        },
+                    }
+                } else {
+                    PickerItem {
+                        title: hit.word.clone(),
+                        detail: format!("{location} (no suggestion)"),
+                        keywords: format!("spell {} {}", hit.word, location),
+                        action: PickerAction::SpellJump {
+                            row: hit.row,
+                            col: hit.start_col,
+                            word: hit.word,
+                        },
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(word) = self.current_word_under_cursor() {
+            items.insert(
+                0,
+                PickerItem {
+                    title: format!("Ignore \"{word}\" this session"),
+                    detail: "SESSION".to_string(),
+                    keywords: format!("ignore spell {word}"),
+                    action: PickerAction::SpellIgnoreWord(word),
+                },
+            );
+        }
+
+        self.open_picker_overlay(PickerOverlay::new(
+            "Spellcheck Entry",
+            items,
+            "No spellcheck actions available.",
+        ));
+    }
+
+    fn open_spellcheck_summary_overlay(&mut self) {
+        let hits = self.spell_hits_for_current_entry();
+        if hits.is_empty() {
+            self.open_info_overlay(
+                "Spellcheck Summary",
+                "No spelling issues in the current entry.".to_string(),
+            );
+            return;
+        }
+
+        let mut counts = HashMap::<String, usize>::new();
+        for hit in &hits {
+            let key = hit.word.to_lowercase();
+            *counts.entry(key).or_insert(0) += 1;
+        }
+        let mut ranked = counts.into_iter().collect::<Vec<_>>();
+        ranked.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        ranked.truncate(20);
+
+        let mut lines = vec![
+            format!("Misspellings found: {}", hits.len()),
+            format!("Unique words      : {}", ranked.len()),
+            format!(
+                "Dictionary size   : {}",
+                self.spell_checker.dictionary_size()
+            ),
+            format!("Session ignores   : {}", self.spell_session_words.len()),
+            String::new(),
+            "Top words:".to_string(),
+        ];
+        for (word, count) in ranked {
+            lines.push(format!("  {word}: {count}"));
+        }
+        lines.push(String::new());
+        lines.push("Use Edit -> Spellcheck Entry to apply fixes.".to_string());
+        lines.push("Use Edit -> Add Word At Cursor for temporary session ignore.".to_string());
+
+        self.open_info_overlay("Spellcheck Summary", lines.join("\n"));
+    }
+
+    fn jump_spellcheck_match(&mut self, direction: i8, viewport_height: usize) {
+        let hits = self.spell_hits_for_current_entry();
+        if hits.is_empty() {
+            self.flash_status("SPELLCHECK CLEAN.");
+            return;
+        }
+        let (row, col) = self.buffer.cursor();
+        let target = if direction >= 0 {
+            hits.iter()
+                .find(|hit| hit.row > row || (hit.row == row && hit.start_col > col))
+                .cloned()
+                .unwrap_or_else(|| hits[0].clone())
+        } else {
+            hits.iter()
+                .rev()
+                .find(|hit| hit.row < row || (hit.row == row && hit.start_col < col))
+                .cloned()
+                .unwrap_or_else(|| hits[hits.len() - 1].clone())
+        };
+        self.buffer.set_cursor(target.row, target.start_col);
+        self.ensure_cursor_visible(viewport_height);
+        self.flash_status(&format!(
+            "SPELL: {} (L{} C{}).",
+            target.word,
+            target.row + 1,
+            target.start_col + 1
+        ));
+    }
+
+    fn autofix_common_typos(&mut self, viewport_height: usize) {
+        let mut fixes = self
+            .spell_hits_for_current_entry()
+            .into_iter()
+            .filter_map(|hit| {
+                SpellChecker::common_typo_correction(&hit.word).map(|replacement| {
+                    (
+                        MatchPos {
+                            row: hit.row,
+                            start_col: hit.start_col,
+                            end_col: hit.end_col,
+                        },
+                        replacement.to_string(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if fixes.is_empty() {
+            self.flash_status("NO COMMON TYPOS FOUND.");
+            return;
+        }
+
+        fixes.sort_by(|left, right| {
+            right
+                .0
+                .row
+                .cmp(&left.0.row)
+                .then_with(|| right.0.start_col.cmp(&left.0.start_col))
+        });
+
+        for (pos, replacement) in &fixes {
+            self.buffer.replace_at(pos, replacement);
+        }
+        self.wrap_all_lines();
+        self.dirty = true;
+        self.mark_dirty_started_now();
+        self.refresh_document_stats();
+        self.refresh_find_matches();
+        self.ensure_cursor_visible(viewport_height);
+        self.flash_status(&format!("AUTO-FIXED {} TYPO(S).", fixes.len()));
+    }
+
+    fn current_word_under_cursor(&self) -> Option<String> {
+        let (row, col) = self.buffer.cursor();
+        let line = self.buffer.line(row)?;
+        spellcheck::tokenize_line_with_positions(line)
+            .into_iter()
+            .find(|span| col >= span.start_col && col <= span.end_col)
+            .map(|span| span.token)
+    }
+
+    fn add_word_at_cursor_to_spell_session(&mut self) {
+        let Some(word) = self.current_word_under_cursor() else {
+            self.flash_status("NO WORD UNDER CURSOR.");
+            return;
+        };
+        let Some(normalized) = spellcheck::session_word(&word) else {
+            self.flash_status("NO WORD UNDER CURSOR.");
+            return;
+        };
+        if self.spell_session_words.insert(normalized.clone()) {
+            self.flash_status(&format!("SPELL IGNORE: {}.", normalized.to_uppercase()));
+        } else {
+            self.flash_status("WORD ALREADY IGNORED.");
+        }
+    }
+
+    fn open_save_receipt_overlay(&mut self) {
+        let Some(receipt) = self.last_save_receipt.clone() else {
+            self.flash_status("SAVE RECEIPT UNAVAILABLE.");
+            return;
+        };
+        self.open_info_overlay("Save Receipt", receipt.to_lines().join("\n"));
+    }
+
+    fn open_daily_flow_coach_overlay(&mut self) {
+        let next_action = if self.dirty {
+            "Save this page (F2), then continue or open next day (Ctrl+Shift+S)."
+        } else {
+            "Start writing now, or type **save** on its own line for quick same-day next entry."
+        };
+        let lines = vec![
+            format!("Entry date   : {}", self.selected_date.format("%Y-%m-%d")),
+            format!("Entry no     : {}", self.entry_number_label()),
+            format!("Save state   : {}", self.save_status_label()),
+            format!("Word progress: {}", self.word_goal_status_label()),
+            format!("Lock state   : {}", self.lock_status_label()),
+            String::new(),
+            "Daily confidence loop:".to_string(),
+            "1. Write freely until you finish a thought.".to_string(),
+            "2. Save revision (F2) whenever you want history.".to_string(),
+            "3. Use **save** + Enter for clean next same-day page.".to_string(),
+            "4. Use Alt+N for a new blank day when you move forward.".to_string(),
+            "5. Use Calendar/Index for archive browsing (intentional friction).".to_string(),
+            String::new(),
+            format!("Next best action: {next_action}"),
+        ];
+        self.open_info_overlay("Daily Flow Coach", lines.join("\n"));
     }
 
     fn document_word_count(&self) -> usize {
@@ -5285,6 +5675,9 @@ impl App {
             return;
         }
         let index = (Local::now().timestamp_subsec_nanos() as usize) % dates.len();
+        if self.requires_archive_confirmation(dates[index]) {
+            return;
+        }
         self.open_date(dates[index]);
         self.flash_status("RANDOM ENTRY.");
     }
@@ -7318,6 +7711,9 @@ impl App {
 
     fn open_adjacent_day(&mut self, delta_days: i64) {
         let target = self.selected_date + ChronoDuration::days(delta_days);
+        if self.requires_archive_confirmation(target) {
+            return;
+        }
         self.open_date(target);
         self.flash_status(&format!("DATE {}.", target.format("%Y-%m-%d")));
     }
@@ -7350,6 +7746,7 @@ impl App {
             MenuAction::QuickSaveNext => {
                 self.quick_save_and_prepare_next_entry(viewport_height);
             }
+            MenuAction::SaveReceipt => self.open_save_receipt_overlay(),
             MenuAction::Export => self.open_export_prompt(),
             MenuAction::QuickExportText => self.quick_export_current(ExportFormatUi::PlainText),
             MenuAction::QuickExportMarkdown => self.quick_export_current(ExportFormatUi::Markdown),
@@ -7394,6 +7791,12 @@ impl App {
             MenuAction::Replace => {
                 self.overlay = Some(Overlay::ReplacePrompt(ReplacePrompt::new()))
             }
+            MenuAction::SpellcheckEntry => self.open_spellcheck_overlay(),
+            MenuAction::SpellcheckSummary => self.open_spellcheck_summary_overlay(),
+            MenuAction::SpellcheckNext => self.jump_spellcheck_match(1, viewport_height),
+            MenuAction::SpellcheckPrevious => self.jump_spellcheck_match(-1, viewport_height),
+            MenuAction::SpellcheckAutoFixTypos => self.autofix_common_typos(viewport_height),
+            MenuAction::SpellcheckIgnoreCursorWord => self.add_word_at_cursor_to_spell_session(),
             MenuAction::SearchPinnedQueries => self.open_pinned_search_overlay(),
             MenuAction::SearchPresets => self.open_search_presets_overlay(),
             MenuAction::SaveSearchPreset => self.save_current_search_preset(),
@@ -7612,6 +8015,7 @@ impl App {
             MenuAction::ToggleKeychainMemory => self.toggle_keychain_memory(),
             MenuAction::FirstRunTour => self.open_first_run_guide_overlay(),
             MenuAction::QuickStart => self.open_quickstart_overlay(),
+            MenuAction::DailyFlowCoach => self.open_daily_flow_coach_overlay(),
             MenuAction::EditSetting(field) => self.open_setting_prompt(field),
             MenuAction::Help => self.overlay = Some(Overlay::Help),
         }
@@ -7929,6 +8333,9 @@ impl App {
         self.streak_current = 0;
         self.streak_best = 0;
         self.streak_last_30 = 0;
+        self.spell_session_words.clear();
+        self.pending_archive_confirm = None;
+        self.last_save_receipt = None;
         self.clear_dirty_tracking();
     }
 
@@ -8251,6 +8658,44 @@ impl App {
                 self.finish_buffer_menu_edit(viewport_height, "TEXT INSERTED.");
             }
             PickerAction::ShowInfo { title, text } => self.open_info_overlay(title, text),
+            PickerAction::SpellApply {
+                row,
+                start_col,
+                end_col,
+                original,
+                replacement,
+            } => {
+                let at = MatchPos {
+                    row,
+                    start_col,
+                    end_col,
+                };
+                self.buffer.replace_at(&at, &replacement);
+                self.finish_buffer_menu_edit(
+                    viewport_height,
+                    &format!(
+                        "SPELL FIXED: {} -> {}.",
+                        original.to_ascii_uppercase(),
+                        replacement.to_ascii_uppercase()
+                    ),
+                );
+            }
+            PickerAction::SpellJump { row, col, word } => {
+                self.buffer.set_cursor(row, col);
+                self.ensure_cursor_visible(viewport_height);
+                self.flash_status(&format!("CHECK SPELLING: {}.", word.to_ascii_uppercase()));
+            }
+            PickerAction::SpellIgnoreWord(word) => {
+                if let Some(normalized) = spellcheck::session_word(&word) {
+                    self.spell_session_words.insert(normalized.clone());
+                    self.flash_status(&format!(
+                        "SPELL IGNORE: {}.",
+                        normalized.to_ascii_uppercase()
+                    ));
+                } else {
+                    self.flash_status("SPELL IGNORE FAILED.");
+                }
+            }
         }
     }
 
@@ -8606,6 +9051,9 @@ impl App {
         match save_result {
             Ok(()) => {
                 log::info!("manual save completed");
+                let snapshot_stats = self.document_stats;
+                let snapshot_entry_no = self.entry_number_label();
+                let snapshot_date = self.selected_date;
                 self.dirty = false;
                 self.clear_dirty_tracking();
                 self.search_index = None;
@@ -8613,6 +9061,14 @@ impl App {
                 self.refresh_integrity_status();
                 self.refresh_streak_metrics();
                 let saved_at = Local::now();
+                self.last_save_receipt = Some(SaveReceipt {
+                    saved_at,
+                    date: snapshot_date,
+                    entry_number: snapshot_entry_no,
+                    lines: snapshot_stats.lines,
+                    words: snapshot_stats.words,
+                    chars: snapshot_stats.chars,
+                });
                 self.last_save_kind = Some(SaveKind::Saved);
                 self.last_save_time = Some(saved_at);
                 self.load_selected_date();
@@ -10255,14 +10711,14 @@ fn next_entry_month(entry_dates: &BTreeSet<NaiveDate>, selected: NaiveDate) -> O
 #[cfg(test)]
 mod tests {
     use super::{
-        App, ConflictOverlay, DatePicker, ExportFormatUi, ExportPrompt, IndexScope, IndexState,
-        MenuAction, MenuId, Overlay, PickerAction, PickerItem, PickerOverlay, RestorePrompt,
-        SearchField, SearchJump, SearchOverlay, SettingField, SettingPrompt, SetupWizard,
-        SyncPhase, SyncRequest, SyncStatusOverlay, compute_streak_metrics, default_export_path,
-        encode_wav_pcm16_mono, extract_midi_note_events, format_mm_ss, format_reveal_codes,
-        is_quick_save_command_line, macro_key_matches, parse_optional_overlay_date,
-        resolve_recovery_text, soundtrack_cache_extension, soundtrack_cache_path,
-        soundtrack_source_is_midi,
+        ARCHIVE_CONFIRM_OLDER_THAN_DAYS, App, ConflictOverlay, DatePicker, ExportFormatUi,
+        ExportPrompt, IndexScope, IndexState, MenuAction, MenuId, Overlay, PickerAction,
+        PickerItem, PickerOverlay, RestorePrompt, SearchField, SearchJump, SearchOverlay,
+        SettingField, SettingPrompt, SetupWizard, SyncPhase, SyncRequest, SyncStatusOverlay,
+        compute_streak_metrics, default_export_path, encode_wav_pcm16_mono,
+        extract_midi_note_events, format_mm_ss, format_reveal_codes, is_quick_save_command_line,
+        macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
+        soundtrack_cache_extension, soundtrack_cache_path, soundtrack_source_is_midi,
     };
     use crate::{
         config::{RecentExportInfo, SearchPresetConfig},
@@ -11704,6 +12160,107 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_shift_f_opens_spellcheck_picker() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.buffer = TextBuffer::from_text("teh journal");
+        app.refresh_document_stats();
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(
+                KeyCode::Char('f'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            )),
+            20,
+        );
+
+        assert!(matches!(app.overlay(), Some(Overlay::Picker(_))));
+    }
+
+    #[test]
+    fn spellcheck_picker_apply_replaces_misspelling() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.buffer = TextBuffer::from_text("teh journal");
+        app.refresh_document_stats();
+        app.open_spellcheck_overlay();
+
+        let action = match app.overlay() {
+            Some(Overlay::Picker(picker)) => picker
+                .items
+                .iter()
+                .find_map(|item| match &item.action {
+                    PickerAction::SpellApply {
+                        original,
+                        replacement,
+                        ..
+                    } if original.eq_ignore_ascii_case("teh")
+                        && replacement.eq_ignore_ascii_case("the") =>
+                    {
+                        Some(item.action.clone())
+                    }
+                    _ => None,
+                })
+                .expect("spell apply action"),
+            _ => panic!("expected spellcheck picker"),
+        };
+
+        app.apply_picker_action(action, 20);
+        assert!(app.buffer.to_text().starts_with("the journal"));
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn spellcheck_autofix_common_typos_updates_buffer() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.buffer = TextBuffer::from_text("teh adn quick note");
+        app.refresh_document_stats();
+        app.autofix_common_typos(20);
+        assert_eq!(app.buffer.to_text(), "the and quick note");
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn archive_guard_requires_repeat_for_old_backward_jump() {
+        let today = Local::now().date_naive();
+        let mut app = App::with_initial_date(Some(today));
+        app.overlay = None;
+
+        app.open_adjacent_day(-(ARCHIVE_CONFIRM_OLDER_THAN_DAYS + 5));
+        assert_eq!(app.selected_date, today);
+        assert_eq!(
+            app.status_text(),
+            Some("ARCHIVE DATE: REPEAT COMMAND TO OPEN.")
+        );
+
+        app.open_adjacent_day(-(ARCHIVE_CONFIRM_OLDER_THAN_DAYS + 5));
+        assert!(app.selected_date < today);
+    }
+
+    #[test]
+    fn save_receipt_overlay_shows_after_manual_save() {
+        let temp = tempdir().expect("tempdir");
+        let start = NaiveDate::from_ymd_opt(2026, 3, 19).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
+        app.overlay = None;
+        app.buffer = TextBuffer::from_text("receipt test entry");
+        app.refresh_document_stats();
+
+        assert!(app.save_current_date_result());
+        app.open_save_receipt_overlay();
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("Saved at"));
+                assert!(rendered.contains("Entry number"));
+            }
+            _ => panic!("expected save receipt info overlay"),
+        }
+    }
+
+    #[test]
     fn keybinding_ctrl_menu_hotkeys_open_all_top_menus() {
         let mut app = App::with_initial_date(None);
         app.overlay = None;
@@ -12038,6 +12595,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"Quick Save + Next".to_string()));
+        assert!(labels.contains(&"Save Receipt".to_string()));
         assert!(labels.contains(&"Save + Next Day".to_string()));
         assert!(labels.contains(&"Save + Lock".to_string()));
         assert!(labels.contains(&"Export Current".to_string()));
@@ -12135,6 +12693,9 @@ mod tests {
         assert!(labels.contains(&"Extract #Tags to Metadata".to_string()));
         assert!(labels.contains(&"Mood Up".to_string()));
         assert!(labels.contains(&"Mood Down".to_string()));
+        assert!(labels.contains(&"Spellcheck Entry".to_string()));
+        assert!(labels.contains(&"Spellcheck Summary".to_string()));
+        assert!(labels.contains(&"Auto-Fix Common Typos".to_string()));
     }
 
     #[test]
@@ -13295,6 +13856,7 @@ mod tests {
 
         assert!(labels.contains(&"About BlueScreen Journal".to_string()));
         assert!(labels.contains(&"First-Run Tour".to_string()));
+        assert!(labels.contains(&"Daily Flow Coach".to_string()));
     }
 
     #[test]
@@ -13312,6 +13874,24 @@ mod tests {
                 assert!(rendered.contains("Type **save**"));
             }
             other => panic!("expected first-run tour overlay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn daily_flow_coach_opens_info_overlay() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::DailyFlowCoach, 20);
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "Daily Flow Coach");
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("Daily confidence loop"));
+                assert!(rendered.contains("quick same-day next entry"));
+            }
+            other => panic!("expected daily flow coach overlay, got {other:?}"),
         }
     }
 

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.3.0
+
+- added spellcheck core module with in-entry misspelling detection, suggestion generation, and typo correction support
+- added menu-driven spellcheck workflows in `EDIT` (picker, summary, next/previous misspelling jump, auto-fix common typos, and session-ignore at cursor)
+- added `bsj spellcheck` CLI command with `--date`, `--from`, `--to`, `--range`, `--json`, `--limit`, and `--count-only`
+- added `FILE -> Save Receipt` overlay for explicit save confirmation details after manual save
+- added `HELP -> Daily Flow Coach` menu entry for simplified write/save/next guidance
+- added deep backward archive-jump confirmation guard to reduce accidental old-entry navigation
+- added `docs/V1_3_UX_CHECKLIST.md` and marked `docs/V1_3_PLAN.md` milestones complete
+- expanded regression coverage with new tests for spellcheck, save receipt, and archive guard flows
+
 ## v1.2.1
 
 - upgraded CI/release workflow action versions for current GitHub runner compatibility

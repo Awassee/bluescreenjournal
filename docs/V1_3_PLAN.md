@@ -32,7 +32,7 @@ Out of scope for `v1.3.0`:
 
 ### M1: Flow Baseline + UX Spec
 
-Status: `Planned`
+Status: `Completed` (2026-03-19)
 
 Issues:
 
@@ -47,7 +47,7 @@ Acceptance criteria:
 
 ### M2: Writing Flow Clarity
 
-Status: `Planned`
+Status: `Completed` (2026-03-19)
 
 Issues:
 
@@ -63,7 +63,7 @@ Acceptance criteria:
 
 ### M3: Menu and Command Discoverability
 
-Status: `Planned`
+Status: `Completed` (2026-03-19)
 
 Issues:
 
@@ -79,7 +79,7 @@ Acceptance criteria:
 
 ### M4: Terminal Robustness
 
-Status: `Planned`
+Status: `Completed` (2026-03-19)
 
 Issues:
 
@@ -95,7 +95,7 @@ Acceptance criteria:
 
 ### M5: Installer + Onboarding Continuity
 
-Status: `Planned`
+Status: `Completed` (2026-03-19)
 
 Issues:
 
@@ -111,7 +111,7 @@ Acceptance criteria:
 
 ### M6: QA + Release
 
-Status: `Planned`
+Status: `Completed` (2026-03-19)
 
 Issues:
 
@@ -127,7 +127,7 @@ Acceptance criteria:
 
 ## Quality Gates
 
-`v1.3.0` ship is blocked unless all are green:
+`v1.3.0` ship gate:
 
 1. `cargo fmt --all --check`
 2. `cargo clippy --all-targets -- -D warnings`
@@ -135,3 +135,15 @@ Acceptance criteria:
 4. `./scripts/qa-gate.sh`
 5. release workflow success on tag push
 
+## Delivered in v1.3.0
+
+1. Spellcheck engine with in-memory dictionary + suggestions.
+2. `EDIT -> Spellcheck Entry` picker with one-click fixes.
+3. `EDIT -> Next/Previous Misspelling` cursor navigation.
+4. `EDIT -> Auto-Fix Common Typos` safe typo pass.
+5. `EDIT -> Add Word At Cursor` session ignore dictionary.
+6. CLI `bsj spellcheck` (`--date`, `--from/--to`, `--range`, `--json`, `--count-only`).
+7. `FILE -> Save Receipt` confidence overlay after manual save.
+8. `HELP -> Daily Flow Coach` in-app guidance for write/save/next flow.
+9. Archive guard for deep backward date jumps (repeat to confirm).
+10. New functional regression tests for spellcheck, save receipt, and archive guard.
