@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.0
+
+- declared the first stable `1.0.0` release across packaging, docs, and installer flows
+- fixed soundtrack playback for MIDI sources by routing `.mid` files through a macOS QuickTime backend instead of `afplay`
+- added MIDI detection coverage (extension + file header) to prevent silent soundtrack failures
+- refreshed docs hub output to include quick links used by the in-app help tests
+
 ## v0.1.17
 
 - added an in-app updater action from `TOOLS -> Check for Updates` that can launch the installer in the background
