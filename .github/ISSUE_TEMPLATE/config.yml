@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Start Here docs hub
+    url: https://github.com/Awassee/bluescreenjournal/blob/main/docs/START_HERE.md
+    about: Use the docs hub to choose the right setup, troubleshooting, or distribution guide.
   - name: Quickstart
     url: https://github.com/Awassee/bluescreenjournal/blob/main/docs/QUICKSTART.md
     about: Start here if you are getting set up.

@@ -1,4 +1,4 @@
-.Dd March 17, 2026
+.Dd March 19, 2026
 .Dt BSJ 1
 .Os macOS
 .Sh NAME
@@ -18,13 +18,21 @@ Without a subcommand,
 .Nm
 launches the full-screen TUI editor.
 .Sh COMMANDS
-.Bl -tag -width "settings set"
+.Bl -tag -width "sysop sync-preview"
 .It Cm open Ar YYYY-MM-DD
 Launch the TUI directly on a specific date.
 .It Cm export Ar YYYY-MM-DD Op Fl -format Ar text|markdown Op Fl -output Ar path
 Print or write the selected entry in plain text or markdown.
-.It Cm search Ar query Op Fl -from Ar YYYY-MM-DD Op Fl -to Ar YYYY-MM-DD
-Search unlocked journal data without creating a plaintext on-disk index.
+.It Cm search Op Ar query Op Fl -from Ar YYYY-MM-DD Op Fl -to Ar YYYY-MM-DD Op Fl -json Op Fl -limit Ar N Op Fl -count-only Op Fl -case-sensitive Op Fl -whole-word Op Fl -context Ar N
+Search unlocked journal data without creating a plaintext on-disk index, with optional machine-readable output and filtering modes.
+.It Cm review Op Fl -from Ar YYYY-MM-DD Op Fl -to Ar YYYY-MM-DD Op Fl -json Op Fl -min-count Ar N
+Print writing analytics summary for a date range.
+.It Cm timeline Op Fl -from Ar YYYY-MM-DD Op Fl -to Ar YYYY-MM-DD Op Fl -query Ar text Op Fl -tag Ar tag Op Fl -person Ar person Op Fl -project Ar project Op Fl -mood Ar 0..9 Op Fl -has-tags Op Fl -has-people Op Fl -has-project Op Fl -weekday Ar mon,tue,... Op Fl -format Ar text|json|csv Op Fl -summary
+Print a filtered timeline of entries or an aggregate summary.
+.It Cm next Op Fl -from Ar YYYY-MM-DD
+Launch directly on the next date without a saved revision.
+.It Cm prompts Op Ar list|pick
+List or pick deterministic journaling prompts, optionally as JSON.
 .It Cm sync Op Fl -backend Ar folder|s3|webdav Op Fl -remote Ar target
 Sync encrypted revisions to a folder, S3, or WebDAV target.
 .It Cm backup
@@ -51,6 +59,8 @@ Update one editable setting value.
 Print docs-hub, quickstart, troubleshooting, sync, backup, macros, terminal, privacy, setup, product, datasheet, FAQ, support, settings, or distribution guidance.
 .It Cm doctor Op Fl -unlock Op Fl -json
 Run install, config, sync, and vault diagnostics.
+.It Cm sysop Ar subcommand
+Run operator-grade diagnostics and audits (dashboard, runbook, env, paths, permissions, vault-layout, orphans, revisions, drafts, conflicts, cache, backups, integrity, activity, sync-preview).
 .It Cm completions Ar bash|zsh|fish
 Print shell completion scripts to stdout.
 .El

@@ -93,6 +93,16 @@ Folder sync example:
 bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
 ```
 
+## 8. Optional: run review and timeline summaries
+
+These commands are useful for weekly check-ins and automation:
+
+```bash
+bsj review --from 2026-03-01 --to 2026-03-31 --json
+bsj timeline --from 2026-03-01 --to 2026-03-31 --summary --format json
+bsj prompts pick --category reflection --json
+```
+
 ## If something feels off
 
 Run:

@@ -37,6 +37,7 @@ Try this order:
 2. arrow keys to navigate menus
 3. `Enter` to trigger actions
 4. check the terminal profile for function-key remapping
+5. on Mac laptops, press and hold `fn` while using `F1`..`F12` if media mode is enabled
 
 ## Recommended smoke test
 

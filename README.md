@@ -21,6 +21,14 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - menu-driven discoverability so new users are not blocked by key memorization
 - local-first design with optional folder/S3/WebDAV encrypted sync
 
+## New in v1.0.3
+
+- expanded CLI analytics: `review --from/--to --json --min-count`
+- expanded timeline filters: `--mood`, `--has-tags`, `--has-people`, `--has-project`, `--weekday`
+- timeline output formats: `--format text|json|csv` and aggregate `--summary`
+- prompt automation output: `prompts list --json`, `prompts pick --json`
+- refreshed docs, release notes, and GitHub issue templates for release consistency
+
 ## Screenshots
 
 | Writing View | Search View |
@@ -220,6 +228,9 @@ The app is direct by design:
 - `bsj search --list-presets` lists saved presets
 - `bsj search "query" --save-preset "Name"` saves and runs a preset in one command
 - `bsj search --delete-preset "Name"` removes a saved preset
+- `bsj review --from YYYY-MM-DD --to YYYY-MM-DD --json` exports range-bounded review metrics
+- `bsj timeline --summary --format json` outputs aggregate timeline analytics
+- `bsj prompts pick --category reflection --json` returns deterministic prompt payloads
 
 ### Protect and move data
 
@@ -335,7 +346,12 @@ bsj search "quiet morning" --from 2026-03-01 --to 2026-03-31
 bsj search "focus" --whole-word --case-sensitive --limit 20
 bsj search "mood:7" --json --context 40
 bsj search "ship" --count-only
+bsj review --from 2026-03-01 --to 2026-03-31 --json --min-count 2
 bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata
+bsj timeline --mood 7 --has-tags --weekday mon,fri --format csv
+bsj timeline --from 2026-03-01 --to 2026-03-31 --summary --format json
+bsj prompts list --category focus --json
+bsj prompts pick --category reflection --json
 bsj export 2026-03-16
 bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md
 bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal

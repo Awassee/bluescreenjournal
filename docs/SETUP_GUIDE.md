@@ -49,6 +49,7 @@ Start the app:
 
 ```bash
 bsj
+bsj --version
 ```
 
 If no vault exists, the TUI setup wizard asks for:

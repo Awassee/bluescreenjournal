@@ -13,6 +13,12 @@ Use this page as the docs control panel for BlueScreen Journal.
 | Operate sync/backup safely | [SYNC_GUIDE.md](SYNC_GUIDE.md) | [BACKUP_RESTORE.md](BACKUP_RESTORE.md), [PRIVACY.md](PRIVACY.md) |
 | Package or distribute releases | [DISTRIBUTION.md](DISTRIBUTION.md) | [docs/releases/](releases/), [CHANGELOG.md](../CHANGELOG.md) |
 
+## Latest release
+
+- current stable: [`v1.0.3`](https://github.com/Awassee/bluescreenjournal/releases/tag/v1.0.3)
+- current release notes: [docs/releases/v1.0.3.md](releases/v1.0.3.md)
+- full history: [docs/releases/](releases/)
+
 ## Visual tour
 
 See live product images in the root README screenshot gallery:
@@ -46,3 +52,14 @@ These are optional CLI mirrors of the docs:
 - `bsj guide support`
 - `bsj guide settings`
 - `bsj guide distribution`
+
+## GitHub surfaces
+
+These are the primary public repo entry points to keep current:
+
+- [README](../README.md)
+- [Start Here](START_HERE.md)
+- [Support](../SUPPORT.md)
+- [Security](../SECURITY.md)
+- [Issue templates](../.github/ISSUE_TEMPLATE/)
+- [Release notes](releases/)

@@ -2,6 +2,9 @@
 
 BlueScreen Journal includes a dedicated operator toolkit:
 
+- CLI surface: `bsj sysop ...`
+- TUI surface: `TOOLS -> SYSOP Center`
+
 1. `bsj sysop dashboard`  
 Unified state snapshot for vault health, integrity, conflicts, backups, cache, and hygiene counters.
 
@@ -46,5 +49,7 @@ Recent revision-activity series for ops visibility.
 
 15. `bsj sysop sync-preview`  
 Non-destructive local/remote sync delta preview (folder, S3, WebDAV).
+
+Most sysop commands support `--json` for automation and ops tooling.
 
 All sysop commands are read-only except normal config side effects in backend path resolution (same behavior as `bsj sync` for folder target convenience).

@@ -74,6 +74,28 @@ Check:
 - are you searching within the right date range
 - are you searching for text in the body versus only in your unsaved current buffer
 
+### `review` or `timeline` says `--from` cannot be after `--to`
+
+The analytics commands validate date range order.
+
+Fix by swapping the dates:
+
+```bash
+bsj review --from 2026-03-01 --to 2026-03-31 --json
+bsj timeline --from 2026-03-01 --to 2026-03-31 --summary --format json
+```
+
+### JSON/CSV output looks wrong in scripts
+
+Use explicit format flags and redirect intentionally:
+
+```bash
+bsj review --json > review.json
+bsj timeline --format csv > timeline.csv
+```
+
+If your shell alias wraps `bsj`, run `command bsj ...` to bypass alias side effects.
+
 ### Sync shows conflicts
 
 Conflicts are preserved on purpose.

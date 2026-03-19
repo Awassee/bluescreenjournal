@@ -246,11 +246,7 @@ CI workflow:
 .github/workflows/ci.yml
 ```
 
-- runs `cargo fmt --all --check`
-- runs `cargo clippy --all-targets -- -D warnings`
-- runs `cargo test --all-targets`
-- builds a host-architecture release bundle
-- runs smoke install and release audit checks
+- runs `./scripts/qa-gate.sh` (format, clippy, tests, package, smoke install)
 
 Release workflow:
 
@@ -279,8 +275,10 @@ git push origin main --tags
 5. Run `./scripts/smoke-release-install.sh`
 6. Run `./scripts/audit-release.sh`
 7. Run `bsj guide distribution` from the built binary
-8. Push a `v*` tag to trigger `.github/workflows/release.yml`
-9. Update the Homebrew formula URL if you publish a formula
+8. Update release notes in `docs/releases/vX.Y.Z.md`
+9. Update public docs surfaces (`README.md`, `docs/START_HERE.md`, issue templates) if needed
+10. Push a `v*` tag to trigger `.github/workflows/release.yml`
+11. Update the Homebrew formula URL if you publish a formula
 
 ## Notes
 

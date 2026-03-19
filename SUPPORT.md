@@ -25,6 +25,8 @@ Please include:
 - actual behavior
 - output from `bsj settings`
 - output from `bsj doctor` and `bsj doctor --unlock` when safe
+- output from `bsj --version`
+- if analytics-related: exact `bsj review`/`bsj timeline` command used
 
 Do not paste secrets or journal content.
 

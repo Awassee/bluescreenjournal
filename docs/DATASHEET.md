@@ -27,6 +27,7 @@ bsj delivers a focused, keyboard-only daily journal that feels like an old word 
 | Date index and calendar | Browse existing entries by list or month grid | Supports journal-style navigation |
 | In-entry find/replace | Incremental find and retro replace flow | Speeds editing without leaving the keyboard |
 | Global search | Searches saved entries without plaintext disk index | Fast retrieval without plaintext index files |
+| Review and timeline analytics | Range-bounded review summaries plus filtered timeline output in text/JSON/CSV | Supports retrospectives and automation without leaving the product surface |
 | Reveal Codes | Shows derived metadata inline | Preserves retro workflow and structural visibility |
 | Closing Thought | Dedicated final line field | Encourages deliberate entry endings |
 | Integrity verify | Checks per-date revision hashchains | Detects tampering and missing history |
@@ -105,6 +106,9 @@ Default prebuilt install target:
 - `bsj`
 - `bsj open YYYY-MM-DD`
 - `bsj search "query" --from YYYY-MM-DD --to YYYY-MM-DD`
+- `bsj review --from YYYY-MM-DD --to YYYY-MM-DD --json`
+- `bsj timeline --from YYYY-MM-DD --to YYYY-MM-DD --summary --format json`
+- `bsj prompts list --category focus --json`
 - `bsj export YYYY-MM-DD`
 - `bsj sync`
 - `bsj backup`
@@ -112,6 +116,7 @@ Default prebuilt install target:
 - `bsj verify`
 - `bsj settings`
 - `bsj doctor`
+- `bsj sysop dashboard`
 
 ## Non-goals
 

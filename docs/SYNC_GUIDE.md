@@ -101,6 +101,7 @@ Run:
 bsj sync
 bsj verify
 bsj doctor --unlock
+bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync
 ```
 
 Then inspect the affected date through the TUI.

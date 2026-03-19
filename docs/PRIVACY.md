@@ -37,9 +37,9 @@ Examples:
 If you choose these actions, plaintext can exist because you explicitly asked for it:
 
 - `bsj export`
+- redirecting `bsj search`, `bsj review`, or `bsj timeline` output into plaintext files
 - copying text out of the terminal
 - screenshots or screen recordings
-- redirecting command output to a plaintext file
 
 ## Sync privacy model
 

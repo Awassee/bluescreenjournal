@@ -37,29 +37,25 @@ bsj settings
 
 ## Template example
 
-Conceptually:
+Example:
 
 ```json
 {
   "key": "ctrl-j",
-  "action": {
-    "type": "InsertTemplate",
-    "text": "Morning notes:\n- \n"
-  }
+  "type": "insert_template",
+  "text": "Morning notes:\n- \n"
 }
 ```
 
 ## Command example
 
-Conceptually:
+Example:
 
 ```json
 {
   "key": "ctrl-t",
-  "action": {
-    "type": "Command",
-    "command": "jump_today"
-  }
+  "type": "command",
+  "command": "jump_today"
 }
 ```
 

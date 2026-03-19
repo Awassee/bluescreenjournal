@@ -8,9 +8,18 @@
   "show_seconds": false,
   "show_ruler": true,
   "show_footer_legend": true,
+  "soundtrack_source": "https://www.midi-karaoke.info/21b56501.mid",
   "opening_line_template": "JOURNAL ENTRY {DATE}",
   "daily_word_goal": 500,
   "remember_passphrase_in_keychain": false,
+  "search_presets": [
+    {
+      "name": "Weekly Review",
+      "query": "focus",
+      "from": "2026-03-01",
+      "to": "2026-03-07"
+    }
+  ],
   "backup_retention": {
     "daily": 7,
     "weekly": 4,

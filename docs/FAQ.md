@@ -31,6 +31,15 @@ No. Folder sync is the simplest path. S3 and WebDAV are optional backends.
 
 Yes, intentionally. `bsj export` writes plaintext or markdown when you ask for it. That is different from silent plaintext persistence in the vault.
 
+## Can I automate weekly reviews and reports?
+
+Yes. Use JSON/CSV-capable commands:
+
+- `bsj review --from YYYY-MM-DD --to YYYY-MM-DD --json`
+- `bsj timeline --summary --format json`
+- `bsj timeline --format csv`
+- `bsj prompts pick --json`
+
 ## Is bsj trying to replace a PKM system?
 
 No. It is intentionally narrower than a general note app or personal knowledge manager.

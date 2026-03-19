@@ -57,6 +57,10 @@ Editable keys:
   - type: string
   - default: `This Mac`
   - purpose: nickname stored in `devices/<deviceId>.json`
+- `typewriter_mode`
+  - type: boolean
+  - default: `false`
+  - purpose: keeps cursor vertically centered while writing
 - `clock_12h`
   - type: boolean
   - default: `false`
@@ -86,6 +90,10 @@ Editable keys:
   - type: integer or `null`
   - default: `null`
   - purpose: progress target shown in the footer/dashboard
+- `remember_passphrase_in_keychain`
+  - type: boolean
+  - default: `false`
+  - purpose: allows macOS Keychain-backed passphrase recall for faster unlock
 - `backup_retention.daily`
   - type: integer
   - default: `7`
@@ -108,6 +116,10 @@ Also present in `config.json`:
 - `export_history`
   - type: array
   - purpose: recent plaintext export destinations and formats for in-product recall
+- `search_presets`
+  - type: array
+  - purpose: named saved global-search queries and date ranges
+  - recommended management: `bsj search --save-preset`, `--preset`, `--list-presets`, `--delete-preset`
 - `macros`
   - type: array
   - purpose: key bindings for template insertion or internal commands

@@ -98,6 +98,14 @@ Default vault path:
 - `F6` or `EDIT -> Replace in Entry` runs retro-style replace confirmation
 - `F5` or `SEARCH -> Search Vault` searches across saved entries after unlock
 
+### Review and timeline analytics
+
+- `bsj review --from YYYY-MM-DD --to YYYY-MM-DD` scopes metrics to a period
+- `bsj review --json` emits automation-friendly output
+- `bsj timeline --format json|csv` supports script and spreadsheet workflows
+- `bsj timeline --summary` returns aggregate counts, date range, and mood distribution
+- timeline metadata filters (`--mood`, `--has-tags`, `--has-people`, `--has-project`, `--weekday`) make retrospective workflows precise
+
 ### Sync and verify
 
 - `F8` or `TOOLS -> Sync Vault` syncs encrypted revision blobs
@@ -144,6 +152,12 @@ Value:
 Value:
 - quick search after unlock
 - avoids leaving a plaintext search database behind on disk
+
+### Review/timeline JSON surfaces
+
+Value:
+- creates low-friction reporting workflows for weekly reviews and ops dashboards
+- keeps analytics in the same toolchain without creating external plaintext indexes
 
 ### Folder, S3, and WebDAV sync
 

@@ -1,69 +1,67 @@
-# BlueScreen Journal: Next 10 Major Features (Implemented)
+# BlueScreen Journal: v1.0.3 Feature Pass
 
-This pass focused on high-leverage search and timeline capabilities that improve retrieval speed, precision, and operator workflows without relaxing the app's local-first security model.
+This pass focused on analytics, automation output, and public docs/GitHub surface consistency.
 
-## 1) JSON Search Output
-- **Problem:** CLI search was human-only output, hard to automate.
-- **Spec:** `bsj search ... --json` prints structured match objects.
-- **Shipped:** Yes.
-- **Test coverage:** `tests::cli_parses_advanced_search_flags`
+## 1) Range-bounded review metrics
+- **Spec:** `bsj review --from YYYY-MM-DD --to YYYY-MM-DD`
+- **Value:** weekly/monthly check-ins without manual date filtering
+- **Coverage:** `tests::cli_parses_review_range_and_json_flags`
 
-## 2) Search Result Limits
-- **Problem:** Large vault queries can produce too much output.
-- **Spec:** `bsj search ... --limit N` truncates to first `N` matches.
-- **Shipped:** Yes.
-- **Test coverage:** parser coverage in `tests::cli_parses_advanced_search_flags`
+## 2) JSON review output
+- **Spec:** `bsj review --json`
+- **Value:** script and dashboard friendly reporting
+- **Coverage:** parser + summary unit tests
 
-## 3) Count-Only Search Mode
-- **Problem:** Sometimes only match count matters for audits/reports.
-- **Spec:** `bsj search ... --count-only` prints count (or JSON count with `--json`).
-- **Shipped:** Yes.
-- **Test coverage:** parser coverage in `tests::cli_parses_advanced_search_flags`
+## 3) Review top-result thresholding
+- **Spec:** `bsj review --min-count N`
+- **Value:** removes noisy low-frequency metadata from top lists
+- **Coverage:** `tests::review_summary_applies_range_and_min_count`
 
-## 4) Case-Sensitive Search
-- **Problem:** Proper nouns and acronyms need exact case matching.
-- **Spec:** `bsj search ... --case-sensitive`.
-- **Shipped:** Yes.
-- **Test coverage:** `search::tests::case_sensitive_search_only_matches_exact_case`
+## 4) Timeline format selection
+- **Spec:** `bsj timeline --format text|json|csv`
+- **Value:** one command surface for human, automation, and spreadsheet use
+- **Coverage:** `tests::cli_parses_timeline_format_and_extended_filters`
 
-## 5) Whole-Word Search
-- **Problem:** Partial substring matches cause noise.
-- **Spec:** `bsj search ... --whole-word` enforces boundary matching.
-- **Shipped:** Yes.
-- **Test coverage:** `search::tests::whole_word_search_ignores_partial_matches`
+## 5) Timeline aggregate mode
+- **Spec:** `bsj timeline --summary`
+- **Value:** fast at-a-glance journal health metrics
+- **Coverage:** `tests::timeline_summary_counts_conflicts_favorites_and_moods`
 
-## 6) Configurable Snippet Context
-- **Problem:** Context needs vary by workflow.
-- **Spec:** `bsj search ... --context N` controls snippet context width.
-- **Shipped:** Yes.
-- **Test coverage:** `search::tests::snippet_context_size_follows_options`
+## 6) Timeline mood filter
+- **Spec:** `bsj timeline --mood 0..9`
+- **Value:** mood-specific retrospectives and trend analysis
+- **Coverage:** `tests::timeline_filters_mood_presence_and_weekday`
 
-## 7) Timeline Text Query Filter
-- **Problem:** Timeline scanning needed quick semantic narrowing.
-- **Spec:** `bsj timeline --query <text>` filters by preview + metadata.
-- **Shipped:** Yes.
-- **Test coverage:** `tests::timeline_query_filter_matches_preview_and_metadata`
+## 7) Timeline metadata-presence filters
+- **Spec:** `--has-tags --has-people --has-project`
+- **Value:** quickly isolate richly-annotated entries
+- **Coverage:** `tests::timeline_filters_mood_presence_and_weekday`
 
-## 8) Timeline Tag Filter
-- **Problem:** Tag-driven reviews were manual.
-- **Spec:** `bsj timeline --tag <tag>` (case-insensitive exact tag match).
-- **Shipped:** Yes.
-- **Test coverage:** `tests::timeline_tag_person_and_project_filters_are_case_insensitive`
+## 8) Timeline weekday filter
+- **Spec:** `bsj timeline --weekday mon,tue,...`
+- **Value:** weekday behavior analysis across routines
+- **Coverage:** `tests::timeline_filters_mood_presence_and_weekday`
 
-## 9) Timeline Person Filter
-- **Problem:** Relationship-focused retrospectives were slower than needed.
-- **Spec:** `bsj timeline --person <name>` (case-insensitive exact person match).
-- **Shipped:** Yes.
-- **Test coverage:** `tests::timeline_tag_person_and_project_filters_are_case_insensitive`
+## 9) Prompt library JSON output
+- **Spec:** `bsj prompts list --json`
+- **Value:** tooling-friendly prompt catalogs
+- **Coverage:** `tests::cli_parses_prompts_json_flags`
 
-## 10) Timeline Project Filter
-- **Problem:** Project-specific review workflow required manual sorting.
-- **Spec:** `bsj timeline --project <project>` (case-insensitive exact project match).
-- **Shipped:** Yes.
-- **Test coverage:** `tests::timeline_tag_person_and_project_filters_are_case_insensitive`
+## 10) Prompt pick JSON output
+- **Spec:** `bsj prompts pick --json`
+- **Value:** deterministic prompt generation for automations
+- **Coverage:** `tests::cli_parses_prompts_json_flags`
+
+## Documentation and GitHub surfaces updated
+
+- README command/reference updates
+- setup/quickstart/troubleshooting/settings/docs hub updates
+- issue-template and PR-template updates
+- release notes added for `v1.0.3`
 
 ## Validation
-- `cargo fmt`
+
+- `cargo fmt --all`
 - `cargo clippy --all-targets -- -D warnings`
-- `cargo test -q`
+- `cargo test --all-targets`
 - `./scripts/qa-gate.sh`
