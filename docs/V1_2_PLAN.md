@@ -103,7 +103,7 @@ Acceptance criteria:
 
 ### M5: Release Packaging + Publish
 
-Status: `In Progress`
+Status: `Complete`
 
 Issues:
 
@@ -136,4 +136,4 @@ Acceptance criteria:
 - `[x]` M2 complete
 - `[x]` M3 complete
 - `[x]` M4 complete
-- `[ ]` M5 complete
+- `[x]` M5 complete
