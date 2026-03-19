@@ -1888,6 +1888,21 @@ impl App {
         }
     }
 
+    pub fn enable_soundtrack_autoplay(&mut self) {
+        if self.config.soundtrack_source.trim().is_empty() || self.soundtrack_loop_enabled {
+            return;
+        }
+        match self.start_soundtrack_playback() {
+            Ok(()) => {
+                self.soundtrack_loop_enabled = true;
+            }
+            Err(error) => {
+                self.soundtrack_loop_enabled = false;
+                log::warn!("soundtrack autoplay failed: {error}");
+            }
+        }
+    }
+
     pub fn integrity_status_label(&self) -> String {
         self.integrity_status
             .as_ref()

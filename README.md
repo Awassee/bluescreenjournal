@@ -186,6 +186,7 @@ The app is direct by design:
 
 - `F8` or `TOOLS -> Sync Vault` syncs encrypted blobs
 - `TOOLS -> Soundtrack Source` sets the MIDI URL/path used for playback
+- soundtrack auto-starts on launch when a source is configured
 - `TOOLS -> Toggle Soundtrack` or `Alt+M` plays/stops the configured MIDI theme source
 - `TOOLS -> Verify Integrity` checks the revision chain
 - `bsj backup` creates an encrypted snapshot under `<vault>/backups/`

@@ -62,6 +62,7 @@ fn run_loop(
     initial_date: Option<NaiveDate>,
 ) -> io::Result<()> {
     let mut app = App::with_initial_date(initial_date);
+    app.enable_soundtrack_autoplay();
     let poll_timeout = Duration::from_millis(80);
 
     while !app.should_quit() {
