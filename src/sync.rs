@@ -2,6 +2,7 @@ use crate::{
     secure_fs,
     vault::{VaultError, VaultMetadata, VaultResult},
 };
+use secrecy::{ExposeSecret, SecretString};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{Client as S3Client, primitives::ByteStream};
 use chrono::NaiveDate;
@@ -273,7 +274,7 @@ pub struct WebDavBackend {
     base_url: Url,
     client: HttpClient,
     username: Option<String>,
-    password: Option<String>,
+    password: Option<SecretString>,
     known_collections: HashSet<String>,
     throttle: RequestThrottle,
 }
@@ -293,7 +294,9 @@ impl WebDavBackend {
         }
 
         let username = env::var("BSJ_WEBDAV_USERNAME").ok();
-        let password = env::var("BSJ_WEBDAV_PASSWORD").ok();
+        let password = env::var("BSJ_WEBDAV_PASSWORD")
+            .ok()
+            .map(|s| SecretString::new(s.into_boxed_str()));
         if username.is_some() && password.is_none() {
             return Err("missing BSJ_WEBDAV_PASSWORD".to_string());
         }
@@ -315,7 +318,9 @@ impl WebDavBackend {
     fn request(&self, method: Method, url: Url) -> RequestBuilder {
         let builder = self.client.request(method, url);
         match &self.username {
-            Some(username) => builder.basic_auth(username, self.password.as_ref()),
+            Some(username) => {
+                builder.basic_auth(username, self.password.as_ref().map(|s| s.expose_secret()))
+            }
             None => builder,
         }
     }

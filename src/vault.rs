@@ -511,12 +511,25 @@ impl UnlockedVault {
         let mut created_at = Utc::now();
         let backup_dir = self.root.join("backups");
         secure_fs::ensure_private_dir(&backup_dir)?;
-        let path = loop {
-            let candidate = backup_dir.join(backup_file_name(created_at));
-            if !candidate.exists() {
-                break candidate;
+        let path = {
+            let mut attempts = 0u32;
+            loop {
+                let candidate = backup_dir.join(backup_file_name(created_at));
+                if !candidate.exists() {
+                    break candidate;
+                }
+                attempts += 1;
+                if attempts > 1_000 {
+                    return Err(VaultError::InvalidFormat(
+                        "could not find unique backup filename".to_string(),
+                    ));
+                }
+                created_at = created_at
+                    .checked_add_signed(TimeDelta::nanoseconds(1))
+                    .ok_or_else(|| {
+                        VaultError::InvalidFormat("backup timestamp overflow".to_string())
+                    })?;
             }
-            created_at += TimeDelta::nanoseconds(1);
         };
         let archive_bytes = build_backup_archive(&self.root)?;
         let compressed = zstd::stream::encode_all(Cursor::new(archive_bytes), 3)?;

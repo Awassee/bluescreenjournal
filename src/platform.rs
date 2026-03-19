@@ -58,19 +58,28 @@ pub fn keychain_account(vault_path: &Path) -> String {
 }
 
 pub fn store_passphrase(vault_path: &Path, passphrase: &SecretString) -> Result<(), String> {
-    let status = Command::new("security")
+    // Passphrase is written to stdin rather than passed as a -w argument to avoid
+    // exposing it in the process argument list (visible via `ps aux`).
+    let mut child = Command::new("security")
         .arg("add-generic-password")
         .arg("-U")
         .arg("-a")
         .arg(keychain_account(vault_path))
         .arg("-s")
         .arg(KEYCHAIN_SERVICE)
-        .arg("-w")
-        .arg(passphrase.expose_secret())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .status()
+        .spawn()
         .map_err(|error| format!("failed to run security add-generic-password: {error}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(passphrase.expose_secret().as_bytes())
+            .map_err(|error| format!("failed to write passphrase to keychain command: {error}"))?;
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("failed to wait for security command: {error}"))?;
     if status.success() {
         Ok(())
     } else {
@@ -93,11 +102,13 @@ pub fn load_passphrase(vault_path: &Path) -> Result<Option<SecretString>, String
         return Ok(None);
     }
 
-    let passphrase = String::from_utf8(output.stdout)
-        .map_err(|error| format!("keychain returned invalid UTF-8: {error}"))?;
-    Ok(Some(SecretString::new(
-        passphrase.trim_end().to_string().into_boxed_str(),
-    )))
+    // Wrap raw bytes in Zeroizing so they are wiped from memory when dropped.
+    let raw = zeroize::Zeroizing::new(output.stdout);
+    let secret = std::str::from_utf8(&raw)
+        .map_err(|_| "keychain returned invalid UTF-8".to_string())?
+        .trim_end()
+        .to_string();
+    Ok(Some(SecretString::new(secret.into_boxed_str())))
 }
 
 pub fn delete_passphrase(vault_path: &Path) -> Result<(), String> {

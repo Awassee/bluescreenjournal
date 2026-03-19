@@ -48,6 +48,12 @@ pub struct SearchIndex {
     postings: HashMap<String, Vec<usize>>,
 }
 
+impl Drop for SearchIndex {
+    fn drop(&mut self) {
+        self.wipe();
+    }
+}
+
 impl SearchIndex {
     pub fn build(mut documents: Vec<SearchDocument>) -> Self {
         documents.sort_unstable_by(|left, right| right.date.cmp(&left.date));
