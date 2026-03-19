@@ -2796,7 +2796,11 @@ impl App {
                 mutated = true;
             }
             KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
-                self.buffer.insert_char(ch);
+                if ch == '\t' {
+                    self.buffer.insert_text(TAB_INSERT_TEXT);
+                } else {
+                    self.buffer.insert_char(ch);
+                }
                 mutated = true;
             }
             _ => {}
@@ -7314,6 +7318,85 @@ mod tests {
 
         assert_eq!(app.buffer.to_text(), "    \n ");
         assert_eq!(app.buffer.cursor(), (1, 1));
+    }
+
+    #[test]
+    fn tab_character_event_inserts_five_spaces() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Char('\t'), KeyModifiers::empty())),
+            20,
+            80,
+        );
+
+        assert_eq!(app.buffer.to_text(), "     ");
+        assert_eq!(app.buffer.cursor(), (0, 5));
+    }
+
+    #[test]
+    fn tab_input_never_stores_literal_tab_byte() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())),
+            20,
+            80,
+        );
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Char('\t'), KeyModifiers::empty())),
+            20,
+            80,
+        );
+
+        assert_eq!(app.buffer.to_text(), "          ");
+        assert!(!app.buffer.to_text().contains('\t'));
+        assert_eq!(app.buffer.cursor(), (0, 10));
+    }
+
+    #[test]
+    fn backspace_after_tab_removes_single_space() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())),
+            20,
+            80,
+        );
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty())),
+            20,
+            80,
+        );
+
+        assert_eq!(app.buffer.to_text(), "    ");
+        assert_eq!(app.buffer.cursor(), (0, 4));
+    }
+
+    #[test]
+    fn wrap_uses_latest_viewport_width_after_resize() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        for ch in "abcdefghij".chars() {
+            app.handle_event_with_viewport(
+                Event::Key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty())),
+                20,
+                10,
+            );
+        }
+        app.handle_event_with_viewport(Event::Resize(6, 25), 20, 6);
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty())),
+            20,
+            6,
+        );
+
+        assert_eq!(app.buffer.to_text(), "abcdef\nghijk");
+        assert_eq!(app.buffer.cursor(), (1, 5));
     }
 
     #[test]
