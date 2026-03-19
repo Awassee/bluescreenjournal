@@ -7246,9 +7246,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
-    fn render_app(app: &App, width: u16, height: u16) -> String {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).expect("terminal");
+    fn render_into_terminal(terminal: &mut Terminal<TestBackend>, app: &App) -> String {
         terminal
             .draw(|frame| super::super::draw(frame, app))
             .expect("draw");
@@ -7264,6 +7262,12 @@ mod tests {
             lines.push(line.trim_end().to_string());
         }
         lines.join("\n")
+    }
+
+    fn render_app(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        render_into_terminal(&mut terminal, app)
     }
 
     fn assert_editor_invariants(app: &App) {
@@ -8807,7 +8811,7 @@ mod tests {
         let rendered = render_app(&app, 60, 20);
 
         assert!(!rendered.contains("TERMINAL TOO SMALL"));
-        assert!(rendered.contains("BSJ v"));
+        assert!(rendered.contains("VERSION v"));
         assert!(rendered.contains("PERSONAL JOURNAL [COMPACT]"));
         assert!(rendered.contains("FILE"));
     }
@@ -8967,5 +8971,102 @@ mod tests {
 
         assert!(rendered.contains("SYNC COMPLETE"));
         assert!(rendered.contains("Enter/Esc close"));
+    }
+
+    #[test]
+    fn menu_action_roundtrip_returns_to_clean_editor_frame() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        let viewport_height = 20;
+        let viewport_width = 80;
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("terminal");
+        let ghost_marker = "GHOST_MENU_TOKEN_42";
+
+        type_editor_text(
+            &mut app,
+            &format!("Entry seed text {ghost_marker}"),
+            viewport_height,
+            viewport_width,
+        );
+        let _ = render_into_terminal(&mut terminal, &app);
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+            viewport_height,
+            viewport_width,
+        );
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty())),
+            viewport_height,
+            viewport_width,
+        );
+        let menu_frame = render_into_terminal(&mut terminal, &app);
+        assert!(menu_frame.contains("Typewriter Mode"));
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())),
+            viewport_height,
+            viewport_width,
+        );
+        let _ = render_into_terminal(&mut terminal, &app);
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+            viewport_height,
+            viewport_width,
+        );
+        assert!(app.menu().is_none());
+        assert!(app.overlay().is_none());
+
+        for _ in 0..ghost_marker.chars().count() {
+            send_editor_key(
+                &mut app,
+                KeyCode::Backspace,
+                KeyModifiers::empty(),
+                viewport_height,
+                viewport_width,
+            );
+        }
+        type_editor_text(&mut app, "clean frame", viewport_height, viewport_width);
+
+        let final_frame = render_into_terminal(&mut terminal, &app);
+        assert!(!app.buffer.to_text().contains(ghost_marker));
+        assert!(!final_frame.contains(ghost_marker));
+        assert!(!final_frame.contains("Typewriter Mode"));
+    }
+
+    #[test]
+    fn shortened_line_repaint_does_not_leave_tail_ghost_text() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        let viewport_height = 20;
+        let viewport_width = 64;
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("terminal");
+        let ghost_marker = "WRAP_GHOST_TRAIL_9999";
+
+        type_editor_text(
+            &mut app,
+            &format!("Typing through wrap checks {ghost_marker}"),
+            viewport_height,
+            viewport_width,
+        );
+        let first_frame = render_into_terminal(&mut terminal, &app);
+        assert!(first_frame.contains(ghost_marker));
+
+        for _ in 0..ghost_marker.chars().count() {
+            send_editor_key(
+                &mut app,
+                KeyCode::Backspace,
+                KeyModifiers::empty(),
+                viewport_height,
+                viewport_width,
+            );
+        }
+        type_editor_text(&mut app, "done", viewport_height, viewport_width);
+
+        let final_frame = render_into_terminal(&mut terminal, &app);
+        assert!(!app.buffer.to_text().contains(ghost_marker));
+        assert!(!final_frame.contains(ghost_marker));
     }
 }

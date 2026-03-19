@@ -88,6 +88,10 @@ fn draw(frame: &mut Frame<'_>, app: &App) {
         return;
     }
 
+    // Ratatui widgets style cells but may not rewrite symbols in untouched regions.
+    // Clear first so closing menus/overlays never leaves stale glyph artifacts behind.
+    frame.render_widget(Clear, area);
+
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         draw_small_terminal_warning(frame, area);
         return;
@@ -128,15 +132,15 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let left = format!(
-        "BSJ {}  [{}]  PERSONAL JOURNAL{}{}  TIME {}  ENTRY NO. {}",
-        app.app_version_label(),
-        app.header_entry_focus_label(),
+        "PERSONAL JOURNAL{}{}  VERSION {}  [{}]  TIME {}  ENTRY NO. {}",
         if compact_mode { " [COMPACT]" } else { "" },
         if app.favorite_marker().is_empty() {
             ""
         } else {
             " *"
         },
+        app.app_version_label(),
+        app.header_entry_focus_label(),
         app.header_time_label(),
         app.entry_number_label()
     );
