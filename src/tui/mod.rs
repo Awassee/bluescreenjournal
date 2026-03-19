@@ -729,7 +729,7 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("Calendar: type YYYY-MM-DD, [ ] saved-day jump, < > entry months, T today"),
         Line::from("Index: type filter, S sort, Shift+F favorites, Shift+C conflicts"),
         Line::from("Search: Tab fields, Enter search/open, T/W/M/Y/A presets, Ctrl+R recall query"),
-        Line::from("Header shows lock, verify, goal, session, and save state."),
+        Line::from("(c) 2026 Awassee LLC and Sean Heiney  sean@sean.net"),
         Line::from("Footer shows mode, context, stats, and status. Enter/Esc/F1 closes."),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);

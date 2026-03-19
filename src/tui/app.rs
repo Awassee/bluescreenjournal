@@ -8889,6 +8889,8 @@ mod tests {
 
         assert!(rendered.contains("BlueScreen Journal"));
         assert!(rendered.contains(env!("CARGO_PKG_VERSION")));
+        assert!(rendered.contains("Awassee LLC and Sean Heiney"));
+        assert!(rendered.contains("sean@sean.net"));
         assert!(rendered.contains("Enter/Esc/F1 closes."));
         assert!(rendered.contains("Ctrl+O/E/W/Y/T/U/L menus."));
     }
