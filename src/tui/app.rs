@@ -35,7 +35,6 @@ const INDEX_PREVIEW_CHARS: usize = 54;
 const TAB_INSERT_TEXT: &str = "     ";
 const SOUNDTRACK_CACHE_DIR_NAME: &str = "bsj-soundtrack-cache";
 const QUICK_SAVE_LINE_COMMAND: &str = "**save**";
-const ENTRY_MARKER_PREFIX: &str = "[ENTRY ";
 const SOUNDTRACK_MIDI_SAMPLE_RATE: u32 = 22_050;
 const SOUNDTRACK_MIDI_MAX_SECONDS: f64 = 180.0;
 const SOUNDTRACK_MIDI_MIN_SECONDS: f64 = 1.0;
@@ -2079,7 +2078,7 @@ impl App {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
             "F2 saves a revision. Header changes to 'REVISION SAVED <time>'.",
-            "Type **save** on its own line, then Enter for quick save + next entry.",
+            "Type **save** on its own line, then Enter for quick save + clean next entry page.",
             "Alt+Right next day  Alt+N next blank new entry",
             "Open older entries through F7 Index or F3 Calendar.",
             "Esc opens menus  Alt+F/E/S/G/T/U/H opens a menu directly",
@@ -4524,7 +4523,7 @@ impl App {
             "First 2 minutes:".to_string(),
             "1. Type immediately into today's entry.".to_string(),
             "2. Save with F2 or FILE -> Save Entry.".to_string(),
-            "3. Type **save** on its own line, then Enter for quick save + next same-day entry."
+            "3. Type **save** on its own line, then Enter for quick save + clean next same-day page."
                 .to_string(),
             "4. Press Esc to open menus if you don't remember keys.".to_string(),
             "5. Press Alt+N to jump to the next blank new-entry date.".to_string(),
@@ -6418,9 +6417,7 @@ impl App {
         self.refresh_document_stats();
         self.refresh_find_matches();
 
-        if self.quick_save_and_prepare_next_entry(viewport_height) {
-            self.flash_status("QUICK SAVED. NEXT ENTRY READY.");
-        }
+        self.quick_save_and_prepare_next_entry(viewport_height);
         true
     }
 
@@ -6429,55 +6426,17 @@ impl App {
             return false;
         }
         self.prepare_next_same_day_entry(viewport_height);
+        self.flash_status("QUICK SAVED. NEW ENTRY READY.");
         true
     }
 
     fn prepare_next_same_day_entry(&mut self, viewport_height: usize) {
-        let next_slot = self.next_same_day_entry_slot();
-        let marker = format!("[ENTRY {:02} {}]", next_slot, self.current_time_string());
-
-        self.buffer.move_to_bottom();
-        self.buffer.move_to_line_end();
-        if self
-            .buffer
-            .line(self.buffer.cursor_row())
-            .map(|line| !line.trim().is_empty())
-            .unwrap_or(false)
-        {
-            self.buffer.insert_newline();
-        }
-        if self.buffer.cursor_row() > 0
-            && self
-                .buffer
-                .line(self.buffer.cursor_row() - 1)
-                .map(|line| !line.trim().is_empty())
-                .unwrap_or(false)
-        {
-            self.buffer.insert_newline();
-        }
-
-        self.buffer.insert_text(&marker);
-        self.buffer.insert_newline();
-        self.wrap_cursor_line();
-        self.dirty = true;
+        // Quick-save transitions to a fresh same-day page so prior text is not left on screen.
+        self.buffer.wipe();
+        self.dirty = false;
         self.refresh_document_stats();
         self.refresh_find_matches();
         self.ensure_cursor_visible(viewport_height);
-    }
-
-    fn next_same_day_entry_slot(&self) -> usize {
-        let mut slot = 1usize;
-        for row in 0..self.buffer.line_count() {
-            if self
-                .buffer
-                .line(row)
-                .map(|line| line.trim_start().starts_with(ENTRY_MARKER_PREFIX))
-                .unwrap_or(false)
-            {
-                slot += 1;
-            }
-        }
-        slot
     }
 
     fn autosave_current_date(&mut self) {
@@ -8875,7 +8834,7 @@ mod tests {
     }
 
     #[test]
-    fn quick_save_line_command_creates_revision_and_prepares_next_same_day_entry() {
+    fn quick_save_line_command_saves_then_opens_clean_same_day_entry_page() {
         let temp = tempdir().expect("tempdir");
         let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
         let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
@@ -8896,10 +8855,12 @@ mod tests {
             viewport_width,
         );
 
-        assert_eq!(app.status_text(), Some("QUICK SAVED. NEXT ENTRY READY."));
-        assert!(!app.buffer.to_text().contains("**save**"));
-        assert!(app.buffer.to_text().contains("[ENTRY 01 "));
-        assert!(app.dirty);
+        assert_eq!(app.status_text(), Some("QUICK SAVED. NEW ENTRY READY."));
+        assert_eq!(app.buffer.to_text(), "");
+        assert_eq!(app.buffer.cursor(), (0, 0));
+        assert!(!app.dirty);
+        assert_eq!(app.selected_date, date);
+        assert!(app.save_status_label().starts_with("REVISION SAVED "));
 
         let saved = app
             .vault
@@ -8911,7 +8872,36 @@ mod tests {
             .expect("saved revision");
         assert!(saved.contains("First entry of the day"));
         assert!(!saved.contains("**save**"));
-        assert!(!saved.contains("[ENTRY "));
+    }
+
+    #[test]
+    fn quick_save_menu_action_saves_and_clears_editor_to_fresh_same_day_page() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 19).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.overlay = None;
+        app.buffer = TextBuffer::from_text("Menu quick save entry");
+        app.buffer
+            .set_cursor(0, "Menu quick save entry".chars().count());
+        app.dirty = true;
+
+        app.perform_menu_action(MenuAction::QuickSaveNext, 20);
+
+        assert_eq!(app.status_text(), Some("QUICK SAVED. NEW ENTRY READY."));
+        assert_eq!(app.buffer.to_text(), "");
+        assert_eq!(app.buffer.cursor(), (0, 0));
+        assert!(!app.dirty);
+        assert_eq!(app.selected_date, date);
+
+        let saved = app
+            .vault
+            .as_ref()
+            .expect("vault")
+            .load_date_state(date)
+            .expect("load")
+            .revision_text
+            .expect("saved revision");
+        assert_eq!(saved, "Menu quick save entry");
     }
 
     #[test]
