@@ -18,6 +18,7 @@ FRAME_W = 1160
 FRAME_H = 820
 SCREEN_COLS = 80
 SCREEN_ROWS = 25
+RELEASE_LABEL = "v1.1.0"
 
 BG_OUTER = "#0b1021"
 BG_TERMINAL = "#111827"
@@ -159,21 +160,28 @@ def editor_frame() -> Image.Image:
     draw_text(
         draw,
         0,
-        "BLUESCREEN JOURNAL         2026-03-17 03:52 PM           ENTRY NO. 000002",
+        f"BLUESCREEN JOURNAL {RELEASE_LABEL:>6}  2026-03-19 09:11 PM  ENTRY NO. 000477",
     )
     draw_highlight_span(draw, 1, 0, "FILE")
-    draw_text(draw, 1, "  EDIT  SEARCH  GO  TOOLS  SETUP  HELP", fill=FG_ACCENT, col=4)
+    draw_text(
+        draw,
+        1,
+        " EDIT  SEARCH  GO  TOOLS  SETUP  HELP  ESC MENUS  CTRL+K COMMANDS",
+        fill=FG_ACCENT,
+        col=4,
+    )
     body = [
         "",
+        "SEAN'S JOURNAL ENTRY [2026-03-19]",
+        "",
         "Today felt quieter than it looked from the outside.",
+        "Quick save is simple: type **save** on its own line, press Enter,",
+        "and bsj writes a new encrypted revision then opens a clean page.",
         "",
-        "The point of bsj is that the screen gets out of the way quickly:",
-        "launch, unlock once, and start typing immediately.",
+        "Search, timeline, and calendar all stay inside this same screen.",
+        "Nothing plaintext is written to disk outside explicit exports.",
         "",
-        "The vault is local-first, revisions are append-only, drafts are",
-        "encrypted, and the command strip never disappears.",
-        "",
-        "That makes it feel more like an appliance than a note app.",
+        "This keeps the app feeling like a writing appliance, not a dashboard.",
         "",
         "Closing Thought: Build the quiet path into the product itself.",
         "",
@@ -188,18 +196,25 @@ def editor_frame() -> Image.Image:
         width=2,
     )
 
-    draw_text(draw, 22, "STATUS  UNLOCKED   VERIFY OK   SAVED 03:51 PM   DRAFT READY", fill=FG_SUCCESS)
+    draw_text(
+        draw,
+        22,
+        "STATUS UNLOCKED | VERIFY OK | SAVED 09:10 PM | AUTOSAVED 09:11 PM",
+        fill=FG_SUCCESS,
+    )
     draw_footer(
         draw,
         [
-            "F1 Help",
-            "F2 Save",
-            "F3 Dates",
-            "F4 Find",
-            "F5 Search",
-            "F7 Index",
-            "F8 Sync",
-            "F10 Quit",
+            "F1Hp",
+            "F2Sv",
+            "F3Dt",
+            "F4Fd",
+            "F5Sr",
+            "F7Ix",
+            "F8Sy",
+            "F10Qt",
+            "F11Rv",
+            "F12Lk",
         ],
     )
     return image
@@ -213,16 +228,16 @@ def calendar_frame() -> Image.Image:
         draw,
         "CALENDAR",
         [
-            "March 2026",
+            "March 2026 (Entry Date Jump)",
             "",
             "Su Mo Tu We Th Fr Sa",
             " 1  2  3  4  5  6  7",
             " 8  9 10 11 12 13 14",
-            "15 16 [17] 18 19 20 21",
+            "15 16 17 18 [19] 20 21",
             "22 23 24 25 26 27 28",
             "29 30 31",
             "",
-            "PgUp/PgDn change month, Enter opens date",
+            "PgUp/PgDn month, Enter open, Alt+N next blank date",
         ],
         width_cols=36,
         height_rows=12,
@@ -244,11 +259,11 @@ def search_frame() -> Image.Image:
             "Query: quiet",
             "From: 2026-03-01      To: 2026-03-31",
             "",
-            "2026-03-17  Today felt [quiet]er than it looked...",
-            "2026-03-16  A [quiet] room makes the draft honest.",
+            "2026-03-19  Today felt [quiet]er than it looked...",
+            "2026-03-18  A [quiet] room makes the draft honest.",
             "2026-03-12  Nothing dramatic. Just a [quiet] win.",
             "",
-            "Enter opens match   Esc closes overlay",
+            "Enter opens match  Ctrl+Shift+B saves preset  Esc closes",
         ],
         width_cols=58,
         height_rows=10,
@@ -269,18 +284,25 @@ def index_frame() -> Image.Image:
         [
             "Date         Entry No.   Preview",
             "",
-            "2026-03-17   0000002     Today felt quieter than it looked...",
-            "2026-03-16   0000001     Setup complete. The screen already feels...",
-            "2026-03-15   0000000     CONFLICT  Two heads require merge.",
+            "2026-03-19   000477      Today felt quieter than it looked...",
+            "2026-03-18   000476      Setup complete. The screen already feels...",
+            "2026-03-15   000473      CONFLICT  Two heads require merge.",
             "",
-            "Up/Down moves   Enter opens   M opens merge view",
+            "Up/Down move  Enter open  Shift+F favorites  Shift+C conflicts",
         ],
         width_cols=66,
         height_rows=9,
         start_col=7,
         start_row=7,
     )
-    draw_highlight_span(draw, 10, 0, "2026-03-17   0000002     Today felt quieter than it looked...", fg=FG_MATCH, bg=BG_MATCH)
+    draw_highlight_span(
+        draw,
+        10,
+        0,
+        "2026-03-19   000477      Today felt quieter than it looked...",
+        fg=FG_MATCH,
+        bg=BG_MATCH,
+    )
     return image
 
 

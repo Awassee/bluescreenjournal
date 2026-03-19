@@ -4,6 +4,13 @@ use zeroize::Zeroize;
 
 const SNIPPET_CONTEXT_CHARS: usize = 24;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchMatchMode {
+    All,
+    Any,
+    Phrase,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchDocument {
     pub date: NaiveDate,
@@ -23,6 +30,8 @@ pub struct SearchOptions {
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub context_chars: usize,
+    pub match_mode: SearchMatchMode,
+    pub max_hits_per_document: usize,
 }
 
 impl Default for SearchOptions {
@@ -31,6 +40,8 @@ impl Default for SearchOptions {
             case_sensitive: false,
             whole_word: false,
             context_chars: SNIPPET_CONTEXT_CHARS,
+            match_mode: SearchMatchMode::All,
+            max_hits_per_document: 1,
         }
     }
 }
@@ -113,7 +124,7 @@ impl SearchIndex {
         let candidate_ids = if options.case_sensitive {
             None
         } else {
-            self.candidate_documents(&query_tokens)
+            self.candidate_documents(&query_tokens, options.match_mode)
         };
 
         let mut results = Vec::new();
@@ -127,56 +138,81 @@ impl SearchIndex {
                 continue;
             }
 
-            let Some(raw_match) = locate_match_with_options(
+            let raw_matches = locate_matches_with_options(
                 document,
                 query_text,
                 &lowered_query,
                 &query_tokens,
                 options,
-            ) else {
-                continue;
-            };
-
-            let (row, start_col, end_col) = byte_range_to_match_position(
-                &document.body,
-                raw_match.start_byte,
-                raw_match.end_byte,
             );
-            let line =
-                line_for_byte_range(&document.body, raw_match.start_byte, raw_match.end_byte);
-            let snippet = generate_snippet(&line, start_col, end_col, options.context_chars);
-            let matched_text = document
-                .body
-                .get(raw_match.start_byte..raw_match.end_byte)
-                .unwrap_or_default()
-                .to_string();
+            if raw_matches.is_empty() {
+                continue;
+            }
 
-            results.push(SearchResult {
-                date: document.date,
-                entry_number: document.entry_number.clone(),
-                snippet,
-                row,
-                start_col,
-                end_col,
-                matched_text,
-            });
+            for raw_match in raw_matches {
+                let (row, start_col, end_col) = byte_range_to_match_position(
+                    &document.body,
+                    raw_match.start_byte,
+                    raw_match.end_byte,
+                );
+                let line =
+                    line_for_byte_range(&document.body, raw_match.start_byte, raw_match.end_byte);
+                let snippet = generate_snippet(&line, start_col, end_col, options.context_chars);
+                let matched_text = document
+                    .body
+                    .get(raw_match.start_byte..raw_match.end_byte)
+                    .unwrap_or_default()
+                    .to_string();
+
+                results.push(SearchResult {
+                    date: document.date,
+                    entry_number: document.entry_number.clone(),
+                    snippet,
+                    row,
+                    start_col,
+                    end_col,
+                    matched_text,
+                });
+            }
         }
 
         results
     }
 
-    fn candidate_documents(&self, query_tokens: &[String]) -> Option<HashSet<usize>> {
+    fn candidate_documents(
+        &self,
+        query_tokens: &[String],
+        match_mode: SearchMatchMode,
+    ) -> Option<HashSet<usize>> {
         if query_tokens.is_empty() {
+            return None;
+        }
+
+        if matches!(match_mode, SearchMatchMode::Phrase) {
             return None;
         }
 
         let mut postings = Vec::with_capacity(query_tokens.len());
         for token in query_tokens {
-            let Some(ids) = self.postings.get(token) else {
+            if let Some(ids) = self.postings.get(token) {
+                postings.push(ids);
+            } else if matches!(match_mode, SearchMatchMode::All) {
                 return Some(HashSet::new());
-            };
-            postings.push(ids);
+            }
         }
+
+        if postings.is_empty() {
+            return Some(HashSet::new());
+        }
+
+        if matches!(match_mode, SearchMatchMode::Any) {
+            let mut union_ids = HashSet::new();
+            for ids in postings {
+                union_ids.extend(ids.iter().copied());
+            }
+            return Some(union_ids);
+        }
+
         postings.sort_by_key(|ids| ids.len());
 
         let mut candidate_ids = postings[0].iter().copied().collect::<HashSet<_>>();
@@ -291,71 +327,119 @@ pub fn format_cli_snippet(snippet: &Snippet) -> String {
     format!("{before}[{highlight}]{after}")
 }
 
-fn locate_match_with_options(
+fn locate_matches_with_options(
     document: &IndexedDocument,
     query_text: &str,
     lowered_query: &str,
     query_tokens: &[String],
     options: &SearchOptions,
-) -> Option<RawMatch> {
-    if options.case_sensitive {
-        if let Some((start_byte, end_byte)) =
-            find_match(&document.body, query_text, options.whole_word)
-        {
-            return Some(RawMatch {
-                start_byte,
-                end_byte,
-            });
-        }
-    } else if let Some((start_byte, end_byte)) =
-        find_match(&document.body_lower, lowered_query, options.whole_word)
-        && document.body.get(start_byte..end_byte).is_some()
-    {
-        return Some(RawMatch {
-            start_byte,
-            end_byte,
-        });
-    }
+) -> Vec<RawMatch> {
+    let max_hits = options.max_hits_per_document.max(1);
+    let mut matches = Vec::new();
 
-    for token in query_tokens {
-        let candidate = if options.case_sensitive {
-            find_match(&document.body, token, options.whole_word)
+    if matches!(options.match_mode, SearchMatchMode::Phrase) {
+        let raw = if options.case_sensitive {
+            find_all_matches(&document.body, query_text, options.whole_word, max_hits)
         } else {
-            find_match(&document.body_lower, token, options.whole_word)
+            find_all_matches(
+                &document.body_lower,
+                lowered_query,
+                options.whole_word,
+                max_hits,
+            )
         };
-        if let Some((start_byte, end_byte)) = candidate
-            && document.body.get(start_byte..end_byte).is_some()
-            && (!options.whole_word || is_word_boundary_match(&document.body, start_byte, end_byte))
-        {
-            return Some(RawMatch {
+        for (start_byte, end_byte) in raw {
+            if document.body.get(start_byte..end_byte).is_some() {
+                matches.push(RawMatch {
+                    start_byte,
+                    end_byte,
+                });
+            }
+        }
+        return matches;
+    }
+
+    if query_tokens.is_empty() {
+        return matches;
+    }
+
+    let mut token_matches = Vec::new();
+    let mut token_presence = 0usize;
+    for token in query_tokens {
+        let raw = if options.case_sensitive {
+            find_all_matches(
+                &document.body,
+                token,
+                options.whole_word,
+                max_hits.saturating_mul(2),
+            )
+        } else {
+            find_all_matches(
+                &document.body_lower,
+                token,
+                options.whole_word,
+                max_hits.saturating_mul(2),
+            )
+        };
+        if !raw.is_empty() {
+            token_presence += 1;
+            token_matches.extend(raw);
+        } else if matches!(options.match_mode, SearchMatchMode::All) {
+            return Vec::new();
+        }
+    }
+
+    if token_presence == 0 {
+        return Vec::new();
+    }
+
+    token_matches.sort_unstable();
+    token_matches.dedup();
+
+    for (start_byte, end_byte) in token_matches {
+        if matches.len() >= max_hits {
+            break;
+        }
+        if document.body.get(start_byte..end_byte).is_some() {
+            matches.push(RawMatch {
                 start_byte,
                 end_byte,
             });
         }
     }
 
-    None
+    matches
 }
 
-fn find_match(haystack: &str, needle: &str, whole_word: bool) -> Option<(usize, usize)> {
+fn find_all_matches(
+    haystack: &str,
+    needle: &str,
+    whole_word: bool,
+    max_hits: usize,
+) -> Vec<(usize, usize)> {
+    let mut matches = Vec::new();
     if needle.is_empty() {
-        return None;
+        return matches;
     }
 
+    let cap = max_hits.max(1);
     let mut search_start = 0usize;
     while let Some(relative) = haystack[search_start..].find(needle) {
         let start = search_start + relative;
         let end = start + needle.len();
         if !whole_word || is_word_boundary_match(haystack, start, end) {
-            return Some((start, end));
+            matches.push((start, end));
+            if matches.len() >= cap {
+                break;
+            }
         }
         if end >= haystack.len() {
             break;
         }
-        search_start = end;
+        search_start = start.saturating_add(1);
     }
 
-    None
+    matches
 }
 
 fn is_word_boundary_match(haystack: &str, start_byte: usize, end_byte: usize) -> bool {
@@ -408,8 +492,8 @@ struct RawMatch {
 #[cfg(test)]
 mod tests {
     use super::{
-        SearchDocument, SearchIndex, SearchOptions, SearchQuery, format_cli_snippet,
-        generate_snippet, matches_date_filter, tokenize,
+        SearchDocument, SearchIndex, SearchMatchMode, SearchOptions, SearchQuery,
+        format_cli_snippet, generate_snippet, matches_date_filter, tokenize,
     };
     use chrono::NaiveDate;
 
@@ -552,5 +636,106 @@ mod tests {
         );
         assert_eq!(short.len(), 1);
         assert_eq!(short[0].snippet.text, "...o charlie d...");
+    }
+
+    #[test]
+    fn all_match_mode_requires_every_token() {
+        let index = SearchIndex::build(vec![SearchDocument {
+            date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+            entry_number: "0000001".to_string(),
+            body: "alpha beta".to_string(),
+        }]);
+        let results = index.search_with_options(
+            &SearchQuery {
+                text: "alpha gamma".to_string(),
+                from: None,
+                to: None,
+            },
+            &SearchOptions {
+                match_mode: SearchMatchMode::All,
+                ..SearchOptions::default()
+            },
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn any_match_mode_returns_partial_token_matches() {
+        let index = SearchIndex::build(vec![SearchDocument {
+            date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+            entry_number: "0000001".to_string(),
+            body: "alpha beta".to_string(),
+        }]);
+        let results = index.search_with_options(
+            &SearchQuery {
+                text: "alpha gamma".to_string(),
+                from: None,
+                to: None,
+            },
+            &SearchOptions {
+                match_mode: SearchMatchMode::Any,
+                ..SearchOptions::default()
+            },
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].matched_text, "alpha");
+    }
+
+    #[test]
+    fn phrase_match_mode_requires_exact_phrase() {
+        let index = SearchIndex::build(vec![SearchDocument {
+            date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+            entry_number: "0000001".to_string(),
+            body: "alpha beta gamma".to_string(),
+        }]);
+        let phrase = index.search_with_options(
+            &SearchQuery {
+                text: "beta gamma".to_string(),
+                from: None,
+                to: None,
+            },
+            &SearchOptions {
+                match_mode: SearchMatchMode::Phrase,
+                ..SearchOptions::default()
+            },
+        );
+        assert_eq!(phrase.len(), 1);
+
+        let missing = index.search_with_options(
+            &SearchQuery {
+                text: "gamma beta".to_string(),
+                from: None,
+                to: None,
+            },
+            &SearchOptions {
+                match_mode: SearchMatchMode::Phrase,
+                ..SearchOptions::default()
+            },
+        );
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn hits_per_document_returns_multiple_matches_when_requested() {
+        let index = SearchIndex::build(vec![SearchDocument {
+            date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+            entry_number: "0000001".to_string(),
+            body: "note one\nnote two\nnote three".to_string(),
+        }]);
+        let results = index.search_with_options(
+            &SearchQuery {
+                text: "note".to_string(),
+                from: None,
+                to: None,
+            },
+            &SearchOptions {
+                max_hits_per_document: 3,
+                ..SearchOptions::default()
+            },
+        );
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].row, 0);
+        assert_eq!(results[1].row, 1);
+        assert_eq!(results[2].row, 2);
     }
 }

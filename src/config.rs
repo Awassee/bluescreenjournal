@@ -22,6 +22,7 @@ const READABLE_SETTING_KEYS: &[&str] = &[
     "local_device_id",
     "export_history",
     "search_presets",
+    "timeline_presets",
 ];
 
 const EDITABLE_SETTING_KEYS: &[&str] = &[
@@ -43,6 +44,7 @@ const EDITABLE_SETTING_KEYS: &[&str] = &[
 ];
 
 const MAX_SEARCH_PRESETS: usize = 24;
+const MAX_TIMELINE_PRESETS: usize = 24;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -95,6 +97,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub search_presets: Vec<SearchPresetConfig>,
     #[serde(default)]
+    pub timeline_presets: Vec<TimelinePresetConfig>,
+    #[serde(default)]
     pub backup_retention: BackupRetentionConfig,
     #[serde(default)]
     pub macros: Vec<MacroConfig>,
@@ -129,6 +133,25 @@ pub struct SearchPresetConfig {
     pub from: Option<String>,
     #[serde(default)]
     pub to: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimelinePresetConfig {
+    pub name: String,
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub tag: Option<String>,
+    #[serde(default)]
+    pub person: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub mood: Option<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -188,6 +211,7 @@ impl AppConfig {
         match Self::load() {
             Ok(Some(mut config)) => {
                 normalize_search_presets(&mut config.search_presets);
+                normalize_timeline_presets(&mut config.timeline_presets);
                 config
             }
             Ok(None) | Err(_) => Self {
@@ -210,6 +234,7 @@ impl AppConfig {
                 favorite_dates: Vec::new(),
                 export_history: Vec::new(),
                 search_presets: Vec::new(),
+                timeline_presets: Vec::new(),
                 backup_retention: BackupRetentionConfig::default(),
                 macros: Vec::new(),
             },
@@ -251,6 +276,36 @@ impl AppConfig {
         self.search_presets
             .retain(|preset| !preset.name.eq_ignore_ascii_case(needle));
         self.search_presets.len() != before
+    }
+
+    pub fn timeline_preset(&self, name: &str) -> Option<&TimelinePresetConfig> {
+        let needle = name.trim();
+        if needle.is_empty() {
+            return None;
+        }
+        self.timeline_presets
+            .iter()
+            .find(|preset| preset.name.eq_ignore_ascii_case(needle))
+    }
+
+    pub fn upsert_timeline_preset(&mut self, preset: TimelinePresetConfig) -> Result<(), String> {
+        let preset = normalize_timeline_preset(preset)?;
+        self.timeline_presets
+            .retain(|existing| !existing.name.eq_ignore_ascii_case(&preset.name));
+        self.timeline_presets.insert(0, preset);
+        self.timeline_presets.truncate(MAX_TIMELINE_PRESETS);
+        Ok(())
+    }
+
+    pub fn remove_timeline_preset(&mut self, name: &str) -> bool {
+        let needle = name.trim();
+        if needle.is_empty() {
+            return false;
+        }
+        let before = self.timeline_presets.len();
+        self.timeline_presets
+            .retain(|preset| !preset.name.eq_ignore_ascii_case(needle));
+        self.timeline_presets.len() != before
     }
 }
 
@@ -306,6 +361,7 @@ pub fn get_setting_value(config: &AppConfig, key: &str) -> Result<String, String
             .unwrap_or_else(|| "null".to_string())),
         "export_history" => Ok(config.export_history.len().to_string()),
         "search_presets" => Ok(config.search_presets.len().to_string()),
+        "timeline_presets" => Ok(config.timeline_presets.len().to_string()),
         _ => Err(format!(
             "unknown setting '{key}'. Known keys: {}",
             READABLE_SETTING_KEYS.join(", ")
@@ -457,6 +513,57 @@ fn normalize_search_preset(mut preset: SearchPresetConfig) -> Result<SearchPrese
     Ok(preset)
 }
 
+fn normalize_timeline_presets(presets: &mut Vec<TimelinePresetConfig>) {
+    let source = std::mem::take(presets);
+    let mut normalized = Vec::new();
+    for preset in source {
+        let Ok(preset) = normalize_timeline_preset(preset) else {
+            continue;
+        };
+        if normalized
+            .iter()
+            .any(|existing: &TimelinePresetConfig| existing.name.eq_ignore_ascii_case(&preset.name))
+        {
+            continue;
+        }
+        normalized.push(preset);
+        if normalized.len() >= MAX_TIMELINE_PRESETS {
+            break;
+        }
+    }
+    *presets = normalized;
+}
+
+fn normalize_timeline_preset(
+    mut preset: TimelinePresetConfig,
+) -> Result<TimelinePresetConfig, String> {
+    let name = preset.name.trim();
+    if name.is_empty() {
+        return Err("timeline preset name cannot be empty".to_string());
+    }
+
+    preset.name = name.to_string();
+    preset.from = normalize_optional_text(preset.from.as_deref());
+    preset.to = normalize_optional_text(preset.to.as_deref());
+    preset.query = normalize_optional_text(preset.query.as_deref());
+    preset.tag = normalize_optional_text(preset.tag.as_deref());
+    preset.person = normalize_optional_text(preset.person.as_deref());
+    preset.project = normalize_optional_text(preset.project.as_deref());
+
+    let has_filter = preset.from.is_some()
+        || preset.to.is_some()
+        || preset.query.is_some()
+        || preset.tag.is_some()
+        || preset.person.is_some()
+        || preset.project.is_some()
+        || preset.mood.is_some();
+    if !has_filter {
+        return Err("timeline preset requires at least one filter".to_string());
+    }
+
+    Ok(preset)
+}
+
 fn normalize_optional_text(value: Option<&str>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
@@ -529,8 +636,8 @@ fn default_opening_line_template() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, BackupRetentionConfig, RecentExportInfo, SearchPresetConfig, default_vault_path,
-        get_setting_value, set_setting_value,
+        AppConfig, BackupRetentionConfig, RecentExportInfo, SearchPresetConfig,
+        TimelinePresetConfig, default_vault_path, get_setting_value, set_setting_value,
     };
     use std::path::PathBuf;
 
@@ -555,6 +662,7 @@ mod tests {
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
             search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         }
@@ -600,6 +708,16 @@ mod tests {
                 path: "/tmp/entry.txt".to_string(),
             }],
             search_presets: Vec::new(),
+            timeline_presets: vec![TimelinePresetConfig {
+                name: "Recent".to_string(),
+                from: Some("2026-03-01".to_string()),
+                to: None,
+                query: Some("ship".to_string()),
+                tag: None,
+                person: None,
+                project: None,
+                mood: None,
+            }],
             backup_retention: BackupRetentionConfig {
                 daily: 5,
                 weekly: 4,
@@ -644,6 +762,10 @@ mod tests {
             get_setting_value(&config, "export_history").expect("export history"),
             "1"
         );
+        assert_eq!(
+            get_setting_value(&config, "timeline_presets").expect("timeline presets"),
+            "1"
+        );
     }
 
     #[test]
@@ -668,6 +790,7 @@ mod tests {
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
             search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };
@@ -726,6 +849,7 @@ mod tests {
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
             search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };
@@ -812,5 +936,68 @@ mod tests {
         assert_eq!(config.search_presets.len(), 1);
         assert_eq!(config.search_presets[0].name, "Personal");
         assert!(!config.remove_search_preset("missing"));
+    }
+
+    #[test]
+    fn upsert_timeline_preset_inserts_and_updates_case_insensitive_name() {
+        let mut config = empty_test_config();
+        config
+            .upsert_timeline_preset(TimelinePresetConfig {
+                name: "Work".to_string(),
+                from: Some("2026-03-01".to_string()),
+                to: Some("2026-03-19".to_string()),
+                query: Some("ship".to_string()),
+                tag: None,
+                person: None,
+                project: Some("Phoenix".to_string()),
+                mood: None,
+            })
+            .expect("insert");
+        config
+            .upsert_timeline_preset(TimelinePresetConfig {
+                name: "work".to_string(),
+                from: Some("2026-03-10".to_string()),
+                to: None,
+                query: Some("refine".to_string()),
+                tag: None,
+                person: None,
+                project: None,
+                mood: Some(7),
+            })
+            .expect("update");
+
+        assert_eq!(config.timeline_presets.len(), 1);
+        assert_eq!(config.timeline_presets[0].name, "work");
+        assert_eq!(config.timeline_presets[0].query.as_deref(), Some("refine"));
+        assert_eq!(config.timeline_presets[0].mood, Some(7));
+    }
+
+    #[test]
+    fn timeline_preset_rejects_blank_filters_and_removes_case_insensitive_name() {
+        let mut config = empty_test_config();
+        let rejected = config.upsert_timeline_preset(TimelinePresetConfig {
+            name: "Empty".to_string(),
+            from: None,
+            to: None,
+            query: None,
+            tag: None,
+            person: None,
+            project: None,
+            mood: None,
+        });
+        assert!(rejected.is_err());
+
+        config.timeline_presets = vec![TimelinePresetConfig {
+            name: "Recent".to_string(),
+            from: Some("2026-03-01".to_string()),
+            to: None,
+            query: Some("ship".to_string()),
+            tag: None,
+            person: None,
+            project: None,
+            mood: None,
+        }];
+        assert!(config.remove_timeline_preset("recent"));
+        assert!(config.timeline_presets.is_empty());
     }
 }

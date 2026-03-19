@@ -674,6 +674,7 @@ mod tests {
             favorite_dates: vec!["2026-03-17".to_string()],
             export_history: Vec::new(),
             search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
             backup_retention: BackupRetentionConfig {
                 daily: 7,
                 weekly: 4,

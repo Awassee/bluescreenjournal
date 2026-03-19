@@ -20,14 +20,15 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - append-only revisions and integrity verification
 - menu-driven discoverability so new users are not blocked by key memorization
 - local-first design with optional folder/S3/WebDAV encrypted sync
+- optional AI summary and reflective coach mode (off by default)
 
-## New in v1.0.3
+## New in v1.1.0
 
-- expanded CLI analytics: `review --from/--to --json --min-count`
-- expanded timeline filters: `--mood`, `--has-tags`, `--has-people`, `--has-project`, `--weekday`
-- timeline output formats: `--format text|json|csv` and aggregate `--summary`
-- prompt automation output: `prompts list --json`, `prompts pick --json`
-- refreshed docs, release notes, and GitHub issue templates for release consistency
+- added power search controls: `--range`, `--match-mode all|any|phrase`, `--hits-per-entry`, `--sort newest|oldest|relevance`, and `--summary`
+- added timeline preset management: `--save-preset`, `--preset`, `--list-presets`, and `--delete-preset`
+- added timeline grouping output: `--group-by day|week|month`
+- added optional AI reflection commands and menu surfaces: `bsj ai summary`, `bsj ai coach`, `TOOLS -> AI Summary (Optional)`, and `TOOLS -> AI Coach Mode (Optional)`
+- refreshed docs and screenshot assets to match the current menu-first `v1.1.0` UI
 
 ## Screenshots
 
@@ -76,7 +77,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.0.3.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.1.0.md) |
 
 ## Turnkey install
 
@@ -89,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.0.3
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.1.0
 ```
 
 Install from source instead of the prebuilt release:
@@ -198,6 +199,7 @@ The app is direct by design:
 | Reveal Codes | Shows metadata inline in a retro-friendly way | Gives structural visibility without cluttering normal view |
 | Opening Line Template | Auto-seeds a configurable header line on blank entry pages | Gives each entry a consistent, personal starting line |
 | Closing Thought | Dedicated final line field for each entry | Encourages deliberate endings and cleaner exports |
+| Optional AI reflection | Adds summary and guided prompts on demand from `TOOLS` | Offers an alternate entry path without changing default writing flow |
 | Encrypted backup and restore | Creates encrypted snapshots with retention support | Gives offline recovery without plaintext archives |
 | Lock command | Wipes unlocked state and returns to passphrase prompt | Safer on visible or shared terminals |
 
@@ -224,13 +226,28 @@ The app is direct by design:
 - `SEARCH -> Saved Presets` reopens named query+range presets
 - in Search overlay: `Ctrl+Shift+B` saves current query as a preset and `Ctrl+1..9` loads preset slots
 - `bsj search "query" --from YYYY-MM-DD --to YYYY-MM-DD` searches from the CLI
+- `bsj search "query" --range last7 --summary` prints quick aggregate signal for recent entries
+- `bsj search "query" --match-mode any|all|phrase --sort relevance --hits-per-entry 5` enables richer retrieval control
 - `bsj search --preset "Weekly Review"` runs a saved preset
 - `bsj search --list-presets` lists saved presets
 - `bsj search "query" --save-preset "Name"` saves and runs a preset in one command
 - `bsj search --delete-preset "Name"` removes a saved preset
-- `bsj review --from YYYY-MM-DD --to YYYY-MM-DD --json` exports range-bounded review metrics
+- `bsj review --range last30 --goal 750 --json` exports range-bounded review metrics plus word-goal hit rate
 - `bsj timeline --summary --format json` outputs aggregate timeline analytics
+- `bsj timeline --group-by week --range last30` rolls entries into weekly groups
+- `bsj timeline --save-preset "Recent Work" --query ship --tag work` stores a reusable timeline filter
+- `bsj timeline --preset "Recent Work"` applies a saved timeline preset
 - `bsj prompts pick --category reflection --json` returns deterministic prompt payloads
+
+### Optional AI reflection mode (off by default)
+
+- `TOOLS -> AI Summary (Optional)` summarizes the current in-memory entry context
+- `TOOLS -> AI Coach Mode (Optional)` opens guided day-reflection prompts and inserts your Q/A transcript back into the editor
+- `Ctrl+Shift+A` opens AI Coach quickly
+- `bsj ai summary --date YYYY-MM-DD` prints a concise summary in the terminal
+- `bsj ai coach --date YYYY-MM-DD --questions 5` prints reflective prompts in the terminal
+- remote AI is opt-in only: set `BSJ_AI_ENABLE_REMOTE=1` and `BSJ_OPENAI_API_KEY` (or `OPENAI_API_KEY`)
+- when remote is not configured, bsj falls back to local heuristic summary/prompt generation
 
 ### Protect and move data
 
@@ -259,6 +276,7 @@ The menu bar is the primary discoverability surface.
 - `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
 - `TOOLS` includes sync, soundtrack source + toggle, integrity details, review mode, prompts, dashboard, updates, doctor output, and a `SYSOP Center` menu for operator audits/runbooks
+- `TOOLS` also includes `AI Summary (Optional)` and `AI Coach Mode (Optional)` for guided reflection workflows
 - `TOOLS -> Check for Updates` now offers an in-app install action that runs the installer in the background
 - `SETUP` includes a live settings summary plus editable vault/sync/device/opening-line/retention/clock/display values
 - `HELP` includes About (version/credits), the key sheet, quick-start guide, and searchable guide topics inside the TUI
@@ -280,6 +298,7 @@ Primary keys:
 - `Ctrl+S` save fallback
 - `Ctrl+F` find fallback
 - `Alt+M` toggle soundtrack
+- `Ctrl+Shift+A` open AI coach mode (optional)
 
 Keyboard verification:
 
@@ -344,14 +363,23 @@ bsj
 bsj open 2026-03-16
 bsj search "quiet morning" --from 2026-03-01 --to 2026-03-31
 bsj search "focus" --whole-word --case-sensitive --limit 20
+bsj search "focus" --match-mode any --sort relevance --hits-per-entry 5
+bsj search "focus" --range last7 --summary
 bsj search "mood:7" --json --context 40
 bsj search "ship" --count-only
-bsj review --from 2026-03-01 --to 2026-03-31 --json --min-count 2
+bsj review --range last30 --goal 750 --json --min-count 2
 bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata
+bsj timeline --range last30 --group-by week
+bsj timeline --save-preset "Recent Work" --query ship --tag work
+bsj timeline --preset "Recent Work"
 bsj timeline --mood 7 --has-tags --weekday mon,fri --format csv
 bsj timeline --from 2026-03-01 --to 2026-03-31 --summary --format json
 bsj prompts list --category focus --json
 bsj prompts pick --category reflection --json
+bsj ai summary --date 2026-03-16
+bsj ai summary --range last7 --max-points 5
+BSJ_AI_ENABLE_REMOTE=1 BSJ_OPENAI_API_KEY=*** bsj ai summary --date 2026-03-16 --remote
+bsj ai coach --date 2026-03-16 --questions 5
 bsj export 2026-03-16
 bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md
 bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
@@ -382,8 +410,9 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v1.0.3.md)
-- [Feature Pass (Next 10)](docs/FEATURE_PASS_VNEXT.md)
+- [Release Notes](docs/releases/v1.1.0.md)
+- [Next 10 Feature Pack](docs/FEATURES_NEXT10.md)
+- [Feature Pass v1.0.3 (Archive)](docs/FEATURE_PASS_VNEXT.md)
 - [SYSOP Features](docs/SYSOP_FEATURES.md)
 - [Setup Guide](docs/SETUP_GUIDE.md)
 - [Settings Guide](docs/SETTINGS_GUIDE.md)

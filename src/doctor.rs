@@ -330,6 +330,7 @@ mod tests {
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
             search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };
@@ -377,6 +378,7 @@ mod tests {
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
             search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };

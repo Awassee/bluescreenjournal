@@ -1,4 +1,5 @@
 use crate::{
+    ai,
     config::{
         self, AppConfig, LastSyncInfo, MacroActionConfig, MacroCommandConfig, RecentExportInfo,
         SearchPresetConfig, default_vault_path,
@@ -61,6 +62,7 @@ pub enum Overlay {
     ConflictChoice(ConflictOverlay),
     MergeDiff(vault::ConflictState),
     Search(SearchOverlay),
+    AiCoach(AiCoachOverlay),
     ReplacePrompt(ReplacePrompt),
     ReplaceConfirm(ReplaceConfirm),
     MetadataPrompt(MetadataPrompt),
@@ -74,7 +76,91 @@ pub enum Overlay {
     RecoverDraft {
         draft_text: String,
     },
+    PruneConfirm {
+        prune_count: usize,
+    },
     QuitConfirm,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AiCoachOverlay {
+    pub provider: String,
+    pub prompts: Vec<String>,
+    pub answers: Vec<String>,
+    pub current_idx: usize,
+    pub input: String,
+    pub error: Option<String>,
+}
+
+impl AiCoachOverlay {
+    fn new(provider: String, prompts: Vec<String>) -> Self {
+        Self {
+            provider,
+            answers: vec![String::new(); prompts.len()],
+            prompts,
+            current_idx: 0,
+            input: String::new(),
+            error: None,
+        }
+    }
+
+    pub fn current_prompt(&self) -> Option<&str> {
+        self.prompts.get(self.current_idx).map(String::as_str)
+    }
+
+    fn apply_current_answer(&mut self) {
+        if let Some(slot) = self.answers.get_mut(self.current_idx) {
+            *slot = self.input.trim().to_string();
+        }
+    }
+
+    fn move_next(&mut self) -> bool {
+        self.apply_current_answer();
+        if self.current_idx + 1 >= self.prompts.len() {
+            return true;
+        }
+        self.current_idx += 1;
+        self.input = self
+            .answers
+            .get(self.current_idx)
+            .cloned()
+            .unwrap_or_default();
+        self.error = None;
+        false
+    }
+
+    fn transcript(&self, date: NaiveDate) -> String {
+        let mut lines = vec![
+            format!("[AI COACH SESSION {}]", date.format("%Y-%m-%d")),
+            format!("[SOURCE {}]", self.provider.to_ascii_uppercase()),
+        ];
+        for (idx, prompt) in self.prompts.iter().enumerate() {
+            let answer = self
+                .answers
+                .get(idx)
+                .map(String::as_str)
+                .unwrap_or_default();
+            lines.push(format!("Q{}: {}", idx + 1, prompt));
+            lines.push(format!("A{}: {}", idx + 1, answer));
+        }
+        lines.push(String::new());
+        lines.join("\n")
+    }
+
+    fn wipe(&mut self) {
+        self.provider.zeroize();
+        for prompt in &mut self.prompts {
+            prompt.zeroize();
+        }
+        self.prompts.clear();
+        for answer in &mut self.answers {
+            answer.zeroize();
+        }
+        self.answers.clear();
+        self.current_idx = 0;
+        self.input.zeroize();
+        zeroize_optional_string(&mut self.error);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1440,6 +1526,8 @@ pub enum MenuAction {
     CommandPalette,
     SysopCenter,
     Save,
+    SaveAndNextDay,
+    SaveAndLock,
     QuickSaveNext,
     Export,
     QuickExportText,
@@ -1452,8 +1540,12 @@ pub enum MenuAction {
     Backup,
     RestoreBackup,
     Dashboard,
+    TodayBrief,
+    WeekCompass,
     SyncCenter,
     ToggleSoundtrack,
+    AiSummary,
+    AiCoach,
     ReviewMode,
     CheckUpdates,
     DoctorReport,
@@ -1479,6 +1571,9 @@ pub enum MenuAction {
     Metadata,
     ClosingThought,
     ClosingTemplates,
+    ExtractHashtags,
+    MoodUp,
+    MoodDown,
     ToggleFavorite,
     ToggleReveal,
     ToggleTypewriter,
@@ -1497,6 +1592,7 @@ pub enum MenuAction {
     JumpBottom,
     InsertStatsStamp,
     InsertMetadataStamp,
+    InsertDailyStarter,
     GlobalSearch,
     SearchHistory,
     SearchScopeToday,
@@ -1519,6 +1615,8 @@ pub enum MenuAction {
     RandomEntry,
     PreviousDay,
     NextDay,
+    Yesterday,
+    Tomorrow,
     PreviousEntry,
     NextEntry,
     NewEntry,
@@ -2140,6 +2238,7 @@ impl App {
                 Some(Overlay::ConflictChoice(_)) => "CONFLICT",
                 Some(Overlay::MergeDiff(_)) => "MERGE",
                 Some(Overlay::Search(_)) => "SEARCH",
+                Some(Overlay::AiCoach(_)) => "AI COACH",
                 Some(Overlay::ReplacePrompt(_)) | Some(Overlay::ReplaceConfirm(_)) => "REPLACE",
                 Some(Overlay::MetadataPrompt(_)) => "METADATA",
                 Some(Overlay::ExportPrompt(_)) => "EXPORT",
@@ -2150,6 +2249,7 @@ impl App {
                 Some(Overlay::Info(_)) => "INFO",
                 Some(Overlay::Picker(_)) => "PICK",
                 Some(Overlay::RecoverDraft { .. }) => "RECOVER",
+                Some(Overlay::PruneConfirm { .. }) => "PRUNE",
                 Some(Overlay::QuitConfirm) => "QUIT",
                 None if self.vault.is_some() => "EDITING",
                 None => "LOCKED",
@@ -2213,6 +2313,13 @@ impl App {
                     search.range_label()
                 )
             }
+            Some(Overlay::AiCoach(coach)) => {
+                format!(
+                    "QUESTION {}/{}",
+                    coach.current_idx.saturating_add(1),
+                    coach.prompts.len()
+                )
+            }
             Some(Overlay::Index(index)) if !index.items.is_empty() => {
                 format!(
                     "ENTRY {}/{}{}{}",
@@ -2239,6 +2346,9 @@ impl App {
                     format!("CHOICE {}/{}", picker.selected + 1, filtered_len)
                 }
             }
+            Some(Overlay::PruneConfirm { prune_count }) => {
+                format!("PRUNE {} BACKUP(S)", prune_count)
+            }
             _ if !self.find_matches.is_empty() => {
                 format!(
                     "FIND {}/{}",
@@ -2255,9 +2365,9 @@ impl App {
             return None;
         }
         if self.dirty {
-            Some("NEXT F2 SAVE  ALT+N NEW DAY  ALT+Y/0 TODAY")
+            Some("NEXT: F2 SAVE | ALT+N NEW DAY | ALT+Y/0 TODAY")
         } else {
-            Some("NEXT TYPE  ALT+N NEW DAY  ALT+[ ] SAVED  ALT+,/. DAY")
+            Some("NEXT: TYPE | ALT+N NEW DAY | ALT+[ ] SAVED | ALT+,/. DAY")
         }
     }
 
@@ -2345,34 +2455,30 @@ impl App {
 
     pub fn overlay_footer_hint(&self) -> Option<&'static str> {
         match self.overlay.as_ref()? {
-            Overlay::SetupWizard(_) => Some("Setup: Enter next | Ctrl+Q quit"),
-            Overlay::UnlockPrompt { .. } => Some("Unlock: Enter unlock | Ctrl+Q quit"),
-            Overlay::Help => Some("Help: Enter/Esc/F1 close"),
-            Overlay::DatePicker(_) => {
-                Some("Dates: arrows/HJKL move | Enter open | N/P next blank | G today")
-            }
-            Overlay::FindPrompt { .. } => Some("Find: type live query | Enter close"),
-            Overlay::ClosingPrompt { .. } => Some("Closing: Enter save | blank + Enter clears"),
-            Overlay::ConflictChoice(_) => Some("Conflict: Tab cycle | 1-5 select | Enter apply"),
-            Overlay::MergeDiff(_) => Some("Merge: Esc close diff | F2 save merged revision"),
-            Overlay::Search(_) => Some(
-                "Search: / query | Tab fields | Enter open result | Ctrl+B pin | Ctrl+Shift+B preset",
-            ),
+            Overlay::SetupWizard(_) => Some("SETUP: ENTER NEXT | CTRL+Q QUIT"),
+            Overlay::UnlockPrompt { .. } => Some("UNLOCK: ENTER OPEN | CTRL+Q QUIT"),
+            Overlay::Help => Some("HELP: ENTER/ESC/F1 CLOSE"),
+            Overlay::DatePicker(_) => Some("DATES: ARROWS MOVE | ENTER OPEN | N/P BLANK"),
+            Overlay::FindPrompt { .. } => Some("FIND: TYPE QUERY | ENTER CLOSE"),
+            Overlay::ClosingPrompt { .. } => Some("CLOSING: ENTER SAVE | BLANK+ENTER CLEAR"),
+            Overlay::ConflictChoice(_) => Some("CONFLICT: TAB OR 1-5 | ENTER APPLY"),
+            Overlay::MergeDiff(_) => Some("MERGE: ESC CLOSE DIFF | F2 SAVE MERGE"),
+            Overlay::Search(_) => Some("SEARCH: / QUERY | TAB FIELDS | ENTER OPEN"),
+            Overlay::AiCoach(_) => Some("AI COACH: TYPE | ENTER NEXT | CTRL+U CLEAR"),
             Overlay::ReplacePrompt(_) | Overlay::ReplaceConfirm(_) => {
-                Some("Replace: Y/N/A/Q flow | Esc cancel")
+                Some("REPLACE: Y/N/A/Q | ESC CANCEL")
             }
-            Overlay::MetadataPrompt(_) => Some("Metadata: Tab fields | Enter save"),
-            Overlay::ExportPrompt(_) => Some("Export: Tab format | Enter write"),
-            Overlay::SettingPrompt(_) => Some("Setup: Enter save setting | Esc cancel"),
-            Overlay::Index(_) => {
-                Some("Index: type filter | * favorite | 1-4 scopes | Shift+N blank | Enter open")
-            }
-            Overlay::SyncStatus(_) => Some("Sync: wait complete | Enter/Esc close"),
-            Overlay::RestorePrompt(_) => Some("Restore: Tab stages | Enter continue/restore"),
-            Overlay::Info(_) => Some("Info: PgUp/PgDn scroll | Enter/Esc close"),
-            Overlay::Picker(_) => Some("Picker: type filter | Enter open"),
-            Overlay::RecoverDraft { .. } => Some("Recovery: Y load draft | N keep revision"),
-            Overlay::QuitConfirm => Some("Quit: Enter/Y confirm | Esc/N cancel"),
+            Overlay::MetadataPrompt(_) => Some("METADATA: TAB FIELDS | ENTER SAVE"),
+            Overlay::ExportPrompt(_) => Some("EXPORT: TAB FORMAT | ENTER WRITE"),
+            Overlay::SettingPrompt(_) => Some("SETUP: ENTER SAVE | ESC CANCEL"),
+            Overlay::Index(_) => Some("INDEX: TYPE FILTER | 1-4 RANGE | ENTER OPEN"),
+            Overlay::SyncStatus(_) => Some("SYNC: ENTER/ESC CLOSE WHEN DONE"),
+            Overlay::RestorePrompt(_) => Some("RESTORE: TAB STAGE | ENTER CONTINUE"),
+            Overlay::Info(_) => Some("INFO: PGUP/PGDN SCROLL | ENTER/ESC CLOSE"),
+            Overlay::Picker(_) => Some("PICKER: TYPE FILTER | ENTER OPEN"),
+            Overlay::RecoverDraft { .. } => Some("RECOVERY: Y LOAD DRAFT | N KEEP REVISION"),
+            Overlay::PruneConfirm { .. } => Some("PRUNE: Y OR ENTER APPLY | N OR ESC CANCEL"),
+            Overlay::QuitConfirm => Some("QUIT: ENTER/Y YES | ESC/N NO"),
         }
     }
 
@@ -2392,6 +2498,18 @@ impl App {
                     label: "Save Entry".to_string(),
                     detail: "F2".to_string(),
                     action: MenuAction::Save,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Save + Next Day".to_string(),
+                    detail: "CTRL+SHIFT+S".to_string(),
+                    action: MenuAction::SaveAndNextDay,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Save + Lock".to_string(),
+                    detail: "CTRL+SHIFT+L".to_string(),
+                    action: MenuAction::SaveAndLock,
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
@@ -2449,8 +2567,8 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
-                    label: "Prune Old Backups".to_string(),
-                    detail: "APPLY".to_string(),
+                    label: "Prune Backups...".to_string(),
+                    detail: "CONFIRM".to_string(),
                     action: MenuAction::BackupPruneNow,
                     enabled: self.vault.is_some(),
                 },
@@ -2508,6 +2626,24 @@ impl App {
                     label: "Closing Templates".to_string(),
                     detail: "PICK".to_string(),
                     action: MenuAction::ClosingTemplates,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Extract #Tags to Metadata".to_string(),
+                    detail: "AUTO".to_string(),
+                    action: MenuAction::ExtractHashtags,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Mood Up".to_string(),
+                    detail: "+1".to_string(),
+                    action: MenuAction::MoodUp,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Mood Down".to_string(),
+                    detail: "-1".to_string(),
+                    action: MenuAction::MoodDown,
                     enabled: true,
                 },
                 MenuItem {
@@ -2587,6 +2723,12 @@ impl App {
                     label: "Insert Opening Line".to_string(),
                     detail: "HEADER".to_string(),
                     action: MenuAction::InsertOpeningLine,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Insert Daily Starter".to_string(),
+                    detail: "TEMPLATE".to_string(),
+                    action: MenuAction::InsertDailyStarter,
                     enabled: true,
                 },
                 MenuItem {
@@ -2744,6 +2886,18 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Yesterday".to_string(),
+                    detail: "ALT+-".to_string(),
+                    action: MenuAction::Yesterday,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Tomorrow".to_string(),
+                    detail: "ALT+=".to_string(),
+                    action: MenuAction::Tomorrow,
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Previous Day".to_string(),
                     detail: "ALT+,".to_string(),
                     action: MenuAction::PreviousDay,
@@ -2836,6 +2990,18 @@ impl App {
                     enabled: true,
                 },
                 MenuItem {
+                    label: "Today Brief".to_string(),
+                    detail: "NOW".to_string(),
+                    action: MenuAction::TodayBrief,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Week Compass".to_string(),
+                    detail: "7D".to_string(),
+                    action: MenuAction::WeekCompass,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
                     label: "Start Sprint (15m)".to_string(),
                     detail: "FOCUS".to_string(),
                     action: MenuAction::StartSprint15,
@@ -2895,6 +3061,18 @@ impl App {
                         "/CTRL+SHIFT+M"
                     ),
                     action: MenuAction::ToggleSoundtrack,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "AI Summary (Optional)".to_string(),
+                    detail: "LOCAL/REMOTE".to_string(),
+                    action: MenuAction::AiSummary,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "AI Coach Mode (Optional)".to_string(),
+                    detail: "GUIDED".to_string(),
+                    action: MenuAction::AiCoach,
                     enabled: true,
                 },
                 MenuItem {
@@ -3149,6 +3327,14 @@ impl App {
                     self.open_adjacent_day(1);
                     return;
                 }
+                KeyCode::Char('-') => {
+                    self.open_adjacent_day(-1);
+                    return;
+                }
+                KeyCode::Char('=') => {
+                    self.open_adjacent_day(1);
+                    return;
+                }
                 KeyCode::Char('[') => {
                     self.open_adjacent_saved_entry(-1);
                     return;
@@ -3229,6 +3415,18 @@ impl App {
         }
         if Self::is_ctrl_shift_char(&key, 'm') {
             self.toggle_soundtrack_playback();
+            return;
+        }
+        if Self::is_ctrl_shift_char(&key, 'a') {
+            self.open_ai_coach_overlay();
+            return;
+        }
+        if Self::is_ctrl_shift_char(&key, 's') {
+            self.save_and_open_next_day();
+            return;
+        }
+        if Self::is_ctrl_shift_char(&key, 'l') {
+            self.save_and_lock();
             return;
         }
         if key.modifiers == KeyModifiers::CONTROL {
@@ -3806,6 +4004,40 @@ impl App {
                 }
                 _ => {}
             },
+            Overlay::AiCoach(coach) => match key.code {
+                KeyCode::Esc => keep_overlay = false,
+                KeyCode::Backspace => {
+                    coach.input.pop();
+                    coach.error = None;
+                }
+                KeyCode::Char('u') if Self::is_ctrl_char(&key, 'u') => {
+                    coach.input.clear();
+                    coach.error = None;
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    if coach.prompts.is_empty() {
+                        coach.error = Some("No prompts loaded.".to_string());
+                    } else if coach.move_next() {
+                        let transcript = coach.transcript(self.selected_date);
+                        if !self
+                            .buffer
+                            .line(self.buffer.cursor().0)
+                            .unwrap_or_default()
+                            .is_empty()
+                        {
+                            self.buffer.insert_newline();
+                        }
+                        self.buffer.insert_text(&transcript);
+                        self.finish_buffer_menu_edit(viewport_height, "AI COACH INSERTED.");
+                        keep_overlay = false;
+                    }
+                }
+                KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
+                    coach.input.push(ch);
+                    coach.error = None;
+                }
+                _ => {}
+            },
             Overlay::ReplacePrompt(prompt) => match key.code {
                 KeyCode::Esc | KeyCode::F(6) => keep_overlay = false,
                 KeyCode::Tab => {
@@ -4203,6 +4435,17 @@ impl App {
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                     self.apply_recovery_choice(false, draft_text);
+                    keep_overlay = false;
+                }
+                _ => {}
+            },
+            Overlay::PruneConfirm { .. } => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    self.prune_backups_now();
+                    keep_overlay = false;
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    self.flash_status("PRUNE CANCELED.");
                     keep_overlay = false;
                 }
                 _ => {}
@@ -4812,6 +5055,54 @@ impl App {
         }
     }
 
+    fn extract_hashtags_to_metadata(&mut self) {
+        let body = self.buffer.to_text();
+        let found_tags = extract_all_hashtags(&body, 24);
+        if found_tags.is_empty() {
+            self.flash_status("NO #TAGS FOUND.");
+            return;
+        }
+
+        let mut added = 0usize;
+        for tag in found_tags {
+            if self
+                .entry_metadata
+                .tags
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&tag))
+            {
+                continue;
+            }
+            self.entry_metadata.tags.push(tag);
+            added += 1;
+        }
+
+        if added == 0 {
+            self.flash_status("ALL #TAGS ALREADY IN METADATA.");
+            return;
+        }
+
+        self.dirty = true;
+        self.mark_dirty_started_now();
+        self.flash_status(&format!("ADDED {added} TAG(S) TO METADATA."));
+    }
+
+    fn nudge_mood(&mut self, delta: i8) {
+        let baseline = self.entry_metadata.mood.unwrap_or(5) as i16;
+        let next = (baseline + delta as i16).clamp(0, 9) as u8;
+        self.entry_metadata.mood = Some(next);
+        self.dirty = true;
+        self.mark_dirty_started_now();
+        self.flash_status(&format!("MOOD {next}."));
+    }
+
+    fn insert_daily_starter_template(&mut self, viewport_height: usize) {
+        let date_label = self.selected_date.format("%Y-%m-%d").to_string();
+        let entry_no = self.entry_number_label();
+        let template = format!("--- ENTRY {entry_no} {date_label} ---\nWIN:\nBLOCKER:\nNEXT:\n");
+        self.insert_text_snippet(&template, viewport_height, "DAILY STARTER INSERTED.");
+    }
+
     fn insert_text_snippet(&mut self, text: &str, viewport_height: usize, status: &str) {
         self.buffer.insert_text(text);
         self.finish_buffer_menu_edit(viewport_height, status);
@@ -5249,6 +5540,73 @@ impl App {
             items,
             "No prompts available.",
         ));
+    }
+
+    fn open_ai_summary_overlay(&mut self) {
+        let context = self.current_entry_ai_context();
+        if context.trim().is_empty() {
+            self.flash_status("ENTRY IS BLANK.");
+            return;
+        }
+        let mode = if ai_remote_requested() {
+            ai::AiRequestMode::RemoteIfConfigured
+        } else {
+            ai::AiRequestMode::LocalOnly
+        };
+        let summary = ai::summarize_text(&context, 5, mode);
+        let text = [
+            "AI Summary (Optional)".to_string(),
+            String::new(),
+            format!("Provider: {}", summary.provider),
+            format!("Date    : {}", self.selected_date.format("%Y-%m-%d")),
+            String::new(),
+            summary.text,
+            String::new(),
+            "Default is local-only. Remote requires --remote CLI or BSJ_AI_ENABLE_REMOTE=1."
+                .to_string(),
+        ]
+        .join("\n");
+        self.open_info_overlay("AI Summary", text);
+        self.flash_status("AI SUMMARY READY.");
+    }
+
+    fn open_ai_coach_overlay(&mut self) {
+        let mode = if ai_remote_requested() {
+            ai::AiRequestMode::RemoteIfConfigured
+        } else {
+            ai::AiRequestMode::LocalOnly
+        };
+        let context = self.current_entry_ai_context();
+        let coach = ai::coach_questions(&context, 5, mode);
+        if coach.questions.is_empty() {
+            self.flash_status("AI COACH UNAVAILABLE.");
+            return;
+        }
+        self.menu = None;
+        self.overlay = Some(Overlay::AiCoach(AiCoachOverlay::new(
+            coach.provider.clone(),
+            coach.questions,
+        )));
+        self.flash_status(&format!(
+            "AI COACH READY ({}).",
+            coach.provider.to_ascii_uppercase()
+        ));
+    }
+
+    fn current_entry_ai_context(&self) -> String {
+        let mut sections = vec![format!("DATE {}", self.selected_date.format("%Y-%m-%d"))];
+        let metadata = crate::format_metadata_stamp(&self.entry_metadata).unwrap_or_default();
+        if !metadata.is_empty() {
+            sections.push(format!("METADATA {metadata}"));
+        }
+        if let Some(closing) = self.closing_thought.as_deref() {
+            let trimmed = closing.trim();
+            if !trimmed.is_empty() {
+                sections.push(format!("CLOSING {trimmed}"));
+            }
+        }
+        sections.push(self.buffer.to_text());
+        sections.join("\n")
     }
 
     fn open_sync_history_overlay(&mut self) {
@@ -6228,6 +6586,119 @@ impl App {
         ));
     }
 
+    fn open_today_brief_overlay(&mut self) {
+        let today = Local::now().date_naive();
+        let mut lines = vec![
+            format!("Date          : {}", today.format("%Y-%m-%d")),
+            format!("Working on    : {}", self.selected_date.format("%Y-%m-%d")),
+            format!("Entry No.     : {}", self.entry_number_label()),
+            format!("Page state    : {}", self.header_page_state_label()),
+            format!("Save state    : {}", self.save_status_label()),
+            format!("Words         : {}", self.document_stats.words),
+            format!("Chars         : {}", self.document_stats.chars),
+            format!("Streak        : {}", self.streak_status_label()),
+            format!(
+                "Goal          : {}",
+                if self.word_goal_status_label().is_empty() {
+                    "OFF".to_string()
+                } else {
+                    self.word_goal_status_label()
+                }
+            ),
+            format!("Vault         : {}", self.lock_status_label()),
+        ];
+
+        if let Some(vault) = &self.vault
+            && let Ok(review) = vault.review_summary(today)
+        {
+            lines.push(String::new());
+            lines.push("Journal pulse".to_string());
+            lines.push(format!(
+                "  Entries this week : {}",
+                review.entries_this_week
+            ));
+            lines.push(format!(
+                "  Entries this month: {}",
+                review.entries_this_month
+            ));
+            lines.push(format!("  Total entries     : {}", review.total_entries));
+        }
+
+        lines.push(String::new());
+        lines.push("Suggested next step".to_string());
+        if self.dirty {
+            lines.push("  Press F2 to save this revision.".to_string());
+        } else {
+            lines.push("  Start typing or press Alt+N for a new day.".to_string());
+        }
+
+        self.open_info_overlay("Today Brief", lines.join("\n"));
+    }
+
+    fn open_week_compass_overlay(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+        let week_start = self.selected_date - ChronoDuration::days(6);
+        match vault.review_summary(self.selected_date) {
+            Ok(review) => {
+                let all_entries = vault.list_index_entries(42).unwrap_or_default();
+                let week_entries = all_entries
+                    .iter()
+                    .filter(|entry| entry.date >= week_start && entry.date <= self.selected_date)
+                    .count();
+                let week_conflicts = all_entries
+                    .iter()
+                    .filter(|entry| {
+                        entry.date >= week_start
+                            && entry.date <= self.selected_date
+                            && entry.has_conflict
+                    })
+                    .count();
+                let week_moods = top_mood_counts(
+                    all_entries
+                        .iter()
+                        .filter(|entry| {
+                            entry.date >= week_start && entry.date <= self.selected_date
+                        })
+                        .filter_map(|entry| entry.metadata.mood),
+                );
+
+                let mut lines = vec![
+                    format!(
+                        "Window        : {} .. {}",
+                        week_start.format("%Y-%m-%d"),
+                        self.selected_date.format("%Y-%m-%d")
+                    ),
+                    format!("Entries (7d)  : {week_entries}"),
+                    format!("Conflicts (7d): {week_conflicts}"),
+                    format!("Current streak: {} day(s)", review.streak_days),
+                    format!("Entries month : {}", review.entries_this_month),
+                    String::new(),
+                    "Top tags".to_string(),
+                ];
+                lines.extend(render_rank_lines(&review.top_tags));
+                lines.push(String::new());
+                lines.push("Top people".to_string());
+                lines.extend(render_rank_lines(&review.top_people));
+                lines.push(String::new());
+                lines.push("Mood mix (7d)".to_string());
+                if week_moods.is_empty() {
+                    lines.push("  No mood data this week.".to_string());
+                } else {
+                    for (mood, count) in week_moods {
+                        lines.push(format!("  Mood {mood}: {count}"));
+                    }
+                }
+                self.open_info_overlay("Week Compass", lines.join("\n"));
+            }
+            Err(error) => {
+                self.open_info_overlay("Week Compass", format!("Compass failed: {error}"))
+            }
+        }
+    }
+
     fn open_review_overlay(&mut self) {
         let Some(vault) = &self.vault else {
             self.flash_status("LOCKED.");
@@ -6494,7 +6965,7 @@ impl App {
 
         lines.push(String::new());
         lines.push("FILE -> Backup Snapshot creates a new encrypted archive.".to_string());
-        lines.push("FILE -> Prune Old Backups applies this retention policy.".to_string());
+        lines.push("FILE -> Prune Backups... applies this retention policy.".to_string());
         self.open_info_overlay("Backup Policy", lines.join("\n"));
     }
 
@@ -6804,6 +7275,8 @@ impl App {
             MenuAction::CommandPalette => self.open_command_palette(),
             MenuAction::SysopCenter => self.open_sysop_center_overlay(),
             MenuAction::Save => self.save_current_date(),
+            MenuAction::SaveAndNextDay => self.save_and_open_next_day(),
+            MenuAction::SaveAndLock => self.save_and_lock(),
             MenuAction::QuickSaveNext => {
                 self.quick_save_and_prepare_next_entry(viewport_height);
             }
@@ -6814,12 +7287,16 @@ impl App {
             MenuAction::BackupHistory => self.open_backup_history_overlay(),
             MenuAction::BackupCleanupPreview => self.open_backup_cleanup_preview_overlay(),
             MenuAction::BackupPolicy => self.open_backup_policy_overlay(),
-            MenuAction::BackupPruneNow => self.prune_backups_now(),
+            MenuAction::BackupPruneNow => self.open_backup_prune_confirm(),
             MenuAction::Backup => self.create_backup_now(),
             MenuAction::RestoreBackup => self.open_restore_prompt(),
             MenuAction::Dashboard => self.open_dashboard_overlay(),
+            MenuAction::TodayBrief => self.open_today_brief_overlay(),
+            MenuAction::WeekCompass => self.open_week_compass_overlay(),
             MenuAction::SyncCenter => self.open_sync_center_overlay(),
             MenuAction::ToggleSoundtrack => self.toggle_soundtrack_playback(),
+            MenuAction::AiSummary => self.open_ai_summary_overlay(),
+            MenuAction::AiCoach => self.open_ai_coach_overlay(),
             MenuAction::ReviewMode => self.open_review_overlay(),
             MenuAction::CheckUpdates => self.open_update_check_overlay(),
             MenuAction::DoctorReport => self.open_doctor_overlay(),
@@ -6852,6 +7329,9 @@ impl App {
             MenuAction::Metadata => self.open_metadata_prompt(),
             MenuAction::ClosingThought => self.open_closing_prompt(),
             MenuAction::ClosingTemplates => self.open_closing_templates_overlay(),
+            MenuAction::ExtractHashtags => self.extract_hashtags_to_metadata(),
+            MenuAction::MoodUp => self.nudge_mood(1),
+            MenuAction::MoodDown => self.nudge_mood(-1),
             MenuAction::ToggleFavorite => self.toggle_favorite_current_date(),
             MenuAction::ToggleReveal => self.toggle_reveal_codes(viewport_height),
             MenuAction::ToggleTypewriter => self.toggle_typewriter_mode(),
@@ -6930,6 +7410,9 @@ impl App {
                 viewport_height,
                 "METADATA INSERTED.",
             ),
+            MenuAction::InsertDailyStarter => {
+                self.insert_daily_starter_template(viewport_height);
+            }
             MenuAction::GlobalSearch => self.open_search_overlay(),
             MenuAction::SearchHistory => self.open_search_history_overlay(),
             MenuAction::SearchScopeToday => {
@@ -7029,6 +7512,8 @@ impl App {
             MenuAction::RandomEntry => self.open_random_saved_entry(),
             MenuAction::PreviousDay => self.open_adjacent_day(-1),
             MenuAction::NextDay => self.open_adjacent_day(1),
+            MenuAction::Yesterday => self.open_adjacent_day(-1),
+            MenuAction::Tomorrow => self.open_adjacent_day(1),
             MenuAction::PreviousEntry => self.open_adjacent_saved_entry(-1),
             MenuAction::NextEntry => self.open_adjacent_saved_entry(1),
             MenuAction::NewEntry => self.open_next_new_entry(),
@@ -7134,6 +7619,23 @@ impl App {
             Ok(pruned) if pruned.is_empty() => self.flash_status("NO BACKUPS PRUNED."),
             Ok(pruned) => self.flash_status(&format!("PRUNED {} BACKUP(S).", pruned.len())),
             Err(error) => self.flash_status(&format!("PRUNE FAILED: {error}")),
+        }
+    }
+
+    fn open_backup_prune_confirm(&mut self) {
+        let Some(vault) = &self.vault else {
+            self.flash_status("LOCKED.");
+            return;
+        };
+        match vault.preview_backup_prune(&self.config.backup_retention) {
+            Ok(backups) if backups.is_empty() => self.flash_status("NO BACKUPS PRUNED."),
+            Ok(backups) => {
+                self.menu = None;
+                self.overlay = Some(Overlay::PruneConfirm {
+                    prune_count: backups.len(),
+                });
+            }
+            Err(error) => self.flash_status(&format!("PRUNE PREVIEW FAILED: {error}")),
         }
     }
 
@@ -7968,6 +8470,43 @@ impl App {
         let _ = self.save_current_date_result();
     }
 
+    fn save_and_open_next_day(&mut self) {
+        if self.vault.is_none() {
+            self.flash_status("LOCKED.");
+            return;
+        }
+        let was_dirty = self.dirty;
+        let did_save = if was_dirty {
+            self.save_current_date_result()
+        } else {
+            true
+        };
+        if !did_save {
+            return;
+        }
+        self.open_next_new_entry();
+        if was_dirty {
+            self.flash_status("SAVED. NEW DAY READY.");
+        } else {
+            self.flash_status("NEW DAY READY.");
+        }
+    }
+
+    fn save_and_lock(&mut self) {
+        if self.vault.is_none() {
+            self.flash_status("LOCKED.");
+            return;
+        }
+        let did_save = if self.dirty {
+            self.save_current_date_result()
+        } else {
+            true
+        };
+        if did_save {
+            self.lock_vault();
+        }
+    }
+
     fn save_current_date_result(&mut self) -> bool {
         let Some(vault) = &self.vault else {
             self.flash_status("LOCKED.");
@@ -8617,6 +9156,9 @@ impl App {
         if !key.modifiers.contains(KeyModifiers::CONTROL) {
             return None;
         }
+        if key.modifiers.contains(KeyModifiers::SHIFT) {
+            return None;
+        }
         let KeyCode::Char(ch) = key.code else {
             return None;
         };
@@ -9101,6 +9643,18 @@ fn on_off(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
+fn ai_remote_requested() -> bool {
+    env::var("BSJ_AI_ENABLE_REMOTE")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn zeroize_optional_string(value: &mut Option<String>) {
     if let Some(mut string) = value.take() {
         string.zeroize();
@@ -9143,6 +9697,7 @@ fn wipe_overlay(overlay: &mut Overlay) {
         Overlay::ConflictChoice(conflict) => conflict.wipe(),
         Overlay::MergeDiff(conflict) => wipe_conflict_state(conflict),
         Overlay::Search(search) => search.wipe(),
+        Overlay::AiCoach(coach) => coach.wipe(),
         Overlay::ReplacePrompt(prompt) => prompt.wipe(),
         Overlay::ReplaceConfirm(confirm) => confirm.wipe(),
         Overlay::MetadataPrompt(prompt) => prompt.wipe(),
@@ -9154,6 +9709,7 @@ fn wipe_overlay(overlay: &mut Overlay) {
         Overlay::Info(info) => info.wipe(),
         Overlay::Picker(picker) => picker.wipe(),
         Overlay::RecoverDraft { draft_text } => draft_text.zeroize(),
+        Overlay::PruneConfirm { .. } => {}
     }
 }
 
@@ -9209,6 +9765,31 @@ fn extract_reveal_tags(body: &str) -> Vec<String> {
         }
         tags.push(cleaned);
         if tags.len() == 3 {
+            break;
+        }
+    }
+    tags
+}
+
+fn extract_all_hashtags(body: &str, max_tags: usize) -> Vec<String> {
+    if max_tags == 0 {
+        return Vec::new();
+    }
+    let mut tags = Vec::new();
+    for token in body.split_whitespace() {
+        let Some(rest) = token.strip_prefix('#') else {
+            continue;
+        };
+        let cleaned = rest
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if cleaned.is_empty() || tags.contains(&cleaned) {
+            continue;
+        }
+        tags.push(cleaned);
+        if tags.len() >= max_tags {
             break;
         }
     }
@@ -10717,6 +11298,69 @@ mod tests {
     }
 
     #[test]
+    fn alt_minus_and_equals_navigate_day_by_day() {
+        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = App::with_initial_date(Some(start));
+        app.overlay = None;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::ALT)),
+            20,
+        );
+        assert_eq!(app.selected_date, start + Duration::days(1));
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('-'), KeyModifiers::ALT)),
+            20,
+        );
+        assert_eq!(app.selected_date, start);
+    }
+
+    #[test]
+    fn ctrl_shift_s_saves_and_opens_next_day() {
+        let temp = tempdir().expect("tempdir");
+        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
+        let viewport_height = 20;
+        let viewport_width = 80;
+
+        type_editor_text(&mut app, "ship notes", viewport_height, viewport_width);
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(
+                KeyCode::Char('S'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            )),
+            viewport_height,
+            viewport_width,
+        );
+
+        assert_eq!(app.selected_date, start + Duration::days(1));
+        assert_eq!(app.status_text(), Some("SAVED. NEW DAY READY."));
+    }
+
+    #[test]
+    fn ctrl_shift_l_saves_then_locks() {
+        let temp = tempdir().expect("tempdir");
+        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
+        let viewport_height = 20;
+        let viewport_width = 80;
+
+        type_editor_text(&mut app, "secure notes", viewport_height, viewport_width);
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(
+                KeyCode::Char('L'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            )),
+            viewport_height,
+            viewport_width,
+        );
+
+        assert!(app.vault.is_none());
+        assert!(matches!(app.overlay, Some(Overlay::UnlockPrompt { .. })));
+    }
+
+    #[test]
     fn date_picker_hjkl_keys_move_selection() {
         let selected = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
         let mut app = App::with_initial_date(Some(selected));
@@ -11281,9 +11925,86 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"Quick Save + Next".to_string()));
+        assert!(labels.contains(&"Save + Next Day".to_string()));
+        assert!(labels.contains(&"Save + Lock".to_string()));
         assert!(labels.contains(&"Export Current".to_string()));
         assert!(labels.contains(&"Backup History".to_string()));
         assert!(labels.contains(&"Backup Cleanup Preview".to_string()));
+        assert!(labels.contains(&"Prune Backups...".to_string()));
+    }
+
+    #[test]
+    fn go_menu_lists_yesterday_and_tomorrow_actions() {
+        let app = App::with_initial_date(None);
+        let labels = app
+            .menu_items(MenuId::Go)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"Yesterday".to_string()));
+        assert!(labels.contains(&"Tomorrow".to_string()));
+    }
+
+    #[test]
+    fn backup_prune_action_opens_confirm_overlay() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+        let metadata = vault::create_vault(&root, &passphrase, None, "Test").expect("create");
+        let unlocked = vault::unlock_vault_with_device(&root, &passphrase, metadata.device_id)
+            .expect("unlock");
+        unlocked
+            .create_backup(&crate::config::BackupRetentionConfig::default())
+            .expect("backup");
+
+        let mut app =
+            App::with_initial_date(Some(NaiveDate::from_ymd_opt(2026, 3, 16).expect("date")));
+        app.vault_path = root;
+        app.vault = Some(unlocked);
+        app.overlay = None;
+        app.config.backup_retention = crate::config::BackupRetentionConfig {
+            daily: 0,
+            weekly: 0,
+            monthly: 0,
+        };
+        let preview_count = app
+            .vault
+            .as_ref()
+            .expect("vault")
+            .preview_backup_prune(&app.config.backup_retention)
+            .expect("preview")
+            .len();
+
+        app.perform_menu_action(MenuAction::BackupPruneNow, 20);
+
+        if preview_count == 0 {
+            assert!(app.overlay().is_none());
+            assert_eq!(app.status_text(), Some("NO BACKUPS PRUNED."));
+        } else {
+            match app.overlay() {
+                Some(Overlay::PruneConfirm { prune_count }) => {
+                    assert_eq!(*prune_count, preview_count);
+                }
+                other => panic!("expected prune confirm overlay, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn backup_prune_confirm_cancel_sets_status() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::PruneConfirm { prune_count: 3 });
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty())),
+            20,
+            80,
+        );
+
+        assert!(app.overlay().is_none());
+        assert_eq!(app.status_text(), Some("PRUNE CANCELED."));
     }
 
     #[test]
@@ -11296,7 +12017,57 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"Insert Opening Line".to_string()));
+        assert!(labels.contains(&"Insert Daily Starter".to_string()));
         assert!(labels.contains(&"Closing Templates".to_string()));
+        assert!(labels.contains(&"Extract #Tags to Metadata".to_string()));
+        assert!(labels.contains(&"Mood Up".to_string()));
+        assert!(labels.contains(&"Mood Down".to_string()));
+    }
+
+    #[test]
+    fn extract_hashtags_action_merges_into_metadata_tags() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.buffer = TextBuffer::from_text("Worked #Launch with #Team and #launch follow-up");
+        app.entry_metadata.tags = vec!["existing".to_string()];
+
+        app.perform_menu_action(MenuAction::ExtractHashtags, 20);
+
+        assert!(app.entry_metadata.tags.contains(&"existing".to_string()));
+        assert!(app.entry_metadata.tags.contains(&"launch".to_string()));
+        assert!(app.entry_metadata.tags.contains(&"team".to_string()));
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn mood_actions_clamp_and_mark_dirty() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.entry_metadata.mood = Some(9);
+        app.dirty = false;
+
+        app.perform_menu_action(MenuAction::MoodUp, 20);
+        assert_eq!(app.entry_metadata.mood, Some(9));
+        assert!(app.dirty);
+
+        app.perform_menu_action(MenuAction::MoodDown, 20);
+        assert_eq!(app.entry_metadata.mood, Some(8));
+    }
+
+    #[test]
+    fn insert_daily_starter_action_writes_template_lines() {
+        let mut app =
+            App::with_initial_date(Some(NaiveDate::from_ymd_opt(2026, 3, 16).expect("date")));
+        app.overlay = None;
+        app.buffer = TextBuffer::new();
+
+        app.perform_menu_action(MenuAction::InsertDailyStarter, 20);
+
+        let body = app.buffer.to_text();
+        assert!(body.contains("--- ENTRY"));
+        assert!(body.contains("WIN:"));
+        assert!(body.contains("BLOCKER:"));
+        assert!(body.contains("NEXT:"));
     }
 
     #[test]
@@ -11471,7 +12242,31 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"Status Dashboard".to_string()));
+        assert!(labels.contains(&"Today Brief".to_string()));
+        assert!(labels.contains(&"Week Compass".to_string()));
         assert!(labels.contains(&"SYSOP Center".to_string()));
+    }
+
+    #[test]
+    fn today_brief_menu_action_opens_info_overlay() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::TodayBrief, 20);
+
+        assert!(matches!(app.overlay(), Some(Overlay::Info(info)) if info.title == "Today Brief"));
+    }
+
+    #[test]
+    fn week_compass_menu_action_opens_info_overlay_when_unlocked() {
+        let temp = tempdir().expect("tempdir");
+        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::WeekCompass, 20);
+
+        assert!(matches!(app.overlay(), Some(Overlay::Info(info)) if info.title == "Week Compass"));
     }
 
     #[test]
@@ -12283,6 +13078,63 @@ mod tests {
         assert!(labels.contains(&"Start Sprint (45m)".to_string()));
         assert!(labels.contains(&"Soundtrack Source".to_string()));
         assert!(labels.contains(&"Toggle Soundtrack".to_string()));
+        assert!(labels.contains(&"Today Brief".to_string()));
+        assert!(labels.contains(&"Week Compass".to_string()));
+        assert!(labels.contains(&"AI Summary (Optional)".to_string()));
+        assert!(labels.contains(&"AI Coach Mode (Optional)".to_string()));
+    }
+
+    #[test]
+    fn ai_summary_action_opens_info_overlay() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.buffer
+            .insert_text("Today I shipped a major fix and closed two blockers.");
+        app.refresh_document_stats();
+
+        app.perform_menu_action(MenuAction::AiSummary, 20);
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "AI Summary");
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("Provider:"));
+                assert!(rendered.contains("AI Summary (Optional)"));
+            }
+            other => panic!("expected AI summary info overlay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ai_coach_overlay_collects_answers_and_inserts_transcript() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        let viewport_height = 20;
+        let viewport_width = 80;
+
+        app.perform_menu_action(MenuAction::AiCoach, viewport_height);
+        let prompt_count = match app.overlay() {
+            Some(Overlay::AiCoach(coach)) => coach.prompts.len(),
+            other => panic!("expected AI coach overlay, got {other:?}"),
+        };
+        assert!(prompt_count > 0);
+
+        for _ in 0..prompt_count {
+            type_editor_text(&mut app, "ok", viewport_height, viewport_width);
+            send_editor_key(
+                &mut app,
+                KeyCode::Enter,
+                KeyModifiers::empty(),
+                viewport_height,
+                viewport_width,
+            );
+        }
+
+        assert!(app.overlay().is_none());
+        let text = app.buffer.to_text();
+        assert!(text.contains("[AI COACH SESSION"));
+        assert!(text.contains("Q1:"));
+        assert!(text.contains("A1: ok"));
     }
 
     #[test]
@@ -12501,12 +13353,12 @@ mod tests {
         app.dirty = false;
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT TYPE  ALT+N NEW DAY  ALT+[ ] SAVED  ALT+,/. DAY")
+            Some("NEXT: TYPE | ALT+N NEW DAY | ALT+[ ] SAVED | ALT+,/. DAY")
         );
         app.dirty = true;
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT F2 SAVE  ALT+N NEW DAY  ALT+Y/0 TODAY")
+            Some("NEXT: F2 SAVE | ALT+N NEW DAY | ALT+Y/0 TODAY")
         );
     }
 
@@ -12750,9 +13602,8 @@ mod tests {
         assert!(rendered.contains(env!("CARGO_PKG_VERSION")));
         assert!(rendered.contains("Awassee LLC and Sean Heiney"));
         assert!(rendered.contains("sean@sean.net"));
-        assert!(rendered.contains("? or Ctrl+/ opens this key guide instantly."));
-        assert!(rendered.contains("Search: Tab fields, / query focus"));
-        assert!(rendered.contains("Ctrl+O/E/W/Y/T/U/L menus."));
+        assert!(rendered.contains("? or Ctrl+/ opens this card instantly."));
+        assert!(rendered.contains("CTRL+O/E/W/Y/T/U/L also opens menus."));
     }
 
     #[test]
@@ -12828,7 +13679,7 @@ mod tests {
         let rendered = render_app(&app, 120, 30);
 
         assert!(rendered.contains("ESC MENUS"));
-        assert!(rendered.contains("? HELP"));
+        assert!(rendered.contains("F1 HELP"));
     }
 
     #[test]

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+## v1.1.0
+
+- added search power controls: `--range`, `--match-mode all|any|phrase`, `--hits-per-entry`, `--sort newest|oldest|relevance`, and `--summary`
+- added timeline preset management: `--save-preset`, `--preset`, `--list-presets`, and `--delete-preset`
+- added timeline calendar grouping output with `--group-by day|week|month`
+- added review `--range` shortcuts and per-run word-goal analytics with `--goal`
+- expanded automated coverage with new unit tests for range presets, grouping rollups, search summary/ranking, timeline preset rendering, and word-goal stats
+- added optional AI reflection surfaces: `bsj ai summary`, `bsj ai coach`, plus `TOOLS -> AI Summary (Optional)` and `TOOLS -> AI Coach Mode (Optional)` in the TUI
+- added local heuristic fallback for AI summary/coaching when remote AI is not configured, preserving default local-first behavior
+
 ## v1.0.3
 
 - added advanced review and timeline CLI capabilities: range-bounded review, JSON review output, minimum top-count thresholds, weekday/mood/metadata-presence timeline filters, and timeline summary/CSV/JSON output formats

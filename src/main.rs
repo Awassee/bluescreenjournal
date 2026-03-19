@@ -1,3 +1,4 @@
+mod ai;
 mod config;
 mod doctor;
 mod help;
@@ -29,7 +30,7 @@ use std::{
     version = env!("CARGO_PKG_VERSION"),
     about = "BlueScreen Journal",
     long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, a menu-driven TUI, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.",
-    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --count-only\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
 )]
 struct Cli {
     #[arg(
@@ -61,6 +62,12 @@ enum Command {
         from: Option<String>,
         #[arg(long)]
         to: Option<String>,
+        #[arg(
+            long,
+            value_enum,
+            help = "Quick date range preset (overrides preset range)"
+        )]
+        range: Option<DateRangeArg>,
         #[arg(long, help = "Print matches in JSON format")]
         json: bool,
         #[arg(
@@ -81,6 +88,27 @@ enum Command {
             help = "Snippet context characters around each match"
         )]
         context: usize,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = SearchMatchArg::All,
+            help = "Token matching mode"
+        )]
+        match_mode: SearchMatchArg,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = SearchSortArg::Newest,
+            help = "Result ordering"
+        )]
+        sort: SearchSortArg,
+        #[arg(long, default_value_t = 1, help = "Maximum matches to emit per entry")]
+        hits_per_entry: usize,
+        #[arg(
+            long,
+            help = "Print aggregate search stats instead of individual matches"
+        )]
+        summary: bool,
         #[arg(long, help = "Run a saved preset by name")]
         preset: Option<String>,
         #[arg(long, help = "List saved search presets and exit")]
@@ -104,6 +132,8 @@ enum Command {
         from: Option<String>,
         #[arg(long, help = "Limit review metrics to entries on or before this date")]
         to: Option<String>,
+        #[arg(long, value_enum, help = "Quick date range preset")]
+        range: Option<DateRangeArg>,
         #[arg(long, help = "Print the review report in JSON")]
         json: bool,
         #[arg(
@@ -112,6 +142,8 @@ enum Command {
             help = "Minimum frequency to include in top tags/people/projects"
         )]
         min_count: usize,
+        #[arg(long, help = "Daily word goal override for this review run")]
+        goal: Option<usize>,
     },
     /// Print a timeline of saved entries with filters
     Timeline {
@@ -119,6 +151,8 @@ enum Command {
         from: Option<String>,
         #[arg(long)]
         to: Option<String>,
+        #[arg(long, value_enum, help = "Quick date range preset")]
+        range: Option<DateRangeArg>,
         #[arg(long, help = "Case-insensitive text filter over preview and metadata")]
         query: Option<String>,
         #[arg(long, help = "Filter to entries tagged with this value")]
@@ -154,12 +188,26 @@ enum Command {
         #[arg(
             long,
             value_enum,
+            help = "Aggregate timeline rows by calendar group instead of individual entries"
+        )]
+        group_by: Option<TimelineGroupByArg>,
+        #[arg(
+            long,
+            value_enum,
             default_value_t = TimelineFormatArg::Text,
             help = "Output format"
         )]
         format: TimelineFormatArg,
         #[arg(long, help = "Print aggregate timeline summary instead of rows")]
         summary: bool,
+        #[arg(long, help = "Run a saved timeline preset by name")]
+        preset: Option<String>,
+        #[arg(long, help = "List saved timeline presets and exit")]
+        list_presets: bool,
+        #[arg(long, help = "Save this timeline filter as a preset")]
+        save_preset: Option<String>,
+        #[arg(long, help = "Delete a saved timeline preset by name and exit")]
+        delete_preset: Option<String>,
     },
     /// Launch directly on the next date without a saved revision
     Next {
@@ -170,6 +218,11 @@ enum Command {
     Prompts {
         #[command(subcommand)]
         command: PromptCommand,
+    },
+    /// Optional AI coach prompts and summaries (off by default)
+    Ai {
+        #[command(subcommand)]
+        command: AiCommand,
     },
     /// Sync encrypted revisions with a folder, S3, or WebDAV target
     Sync {
@@ -263,6 +316,55 @@ enum PromptCommand {
         date: Option<String>,
         #[arg(long, help = "Print prompt output as JSON")]
         json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AiCommand {
+    /// Summarize one date or a date range using optional AI assistance
+    Summary {
+        #[arg(long, help = "Summarize one specific date (YYYY-MM-DD)")]
+        date: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, value_enum, help = "Quick date range preset")]
+        range: Option<DateRangeArg>,
+        #[arg(
+            long,
+            default_value_t = 5,
+            help = "Maximum summary lines for text output"
+        )]
+        max_points: usize,
+        #[arg(long, help = "Print summary output as JSON")]
+        json: bool,
+        #[arg(
+            long,
+            help = "Use remote AI if BSJ_AI_ENABLE_REMOTE=1 and API key are configured"
+        )]
+        remote: bool,
+    },
+    /// Generate reflective AI-style coaching questions for a date
+    Coach {
+        #[arg(
+            long,
+            help = "Generate prompts for one date (YYYY-MM-DD, default=today)"
+        )]
+        date: Option<String>,
+        #[arg(
+            long,
+            default_value_t = 5,
+            help = "Number of coaching questions to generate"
+        )]
+        questions: usize,
+        #[arg(long, help = "Print prompts as JSON")]
+        json: bool,
+        #[arg(
+            long,
+            help = "Use remote AI if BSJ_AI_ENABLE_REMOTE=1 and API key are configured"
+        )]
+        remote: bool,
     },
 }
 
@@ -411,11 +513,53 @@ enum ExportFormatArg {
     Markdown,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DateRangeArg {
+    Today,
+    Yesterday,
+    Last7,
+    Last30,
+    ThisMonth,
+    LastMonth,
+    Ytd,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SearchMatchArg {
+    All,
+    Any,
+    Phrase,
+}
+
+impl SearchMatchArg {
+    fn to_search_mode(self) -> search::SearchMatchMode {
+        match self {
+            Self::All => search::SearchMatchMode::All,
+            Self::Any => search::SearchMatchMode::Any,
+            Self::Phrase => search::SearchMatchMode::Phrase,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+enum SearchSortArg {
+    Newest,
+    Oldest,
+    Relevance,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 enum TimelineFormatArg {
     Text,
     Json,
     Csv,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+enum TimelineGroupByArg {
+    Day,
+    Week,
+    Month,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, Hash)]
@@ -505,12 +649,17 @@ fn main() {
             query,
             from,
             to,
+            range,
             json,
             limit,
             count_only,
             case_sensitive,
             whole_word,
             context,
+            match_mode,
+            sort,
+            hits_per_entry,
+            summary,
             preset,
             list_presets,
             save_preset,
@@ -535,12 +684,17 @@ fn main() {
                 query,
                 from,
                 to,
+                range,
                 json_output: json,
                 limit,
                 count_only,
                 case_sensitive,
                 whole_word,
                 context_chars: context,
+                match_mode,
+                sort,
+                hits_per_entry,
+                summary,
                 preset_name: preset,
                 list_presets,
                 save_preset,
@@ -556,8 +710,10 @@ fn main() {
             on_this_day,
             from,
             to,
+            range,
             json,
             min_count,
+            goal,
         }) => {
             let from = match parse_optional_date_arg("from", from.as_deref()) {
                 Ok(date) => date,
@@ -579,8 +735,10 @@ fn main() {
                 on_this_day_limit: on_this_day,
                 from,
                 to,
+                range,
                 json_output: json,
                 min_count,
+                goal_override: goal,
             }) {
                 log::error!("review failed: {error}");
                 eprintln!("{error}");
@@ -590,6 +748,7 @@ fn main() {
         Some(Command::Timeline {
             from,
             to,
+            range,
             query,
             tag,
             person,
@@ -604,8 +763,13 @@ fn main() {
             favorites,
             conflicts,
             metadata,
+            group_by,
             format,
             summary,
+            preset,
+            list_presets,
+            save_preset,
+            delete_preset,
         }) => {
             let from = match parse_optional_date_arg("from", from.as_deref()) {
                 Ok(date) => date,
@@ -625,6 +789,7 @@ fn main() {
             if let Err(error) = run_cli_timeline(TimelineFilters {
                 from,
                 to,
+                range,
                 query,
                 tag,
                 person,
@@ -639,8 +804,13 @@ fn main() {
                 favorites_only: favorites,
                 conflicts_only: conflicts,
                 show_metadata: metadata,
+                group_by,
                 format,
                 summary_only: summary,
+                preset_name: preset,
+                list_presets,
+                save_preset,
+                delete_preset,
             }) {
                 log::error!("timeline failed: {error}");
                 eprintln!("{error}");
@@ -665,6 +835,13 @@ fn main() {
         Some(Command::Prompts { command }) => {
             if let Err(error) = run_cli_prompts(command) {
                 log::error!("prompts failed: {error}");
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        Some(Command::Ai { command }) => {
+            if let Err(error) = run_cli_ai(command) {
+                log::error!("ai command failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
             }
@@ -754,17 +931,51 @@ fn parse_date_arg(label: &str, value: &str) -> Result<NaiveDate, String> {
         .map_err(|_| format!("invalid {label} '{value}'; expected YYYY-MM-DD"))
 }
 
+fn resolve_range_bounds(range: DateRangeArg, today: NaiveDate) -> (NaiveDate, NaiveDate) {
+    match range {
+        DateRangeArg::Today => (today, today),
+        DateRangeArg::Yesterday => {
+            let date = today - chrono::Duration::days(1);
+            (date, date)
+        }
+        DateRangeArg::Last7 => (today - chrono::Duration::days(6), today),
+        DateRangeArg::Last30 => (today - chrono::Duration::days(29), today),
+        DateRangeArg::ThisMonth => {
+            let from = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).expect("date");
+            (from, today)
+        }
+        DateRangeArg::LastMonth => {
+            let first_of_month =
+                NaiveDate::from_ymd_opt(today.year(), today.month(), 1).expect("date");
+            let last_of_previous = first_of_month - chrono::Duration::days(1);
+            let from =
+                NaiveDate::from_ymd_opt(last_of_previous.year(), last_of_previous.month(), 1)
+                    .expect("date");
+            (from, last_of_previous)
+        }
+        DateRangeArg::Ytd => {
+            let from = NaiveDate::from_ymd_opt(today.year(), 1, 1).expect("date");
+            (from, today)
+        }
+    }
+}
+
 #[derive(Debug)]
 struct SearchCliArgs {
     query: Option<String>,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
+    range: Option<DateRangeArg>,
     json_output: bool,
     limit: usize,
     count_only: bool,
     case_sensitive: bool,
     whole_word: bool,
     context_chars: usize,
+    match_mode: SearchMatchArg,
+    sort: SearchSortArg,
+    hits_per_entry: usize,
+    summary: bool,
     preset_name: Option<String>,
     list_presets: bool,
     save_preset: Option<String>,
@@ -776,12 +987,17 @@ fn run_cli_search(args: SearchCliArgs) -> Result<(), String> {
         query,
         from,
         to,
+        range,
         json_output,
         limit,
         count_only,
         case_sensitive,
         whole_word,
         context_chars,
+        match_mode,
+        sort,
+        hits_per_entry,
+        summary,
         preset_name,
         list_presets,
         save_preset,
@@ -789,6 +1005,9 @@ fn run_cli_search(args: SearchCliArgs) -> Result<(), String> {
     } = args;
 
     log::info!("running CLI search");
+    if hits_per_entry == 0 {
+        return Err("--hits-per-entry must be at least 1".to_string());
+    }
     let mut config = config::AppConfig::load_or_default();
 
     if list_presets {
@@ -841,8 +1060,11 @@ fn run_cli_search(args: SearchCliArgs) -> Result<(), String> {
         "preset to",
         preset.as_ref().and_then(|preset| preset.to.as_deref()),
     )?;
-    let from = from.or(preset_from);
-    let to = to.or(preset_to);
+    let (range_from, range_to) = range
+        .map(|range| resolve_range_bounds(range, Local::now().date_naive()))
+        .map_or((None, None), |(from, to)| (Some(from), Some(to)));
+    let from = from.or(range_from).or(preset_from);
+    let to = to.or(range_to).or(preset_to);
 
     if let (Some(from), Some(to)) = (from, to) {
         if from > to {
@@ -870,7 +1092,7 @@ fn run_cli_search(args: SearchCliArgs) -> Result<(), String> {
     let index = search::SearchIndex::build(documents);
     let mut results = index.search_with_options(
         &search::SearchQuery {
-            text: effective_query,
+            text: effective_query.clone(),
             from,
             to,
         },
@@ -878,11 +1100,44 @@ fn run_cli_search(args: SearchCliArgs) -> Result<(), String> {
             case_sensitive,
             whole_word,
             context_chars,
+            match_mode: match_mode.to_search_mode(),
+            max_hits_per_document: hits_per_entry,
         },
     );
 
+    sort_search_results(&mut results, sort, &effective_query, case_sensitive);
+
     if limit > 0 && results.len() > limit {
         results.truncate(limit);
+    }
+
+    if summary {
+        let summary = build_search_summary(&results);
+        if json_output {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&summary)
+                    .map_err(|error| format!("json failed: {error}"))?
+            );
+        } else {
+            println!("Search Summary");
+            println!("Matches      : {}", summary.total_matches);
+            println!("Dates matched: {}", summary.matched_dates);
+            println!(
+                "Date range   : {} .. {}",
+                summary.first_date.as_deref().unwrap_or("-"),
+                summary.last_date.as_deref().unwrap_or("-")
+            );
+            println!("Top dates");
+            if summary.top_dates.is_empty() {
+                println!("  (none)");
+            } else {
+                for (date, count) in &summary.top_dates {
+                    println!("  {date}: {count}");
+                }
+            }
+        }
+        return Ok(());
     }
 
     if count_only {
@@ -947,10 +1202,108 @@ fn run_cli_search(args: SearchCliArgs) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct SearchSummaryCli {
+    total_matches: usize,
+    matched_dates: usize,
+    first_date: Option<String>,
+    last_date: Option<String>,
+    top_dates: Vec<(String, usize)>,
+}
+
+fn sort_search_results(
+    results: &mut [search::SearchResult],
+    sort: SearchSortArg,
+    query_text: &str,
+    case_sensitive: bool,
+) {
+    match sort {
+        SearchSortArg::Newest => {
+            results.sort_by(|left, right| {
+                right
+                    .date
+                    .cmp(&left.date)
+                    .then_with(|| left.row.cmp(&right.row))
+                    .then_with(|| left.start_col.cmp(&right.start_col))
+            });
+        }
+        SearchSortArg::Oldest => {
+            results.sort_by(|left, right| {
+                left.date
+                    .cmp(&right.date)
+                    .then_with(|| left.row.cmp(&right.row))
+                    .then_with(|| left.start_col.cmp(&right.start_col))
+            });
+        }
+        SearchSortArg::Relevance => {
+            let query_cmp = if case_sensitive {
+                query_text.to_string()
+            } else {
+                query_text.to_lowercase()
+            };
+            results.sort_by(|left, right| {
+                let left_score = search_relevance_score(left, &query_cmp, case_sensitive);
+                let right_score = search_relevance_score(right, &query_cmp, case_sensitive);
+                right_score
+                    .cmp(&left_score)
+                    .then_with(|| right.date.cmp(&left.date))
+                    .then_with(|| left.row.cmp(&right.row))
+                    .then_with(|| left.start_col.cmp(&right.start_col))
+            });
+        }
+    }
+}
+
+fn search_relevance_score(
+    result: &search::SearchResult,
+    query_cmp: &str,
+    case_sensitive: bool,
+) -> usize {
+    let text = if case_sensitive {
+        result.matched_text.clone()
+    } else {
+        result.matched_text.to_lowercase()
+    };
+    let exact_bonus = usize::from(text == query_cmp) * 1000;
+    exact_bonus + text.chars().count()
+}
+
+fn build_search_summary(results: &[search::SearchResult]) -> SearchSummaryCli {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for result in results {
+        let key = result.date.format("%Y-%m-%d").to_string();
+        *counts.entry(key).or_insert(0) += 1;
+    }
+
+    let mut top_dates = counts
+        .iter()
+        .map(|(date, count)| (date.clone(), *count))
+        .collect::<Vec<_>>();
+    top_dates.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| right.0.cmp(&left.0)));
+    top_dates.truncate(10);
+
+    SearchSummaryCli {
+        total_matches: results.len(),
+        matched_dates: counts.len(),
+        first_date: results
+            .iter()
+            .map(|result| result.date)
+            .min()
+            .map(|date| date.format("%Y-%m-%d").to_string()),
+        last_date: results
+            .iter()
+            .map(|result| result.date)
+            .max()
+            .map(|date| date.format("%Y-%m-%d").to_string()),
+        top_dates,
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TimelineFilters {
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
+    range: Option<DateRangeArg>,
     query: Option<String>,
     tag: Option<String>,
     person: Option<String>,
@@ -965,8 +1318,13 @@ struct TimelineFilters {
     favorites_only: bool,
     conflicts_only: bool,
     show_metadata: bool,
+    group_by: Option<TimelineGroupByArg>,
     format: TimelineFormatArg,
     summary_only: bool,
+    preset_name: Option<String>,
+    list_presets: bool,
+    save_preset: Option<String>,
+    delete_preset: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -975,8 +1333,10 @@ struct ReviewCliArgs {
     on_this_day_limit: usize,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
+    range: Option<DateRangeArg>,
     json_output: bool,
     min_count: usize,
+    goal_override: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1001,6 +1361,17 @@ struct ReviewHitCli {
     preview: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct ReviewWordStatsCli {
+    total_words: usize,
+    entries_counted: usize,
+    avg_words_per_entry: f64,
+    active_days: usize,
+    goal: Option<usize>,
+    days_meeting_goal: usize,
+    goal_hit_rate: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct TimelineRowCli {
     date: String,
@@ -1019,6 +1390,14 @@ struct TimelineSummaryCli {
     first_date: Option<String>,
     last_date: Option<String>,
     moods: Vec<(u8, usize)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct TimelineGroupRowCli {
+    group: String,
+    entries: usize,
+    conflicts: usize,
+    favorites: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1083,7 +1462,17 @@ const PROMPT_TEMPLATES: &[PromptTemplate] = &[
 
 fn run_cli_review(args: ReviewCliArgs) -> Result<(), String> {
     log::info!("running CLI review");
-    if let (Some(from), Some(to)) = (args.from, args.to)
+    if args.goal_override == Some(0) {
+        return Err("--goal must be at least 1".to_string());
+    }
+    let (range_from, range_to) = args
+        .range
+        .map(|range| resolve_range_bounds(range, Local::now().date_naive()))
+        .map_or((None, None), |(from, to)| (Some(from), Some(to)));
+    let from = args.from.or(range_from);
+    let to = args.to.or(range_to);
+
+    if let (Some(from), Some(to)) = (from, to)
         && from > to
     {
         return Err("--from cannot be after --to".to_string());
@@ -1095,13 +1484,30 @@ fn run_cli_review(args: ReviewCliArgs) -> Result<(), String> {
     let entries = vault
         .list_index_entries(120)
         .map_err(|error| format!("review failed: {error}"))?;
-    let mut review = summarize_review_entries(entries, today, args.from, args.to, args.min_count);
+    let mut review = summarize_review_entries(entries, today, from, to, args.min_count);
     review.on_this_day.truncate(args.on_this_day_limit.max(1));
+    let word_stats = compute_review_word_stats(
+        &vault
+            .load_search_documents()
+            .map_err(|error| format!("review failed: {error}"))?,
+        from,
+        to,
+        args.goal_override.or(config.daily_word_goal),
+    );
 
     if args.json_output {
+        #[derive(Serialize)]
+        struct ReviewOutput<'a> {
+            summary: &'a ReviewCliSummary,
+            words: ReviewWordStatsCli,
+        }
+        let payload = ReviewOutput {
+            summary: &review,
+            words: word_stats.clone(),
+        };
         println!(
             "{}",
-            serde_json::to_string_pretty(&review)
+            serde_json::to_string_pretty(&payload)
                 .map_err(|error| format!("failed to serialize review JSON: {error}"))?
         );
         return Ok(());
@@ -1118,6 +1524,16 @@ fn run_cli_review(args: ReviewCliArgs) -> Result<(), String> {
     println!("Current streak: {} day(s)", review.streak_days);
     println!("This week     : {}", review.entries_this_week);
     println!("This month    : {}", review.entries_this_month);
+    println!("Words total   : {}", word_stats.total_words);
+    println!("Words/entry   : {:.1}", word_stats.avg_words_per_entry);
+    if let Some(goal) = word_stats.goal {
+        println!(
+            "Goal ({goal}/day): {}/{} day(s) ({:.0}%)",
+            word_stats.days_meeting_goal,
+            word_stats.active_days,
+            word_stats.goal_hit_rate * 100.0
+        );
+    }
     println!();
 
     println!("Top tags");
@@ -1138,15 +1554,116 @@ fn run_cli_review(args: ReviewCliArgs) -> Result<(), String> {
     Ok(())
 }
 
-fn run_cli_timeline(filters: TimelineFilters) -> Result<(), String> {
+fn run_cli_timeline(mut filters: TimelineFilters) -> Result<(), String> {
     log::info!("running CLI timeline");
+    let mut config = config::AppConfig::load_or_default();
+
+    if filters.list_presets {
+        let lines = render_timeline_preset_lines(&config);
+        if lines.is_empty() {
+            println!("No saved timeline presets.");
+        } else {
+            for line in lines {
+                println!("{line}");
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(name) = filters.delete_preset.as_deref() {
+        if config.remove_timeline_preset(name) {
+            config
+                .save()
+                .map_err(|error| format!("failed to save config: {error}"))?;
+            println!("Deleted timeline preset: {}", name.trim());
+            return Ok(());
+        }
+        return Err(format!("timeline preset not found: {name}"));
+    }
+
+    let preset = if let Some(name) = filters.preset_name.as_deref() {
+        Some(
+            config
+                .timeline_preset(name)
+                .cloned()
+                .ok_or_else(|| format!("timeline preset not found: {name}"))?,
+        )
+    } else {
+        None
+    };
+
+    let preset_from = parse_optional_date_arg(
+        "preset from",
+        preset.as_ref().and_then(|p| p.from.as_deref()),
+    )?;
+    let preset_to =
+        parse_optional_date_arg("preset to", preset.as_ref().and_then(|p| p.to.as_deref()))?;
+    let (range_from, range_to) = filters
+        .range
+        .map(|range| resolve_range_bounds(range, Local::now().date_naive()))
+        .map_or((None, None), |(from, to)| (Some(from), Some(to)));
+
+    filters.from = filters.from.or(range_from).or(preset_from);
+    filters.to = filters.to.or(range_to).or(preset_to);
+    if filters.query.is_none() {
+        filters.query = preset.as_ref().and_then(|p| p.query.clone());
+    }
+    if filters.tag.is_none() {
+        filters.tag = preset.as_ref().and_then(|p| p.tag.clone());
+    }
+    if filters.person.is_none() {
+        filters.person = preset.as_ref().and_then(|p| p.person.clone());
+    }
+    if filters.project.is_none() {
+        filters.project = preset.as_ref().and_then(|p| p.project.clone());
+    }
+    if filters.mood.is_none() {
+        filters.mood = preset.as_ref().and_then(|p| p.mood);
+    }
+
+    if let Some(name) = filters.save_preset.as_deref() {
+        config.upsert_timeline_preset(config::TimelinePresetConfig {
+            name: name.trim().to_string(),
+            from: filters.from.map(|date| date.format("%Y-%m-%d").to_string()),
+            to: filters.to.map(|date| date.format("%Y-%m-%d").to_string()),
+            query: filters
+                .query
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            tag: filters
+                .tag
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            person: filters
+                .person
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            project: filters
+                .project
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            mood: filters.mood,
+        })?;
+        config
+            .save()
+            .map_err(|error| format!("failed to save config: {error}"))?;
+        println!("Saved timeline preset: {}", name.trim());
+    }
+
     if let (Some(from), Some(to)) = (filters.from, filters.to)
         && from > to
     {
         return Err("--from cannot be after --to".to_string());
     }
 
-    let config = config::AppConfig::load_or_default();
     let vault = unlock_cli_vault(&config)?;
     let entries = vault
         .list_index_entries(120)
@@ -1155,6 +1672,7 @@ fn run_cli_timeline(filters: TimelineFilters) -> Result<(), String> {
     let show_metadata = filters.show_metadata;
     let format = filters.format;
     let summary_only = filters.summary_only;
+    let group_by = filters.group_by;
     let entries = filter_timeline_entries(entries, filters, &favorite_dates);
 
     if entries.is_empty() {
@@ -1164,7 +1682,45 @@ fn run_cli_timeline(filters: TimelineFilters) -> Result<(), String> {
             }
             TimelineFormatArg::Json => println!("[]"),
             TimelineFormatArg::Csv => {
-                println!("date,entry_number,favorite,conflict,preview,metadata")
+                if group_by.is_some() {
+                    println!("group,entries,conflicts,favorites");
+                } else {
+                    println!("date,entry_number,favorite,conflict,preview,metadata");
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(group_by) = group_by {
+        let rows = group_timeline_entries(&entries, &favorite_dates, group_by);
+        match format {
+            TimelineFormatArg::Text => {
+                for row in &rows {
+                    println!(
+                        "{}  entries={} conflicts={} favorites={}",
+                        row.group, row.entries, row.conflicts, row.favorites
+                    );
+                }
+            }
+            TimelineFormatArg::Json => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows)
+                        .map_err(|error| format!("failed to serialize timeline JSON: {error}"))?
+                );
+            }
+            TimelineFormatArg::Csv => {
+                println!("group,entries,conflicts,favorites");
+                for row in &rows {
+                    println!(
+                        "{},{},{},{}",
+                        escape_csv_cell(&row.group),
+                        row.entries,
+                        row.conflicts,
+                        row.favorites
+                    );
+                }
             }
         }
         return Ok(());
@@ -1373,6 +1929,156 @@ fn run_cli_prompts(command: PromptCommand) -> Result<(), String> {
     Ok(())
 }
 
+fn run_cli_ai(command: AiCommand) -> Result<(), String> {
+    log::info!("running CLI ai command");
+    let config = config::AppConfig::load_or_default();
+    let vault = unlock_cli_vault(&config)?;
+
+    match command {
+        AiCommand::Summary {
+            date,
+            from,
+            to,
+            range,
+            max_points,
+            json,
+            remote,
+        } => {
+            let date = parse_optional_date_arg("date", date.as_deref())?;
+            let mut from = parse_optional_date_arg("from", from.as_deref())?;
+            let mut to = parse_optional_date_arg("to", to.as_deref())?;
+            if let Some(range) = range {
+                let (range_from, range_to) = resolve_range_bounds(range, Local::now().date_naive());
+                from = from.or(Some(range_from));
+                to = to.or(Some(range_to));
+            }
+            if let Some(date) = date {
+                from = Some(date);
+                to = Some(date);
+            }
+            if let (Some(from), Some(to)) = (from, to)
+                && from > to
+            {
+                return Err("--from cannot be after --to".to_string());
+            }
+
+            let documents = vault
+                .load_search_documents()
+                .map_err(|error| format!("failed to load entries: {error}"))?;
+            let mut selected = documents
+                .into_iter()
+                .filter(|doc| search::matches_date_filter(doc.date, from, to))
+                .collect::<Vec<_>>();
+            if selected.is_empty() {
+                return Err("no entries found for requested AI summary scope".to_string());
+            }
+            selected.sort_by(|left, right| left.date.cmp(&right.date));
+            let context = selected
+                .iter()
+                .map(|doc| {
+                    format!(
+                        "DATE {}\nENTRY {}\n{}\n",
+                        doc.date.format("%Y-%m-%d"),
+                        doc.entry_number,
+                        doc.body
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let mode = if remote {
+                ai::AiRequestMode::RemoteIfConfigured
+            } else {
+                ai::AiRequestMode::LocalOnly
+            };
+            let summary = ai::summarize_text(&context, max_points.max(1), mode);
+            if json {
+                #[derive(Serialize)]
+                struct Payload {
+                    provider: String,
+                    from: Option<String>,
+                    to: Option<String>,
+                    entry_count: usize,
+                    summary: String,
+                }
+                let payload = Payload {
+                    provider: summary.provider,
+                    from: from.map(|value| value.format("%Y-%m-%d").to_string()),
+                    to: to.map(|value| value.format("%Y-%m-%d").to_string()),
+                    entry_count: selected.len(),
+                    summary: summary.text,
+                };
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&payload)
+                        .map_err(|error| format!("failed to serialize AI summary JSON: {error}"))?
+                );
+                return Ok(());
+            }
+
+            println!(
+                "AI Summary [{}] {}..{} ({} entries)\n",
+                summary.provider,
+                from.map(|value| value.format("%Y-%m-%d").to_string())
+                    .unwrap_or_else(|| "start".to_string()),
+                to.map(|value| value.format("%Y-%m-%d").to_string())
+                    .unwrap_or_else(|| "now".to_string()),
+                selected.len(),
+            );
+            println!("{}", summary.text);
+        }
+        AiCommand::Coach {
+            date,
+            questions,
+            json,
+            remote,
+        } => {
+            let date = parse_optional_date_arg("date", date.as_deref())?
+                .unwrap_or_else(|| Local::now().date_naive());
+            let context = vault
+                .export_entry(date)
+                .map_err(|error| format!("failed to read entry: {error}"))?
+                .map(|entry| entry.body)
+                .unwrap_or_default();
+            let mode = if remote {
+                ai::AiRequestMode::RemoteIfConfigured
+            } else {
+                ai::AiRequestMode::LocalOnly
+            };
+            let coach = ai::coach_questions(&context, questions.max(1), mode);
+            if json {
+                #[derive(Serialize)]
+                struct Payload {
+                    provider: String,
+                    date: String,
+                    questions: Vec<String>,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&Payload {
+                        provider: coach.provider,
+                        date: date.format("%Y-%m-%d").to_string(),
+                        questions: coach.questions,
+                    })
+                    .map_err(|error| format!("failed to serialize AI coach JSON: {error}"))?
+                );
+                return Ok(());
+            }
+
+            println!(
+                "AI Coach [{}] for {}\n",
+                coach.provider,
+                date.format("%Y-%m-%d")
+            );
+            for (idx, question) in coach.questions.iter().enumerate() {
+                println!("Q{}: {}", idx + 1, question);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn filter_timeline_entries(
     mut entries: Vec<vault::IndexEntry>,
     filters: TimelineFilters,
@@ -1556,6 +2262,56 @@ fn summarize_review_entries(
     }
 }
 
+fn compute_review_word_stats(
+    documents: &[search::SearchDocument],
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    goal: Option<usize>,
+) -> ReviewWordStatsCli {
+    let mut total_words = 0usize;
+    let mut entries_counted = 0usize;
+    let mut words_by_day = BTreeMap::<NaiveDate, usize>::new();
+
+    for document in documents {
+        if !search::matches_date_filter(document.date, from, to) {
+            continue;
+        }
+        let words = search::tokenize(&document.body).len();
+        total_words += words;
+        entries_counted += 1;
+        *words_by_day.entry(document.date).or_insert(0) += words;
+    }
+
+    let active_days = words_by_day.len();
+    let days_meeting_goal = goal
+        .map(|goal| {
+            words_by_day
+                .values()
+                .filter(|total| **total >= goal)
+                .count()
+        })
+        .unwrap_or(0);
+    let goal_hit_rate = if goal.is_some() && active_days > 0 {
+        days_meeting_goal as f64 / active_days as f64
+    } else {
+        0.0
+    };
+
+    ReviewWordStatsCli {
+        total_words,
+        entries_counted,
+        avg_words_per_entry: if entries_counted > 0 {
+            total_words as f64 / entries_counted as f64
+        } else {
+            0.0
+        },
+        active_days,
+        goal,
+        days_meeting_goal,
+        goal_hit_rate,
+    }
+}
+
 fn top_counts_from_strings<I>(values: I, min_count: usize) -> Vec<(String, usize)>
 where
     I: IntoIterator<Item = String>,
@@ -1627,6 +2383,42 @@ fn build_timeline_summary(
         last_date,
         moods: mood_counts.into_iter().collect(),
     }
+}
+
+fn group_timeline_entries(
+    entries: &[vault::IndexEntry],
+    favorite_dates: &HashSet<NaiveDate>,
+    group_by: TimelineGroupByArg,
+) -> Vec<TimelineGroupRowCli> {
+    let mut grouped = BTreeMap::<String, TimelineGroupRowCli>::new();
+
+    for entry in entries {
+        let label = match group_by {
+            TimelineGroupByArg::Day => entry.date.format("%Y-%m-%d").to_string(),
+            TimelineGroupByArg::Week => {
+                let iso = entry.date.iso_week();
+                format!("{}-W{:02}", iso.year(), iso.week())
+            }
+            TimelineGroupByArg::Month => entry.date.format("%Y-%m").to_string(),
+        };
+        let row = grouped.entry(label.clone()).or_insert(TimelineGroupRowCli {
+            group: label,
+            entries: 0,
+            conflicts: 0,
+            favorites: 0,
+        });
+        row.entries += 1;
+        if entry.has_conflict {
+            row.conflicts += 1;
+        }
+        if favorite_dates.contains(&entry.date) {
+            row.favorites += 1;
+        }
+    }
+
+    let mut rows = grouped.into_values().collect::<Vec<_>>();
+    rows.sort_by(|left, right| right.group.cmp(&left.group));
+    rows
 }
 
 fn escape_csv_cell(value: &str) -> String {
@@ -3098,6 +3890,42 @@ fn render_search_preset_lines(config: &config::AppConfig) -> Vec<String> {
         .collect()
 }
 
+fn render_timeline_preset_lines(config: &config::AppConfig) -> Vec<String> {
+    config
+        .timeline_presets
+        .iter()
+        .map(|preset| {
+            let mut filters = Vec::new();
+            if let Some(query) = preset.query.as_deref() {
+                filters.push(format!("query={query}"));
+            }
+            if let Some(tag) = preset.tag.as_deref() {
+                filters.push(format!("tag={tag}"));
+            }
+            if let Some(person) = preset.person.as_deref() {
+                filters.push(format!("person={person}"));
+            }
+            if let Some(project) = preset.project.as_deref() {
+                filters.push(format!("project={project}"));
+            }
+            if let Some(mood) = preset.mood {
+                filters.push(format!("mood={mood}"));
+            }
+            let filter_text = if filters.is_empty() {
+                "-".to_string()
+            } else {
+                filters.join(";")
+            };
+            format!(
+                "{}\t{}\t{}",
+                preset.name,
+                preset_range_label(preset.from.as_deref(), preset.to.as_deref()),
+                filter_text
+            )
+        })
+        .collect()
+}
+
 fn preset_range_label(from: Option<&str>, to: Option<&str>) -> String {
     match (from.map(str::trim), to.map(str::trim)) {
         (Some(from), Some(to)) if !from.is_empty() && !to.is_empty() => format!("{from}..{to}"),
@@ -3115,13 +3943,19 @@ fn write_plaintext_output(path: &Path, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, PromptCategoryArg, SysopCommand, TimelineFilters, TimelineFormatArg,
-        WeekdayArg, build_timeline_summary, deterministic_prompt_for_date, escape_csv_cell,
-        filter_timeline_entries, format_metadata_stamp, next_blank_date, parse_favorite_dates,
-        preset_range_label, prompts_for_category, rank_lines, render_markdown_export,
-        render_search_preset_lines, summarize_review_entries,
+        Cli, Command, DateRangeArg, PromptCategoryArg, SearchSortArg, SysopCommand,
+        TimelineFilters, TimelineFormatArg, TimelineGroupByArg, WeekdayArg, build_search_summary,
+        build_timeline_summary, compute_review_word_stats, deterministic_prompt_for_date,
+        escape_csv_cell, filter_timeline_entries, format_metadata_stamp, group_timeline_entries,
+        next_blank_date, parse_favorite_dates, preset_range_label, prompts_for_category,
+        rank_lines, render_markdown_export, render_search_preset_lines,
+        render_timeline_preset_lines, resolve_range_bounds, sort_search_results,
+        summarize_review_entries,
     };
-    use crate::config::{AppConfig, BackupRetentionConfig, SearchPresetConfig};
+    use crate::config::{
+        AppConfig, BackupRetentionConfig, SearchPresetConfig, TimelinePresetConfig,
+    };
+    use crate::search::{SearchDocument, SearchResult, Snippet};
     use crate::vault::{EntryMetadata, ExportedEntry, IndexEntry};
     use chrono::NaiveDate;
     use clap::Parser;
@@ -3195,6 +4029,16 @@ mod tests {
                 from: Some("2026-03-13".to_string()),
                 to: Some("2026-03-19".to_string()),
             }],
+            timeline_presets: vec![TimelinePresetConfig {
+                name: "Recent Work".to_string(),
+                from: Some("2026-03-01".to_string()),
+                to: Some("2026-03-19".to_string()),
+                query: Some("ship".to_string()),
+                tag: Some("work".to_string()),
+                person: None,
+                project: None,
+                mood: None,
+            }],
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };
@@ -3204,6 +4048,51 @@ mod tests {
         assert!(lines[0].contains("Weekly"));
         assert!(lines[0].contains("project alpha"));
         assert!(lines[0].contains("2026-03-13..2026-03-19"));
+    }
+
+    #[test]
+    fn render_timeline_preset_lines_includes_filter_summary() {
+        let config = AppConfig {
+            vault_path: PathBuf::from("/tmp/vault"),
+            sync_target_path: None,
+            local_device_id: None,
+            device_nickname: "This Mac".to_string(),
+            typewriter_mode: false,
+            clock_12h: false,
+            show_seconds: false,
+            show_ruler: true,
+            show_footer_legend: true,
+            soundtrack_source: String::new(),
+            opening_line_template: String::new(),
+            daily_word_goal: None,
+            remember_passphrase_in_keychain: false,
+            first_run_coach_completed: false,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: Vec::new(),
+            export_history: Vec::new(),
+            search_presets: Vec::new(),
+            timeline_presets: vec![TimelinePresetConfig {
+                name: "Weekly".to_string(),
+                from: Some("2026-03-10".to_string()),
+                to: Some("2026-03-19".to_string()),
+                query: Some("ship".to_string()),
+                tag: Some("work".to_string()),
+                person: Some("riley".to_string()),
+                project: None,
+                mood: Some(7),
+            }],
+            backup_retention: BackupRetentionConfig::default(),
+            macros: Vec::new(),
+        };
+
+        let lines = render_timeline_preset_lines(&config);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("Weekly"));
+        assert!(lines[0].contains("2026-03-10..2026-03-19"));
+        assert!(lines[0].contains("query=ship"));
+        assert!(lines[0].contains("tag=work"));
+        assert!(lines[0].contains("mood=7"));
     }
 
     #[test]
@@ -3247,6 +4136,42 @@ mod tests {
                 assert!(case_sensitive);
                 assert!(whole_word);
                 assert_eq!(context, 40);
+            }
+            _ => panic!("expected search command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_search_range_match_sort_and_summary_flags() {
+        let cli = Cli::parse_from([
+            "bsj",
+            "search",
+            "focus",
+            "--range",
+            "last7",
+            "--match-mode",
+            "any",
+            "--sort",
+            "relevance",
+            "--hits-per-entry",
+            "4",
+            "--summary",
+        ]);
+
+        match cli.command {
+            Some(Command::Search {
+                range,
+                match_mode,
+                sort,
+                hits_per_entry,
+                summary,
+                ..
+            }) => {
+                assert!(matches!(range, Some(DateRangeArg::Last7)));
+                assert!(matches!(match_mode, super::SearchMatchArg::Any));
+                assert!(matches!(sort, SearchSortArg::Relevance));
+                assert_eq!(hits_per_entry, 4);
+                assert!(summary);
             }
             _ => panic!("expected search command"),
         }
@@ -3316,6 +4241,18 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_review_range_preset_and_goal() {
+        let cli = Cli::parse_from(["bsj", "review", "--range", "last30", "--goal", "750"]);
+        match cli.command {
+            Some(Command::Review { range, goal, .. }) => {
+                assert!(matches!(range, Some(DateRangeArg::Last30)));
+                assert_eq!(goal, Some(750));
+            }
+            _ => panic!("expected review command"),
+        }
+    }
+
+    #[test]
     fn cli_parses_timeline_format_and_extended_filters() {
         let cli = Cli::parse_from([
             "bsj",
@@ -3356,6 +4293,37 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_timeline_range_group_and_preset_flags() {
+        let cli = Cli::parse_from([
+            "bsj",
+            "timeline",
+            "--range",
+            "last30",
+            "--group-by",
+            "week",
+            "--preset",
+            "Recent Work",
+            "--save-preset",
+            "Last Month",
+        ]);
+        match cli.command {
+            Some(Command::Timeline {
+                range,
+                group_by,
+                preset,
+                save_preset,
+                ..
+            }) => {
+                assert!(matches!(range, Some(DateRangeArg::Last30)));
+                assert!(matches!(group_by, Some(TimelineGroupByArg::Week)));
+                assert_eq!(preset.as_deref(), Some("Recent Work"));
+                assert_eq!(save_preset.as_deref(), Some("Last Month"));
+            }
+            _ => panic!("expected timeline command"),
+        }
+    }
+
+    #[test]
     fn cli_parses_prompts_json_flags() {
         let list = Cli::parse_from(["bsj", "prompts", "list", "--json"]);
         match list.command {
@@ -3373,6 +4341,71 @@ mod tests {
                 _ => panic!("expected prompts pick command"),
             },
             _ => panic!("expected prompts command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_ai_summary_flags() {
+        let cli = Cli::parse_from([
+            "bsj",
+            "ai",
+            "summary",
+            "--range",
+            "last7",
+            "--max-points",
+            "6",
+            "--json",
+            "--remote",
+        ]);
+
+        match cli.command {
+            Some(Command::Ai {
+                command:
+                    super::AiCommand::Summary {
+                        range,
+                        max_points,
+                        json,
+                        remote,
+                        ..
+                    },
+            }) => {
+                assert!(matches!(range, Some(DateRangeArg::Last7)));
+                assert_eq!(max_points, 6);
+                assert!(json);
+                assert!(remote);
+            }
+            _ => panic!("expected ai summary command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_ai_coach_flags() {
+        let cli = Cli::parse_from([
+            "bsj",
+            "ai",
+            "coach",
+            "--date",
+            "2026-03-19",
+            "--questions",
+            "7",
+            "--remote",
+        ]);
+
+        match cli.command {
+            Some(Command::Ai {
+                command:
+                    super::AiCommand::Coach {
+                        date,
+                        questions,
+                        remote,
+                        ..
+                    },
+            }) => {
+                assert_eq!(date.as_deref(), Some("2026-03-19"));
+                assert_eq!(questions, 7);
+                assert!(remote);
+            }
+            _ => panic!("expected ai coach command"),
         }
     }
 
@@ -3441,6 +4474,7 @@ mod tests {
             TimelineFilters {
                 from: Some(NaiveDate::from_ymd_opt(2026, 3, 10).expect("from")),
                 to: Some(NaiveDate::from_ymd_opt(2026, 3, 11).expect("to")),
+                range: None,
                 query: None,
                 tag: None,
                 person: None,
@@ -3455,8 +4489,13 @@ mod tests {
                 favorites_only: false,
                 conflicts_only: false,
                 show_metadata: false,
+                group_by: None,
                 format: TimelineFormatArg::Text,
                 summary_only: false,
+                preset_name: None,
+                list_presets: false,
+                save_preset: None,
+                delete_preset: None,
             },
             &HashSet::new(),
         );
@@ -3484,6 +4523,7 @@ mod tests {
             TimelineFilters {
                 from: None,
                 to: None,
+                range: None,
                 query: None,
                 tag: None,
                 person: None,
@@ -3498,8 +4538,13 @@ mod tests {
                 favorites_only: true,
                 conflicts_only: true,
                 show_metadata: false,
+                group_by: None,
                 format: TimelineFormatArg::Text,
                 summary_only: false,
+                preset_name: None,
+                list_presets: false,
+                save_preset: None,
+                delete_preset: None,
             },
             &favorites,
         );
@@ -3602,6 +4647,7 @@ mod tests {
             TimelineFilters {
                 from: None,
                 to: None,
+                range: None,
                 query: Some("phoenix".to_string()),
                 tag: None,
                 person: None,
@@ -3616,8 +4662,13 @@ mod tests {
                 favorites_only: false,
                 conflicts_only: false,
                 show_metadata: false,
+                group_by: None,
                 format: TimelineFormatArg::Text,
                 summary_only: false,
+                preset_name: None,
+                list_presets: false,
+                save_preset: None,
+                delete_preset: None,
             },
             &HashSet::new(),
         );
@@ -3662,6 +4713,7 @@ mod tests {
             TimelineFilters {
                 from: None,
                 to: None,
+                range: None,
                 query: None,
                 tag: Some("deepwork".to_string()),
                 person: None,
@@ -3676,8 +4728,13 @@ mod tests {
                 favorites_only: false,
                 conflicts_only: false,
                 show_metadata: false,
+                group_by: None,
                 format: TimelineFormatArg::Text,
                 summary_only: false,
+                preset_name: None,
+                list_presets: false,
+                save_preset: None,
+                delete_preset: None,
             },
             &HashSet::new(),
         );
@@ -3688,6 +4745,7 @@ mod tests {
             TimelineFilters {
                 from: None,
                 to: None,
+                range: None,
                 query: None,
                 tag: None,
                 person: Some("riley".to_string()),
@@ -3702,8 +4760,13 @@ mod tests {
                 favorites_only: false,
                 conflicts_only: false,
                 show_metadata: false,
+                group_by: None,
                 format: TimelineFormatArg::Text,
                 summary_only: false,
+                preset_name: None,
+                list_presets: false,
+                save_preset: None,
+                delete_preset: None,
             },
             &HashSet::new(),
         );
@@ -3714,6 +4777,7 @@ mod tests {
             TimelineFilters {
                 from: None,
                 to: None,
+                range: None,
                 query: None,
                 tag: None,
                 person: None,
@@ -3728,8 +4792,13 @@ mod tests {
                 favorites_only: false,
                 conflicts_only: false,
                 show_metadata: false,
+                group_by: None,
                 format: TimelineFormatArg::Text,
                 summary_only: false,
+                preset_name: None,
+                list_presets: false,
+                save_preset: None,
+                delete_preset: None,
             },
             &HashSet::new(),
         );
@@ -3770,6 +4839,7 @@ mod tests {
             TimelineFilters {
                 from: None,
                 to: None,
+                range: None,
                 query: None,
                 tag: None,
                 person: None,
@@ -3784,8 +4854,13 @@ mod tests {
                 favorites_only: false,
                 conflicts_only: false,
                 show_metadata: false,
+                group_by: None,
                 format: TimelineFormatArg::Text,
                 summary_only: false,
+                preset_name: None,
+                list_presets: false,
+                save_preset: None,
+                delete_preset: None,
             },
             &HashSet::new(),
         );
@@ -3885,6 +4960,151 @@ mod tests {
         assert_eq!(summary.top_tags, vec![("work".to_string(), 2)]);
         assert_eq!(summary.top_people, vec![("Riley".to_string(), 2)]);
         assert_eq!(summary.top_projects, vec![("Phoenix".to_string(), 2)]);
+    }
+
+    #[test]
+    fn resolve_range_bounds_last7_uses_inclusive_window() {
+        let today = NaiveDate::from_ymd_opt(2026, 3, 19).expect("today");
+        let (from, to) = resolve_range_bounds(DateRangeArg::Last7, today);
+        assert_eq!(from, NaiveDate::from_ymd_opt(2026, 3, 13).expect("from"));
+        assert_eq!(to, today);
+    }
+
+    #[test]
+    fn sort_search_results_relevance_prefers_exact_query_match() {
+        let mut results = vec![
+            SearchResult {
+                date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+                entry_number: "1".to_string(),
+                snippet: Snippet {
+                    text: "abc".to_string(),
+                    highlight_start: 0,
+                    highlight_end: 3,
+                },
+                row: 0,
+                start_col: 0,
+                end_col: 3,
+                matched_text: "foc".to_string(),
+            },
+            SearchResult {
+                date: NaiveDate::from_ymd_opt(2026, 3, 18).expect("date"),
+                entry_number: "2".to_string(),
+                snippet: Snippet {
+                    text: "def".to_string(),
+                    highlight_start: 0,
+                    highlight_end: 5,
+                },
+                row: 0,
+                start_col: 0,
+                end_col: 5,
+                matched_text: "focus".to_string(),
+            },
+        ];
+        sort_search_results(&mut results, SearchSortArg::Relevance, "focus", false);
+        assert_eq!(results[0].matched_text, "focus");
+    }
+
+    #[test]
+    fn build_search_summary_counts_matches_and_unique_dates() {
+        let results = vec![
+            SearchResult {
+                date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+                entry_number: "1".to_string(),
+                snippet: Snippet {
+                    text: "a".to_string(),
+                    highlight_start: 0,
+                    highlight_end: 1,
+                },
+                row: 0,
+                start_col: 0,
+                end_col: 1,
+                matched_text: "a".to_string(),
+            },
+            SearchResult {
+                date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+                entry_number: "1".to_string(),
+                snippet: Snippet {
+                    text: "b".to_string(),
+                    highlight_start: 0,
+                    highlight_end: 1,
+                },
+                row: 1,
+                start_col: 0,
+                end_col: 1,
+                matched_text: "b".to_string(),
+            },
+            SearchResult {
+                date: NaiveDate::from_ymd_opt(2026, 3, 18).expect("date"),
+                entry_number: "2".to_string(),
+                snippet: Snippet {
+                    text: "c".to_string(),
+                    highlight_start: 0,
+                    highlight_end: 1,
+                },
+                row: 0,
+                start_col: 0,
+                end_col: 1,
+                matched_text: "c".to_string(),
+            },
+        ];
+        let summary = build_search_summary(&results);
+        assert_eq!(summary.total_matches, 3);
+        assert_eq!(summary.matched_dates, 2);
+        assert_eq!(summary.top_dates[0], ("2026-03-19".to_string(), 2));
+    }
+
+    #[test]
+    fn group_timeline_entries_rolls_up_week_and_counts_flags() {
+        let entries = vec![
+            IndexEntry {
+                date: NaiveDate::from_ymd_opt(2026, 3, 17).expect("date"),
+                entry_number: "000100".to_string(),
+                preview: "a".to_string(),
+                has_conflict: false,
+                metadata: EntryMetadata::default(),
+            },
+            IndexEntry {
+                date: NaiveDate::from_ymd_opt(2026, 3, 18).expect("date"),
+                entry_number: "000101".to_string(),
+                preview: "b".to_string(),
+                has_conflict: true,
+                metadata: EntryMetadata::default(),
+            },
+        ];
+        let favorites = HashSet::from([NaiveDate::from_ymd_opt(2026, 3, 18).expect("fav")]);
+        let grouped = group_timeline_entries(&entries, &favorites, TimelineGroupByArg::Week);
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(grouped[0].entries, 2);
+        assert_eq!(grouped[0].conflicts, 1);
+        assert_eq!(grouped[0].favorites, 1);
+    }
+
+    #[test]
+    fn review_word_stats_counts_words_and_goal_hit_rate() {
+        let docs = vec![
+            SearchDocument {
+                date: NaiveDate::from_ymd_opt(2026, 3, 18).expect("date"),
+                entry_number: "1".to_string(),
+                body: "one two three".to_string(),
+            },
+            SearchDocument {
+                date: NaiveDate::from_ymd_opt(2026, 3, 18).expect("date"),
+                entry_number: "2".to_string(),
+                body: "four five".to_string(),
+            },
+            SearchDocument {
+                date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+                entry_number: "3".to_string(),
+                body: "six seven eight nine".to_string(),
+            },
+        ];
+
+        let stats = compute_review_word_stats(&docs, None, None, Some(4));
+        assert_eq!(stats.total_words, 9);
+        assert_eq!(stats.entries_counted, 3);
+        assert_eq!(stats.active_days, 2);
+        assert_eq!(stats.days_meeting_goal, 2);
+        assert!((stats.goal_hit_rate - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -4,10 +4,10 @@ pub mod calendar;
 
 use crate::tui::{
     app::{
-        App, ConflictMode, ConflictOverlay, DatePicker, ExportPrompt, IndexState, InfoOverlay,
-        MenuId, MenuItem, MetadataField, MetadataPrompt, Overlay, PickerOverlay, ReplacePrompt,
-        ReplaceStage, RestorePrompt, RestoreStage, SearchField, SearchOverlay, SettingPrompt,
-        SetupStep, SetupWizard, SyncPhase, SyncStatusOverlay, index_detail_summary,
+        AiCoachOverlay, App, ConflictMode, ConflictOverlay, DatePicker, ExportPrompt, IndexState,
+        InfoOverlay, MenuId, MenuItem, MetadataField, MetadataPrompt, Overlay, PickerOverlay,
+        ReplacePrompt, ReplaceStage, RestorePrompt, RestoreStage, SearchField, SearchOverlay,
+        SettingPrompt, SetupStep, SetupWizard, SyncPhase, SyncStatusOverlay, index_detail_summary,
         index_row_flags,
     },
     buffer::MatchPos,
@@ -216,21 +216,21 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let hint = if app.menu().is_some() {
-        "LEFT/RIGHT MENU  UP/DOWN ITEM  ENTER SELECT  ESC CLOSE  ALT+F/E/S/G/T/U/H JUMP"
+        "ARROWS MOVE  ENTER SELECT  ESC CLOSE  ALT+F/E/S/G/T/U/H JUMP"
     } else if app.should_show_menu_discovery_hint() {
         if area.width >= 130 {
-            "ESC MENUS  ? HELP  ALT+,/. DAY  ALT+[ ] SAVED  ALT+N NEW  ALT+Y/0 TODAY  ALT+D DATES  ALT+I INDEX  ALT+K COMMANDS"
+            "ESC MENUS  F1 HELP  F2 SAVE  F3 DATES  F5 SEARCH  F7 INDEX  ALT+N NEW"
         } else if area.width >= 104 {
-            "ESC MENUS  ? HELP  ALT+,/. DAY  ALT+[ ] SAVED  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
+            "ESC MENUS  F1 HELP  F2 SAVE  F3 DATES  F7 INDEX  ALT+N NEW"
         } else {
-            "ESC MENUS  ? HELP  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
+            "ESC MENUS  F1 HELP  F2 SAVE  ALT+N NEW"
         }
     } else if area.width >= 130 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H OR CTRL+O/E/W/Y/T/U/L  ALT+,/. DAY  ALT+[ ] SAVED  ALT+N NEW  ALT+Y/0 TODAY  ALT+D DATES  ALT+I INDEX  ALT+K COMMANDS"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H  CTRL+O/E/W/Y/T/U/L  F2 SAVE  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
     } else if area.width >= 104 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H OR CTRL+O/E/W/Y/T/U/L  ALT+,/. DAY  ALT+[ ] SAVED  ALT+N NEW  ALT+Y/0 TODAY  ALT+D/ALT+I"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H  F2 SAVE  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
     } else {
-        "ESC MENUS  ? HELP  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
+        "ESC MENUS  F1 HELP  F2 SAVE  ALT+N NEW"
     };
     let left_width = spans
         .iter()
@@ -474,14 +474,15 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
 
 fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
     if !app.show_footer_legend_enabled() {
-        return "Ctrl+K Commands".to_string();
+        return "CTRL+K COMMANDS".to_string();
     }
 
     if app.menu().is_some() {
         if width >= 96 {
-            return "Menu: Left/Right switch | Up/Down move | Enter select | Esc close | Alt+F/E/S/G/T/U/H jump".to_string();
+            return "MENU ARROWS MOVE | ENTER SELECT | ESC CLOSE | ALT+F/E/S/G/T/U/H JUMP"
+                .to_string();
         }
-        return "Menu: Arrows move | Enter select | Esc close | Alt+menu".to_string();
+        return "MENU ARROWS MOVE | ENTER SELECT | ESC CLOSE".to_string();
     }
 
     if let Some(hint) = app.overlay_footer_hint() {
@@ -492,19 +493,19 @@ fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
     }
 
     let legend = if width >= 130 {
-        "Esc menus | ? help | Alt+F/E/S/G/T/U/H | Alt+,/. day | Alt+[ ] saved | Alt+N new | Alt+Y/0 today | Alt+D dates | Alt+I index | Alt+K commands | Ctrl+Shift+N/D/I/Y fallbacks | **save** Enter quick-next | F2 save | F9 closing | F10 quit".to_string()
+        "F1 HELP F2 SAVE F3 DATES F4 FIND F5 SEARCH F6 REPLACE F7 INDEX F8 SYNC F9 CLOSING F10 QUIT F11 REVEAL F12 LOCK"
+            .to_string()
     } else if width >= 108 {
-        "Esc menus | ? help | Alt+F/E/S/G/T/U/H | Alt+,/. day | Alt+[ ] saved | Alt+N new | Alt+Y/0 today | Alt+D dates | Alt+I index | Ctrl+Shift+N new | **save** Enter quick-next | F2 save | F10 quit"
+        "F1 HELP F2 SAVE F3 DATES F4 FIND F5 SEARCH F6 REPLACE F7 INDEX F8 SYNC F10 QUIT"
             .to_string()
     } else if width >= 90 {
-        "Esc menus | ? help | Alt+,/. day | Alt+N new | Alt+D dates | Alt+I index | **save** Enter quick-next | F2 save"
-            .to_string()
+        "F1 HELP F2 SAVE F3 DATES F4 FIND F7 INDEX F10 QUIT ESC MENUS".to_string()
     } else {
-        "Esc menus | ? help | Alt+N new | F2 save".to_string()
+        "F2 SAVE  F10 QUIT  ESC MENUS".to_string()
     };
 
     if compact_mode && width >= 100 {
-        format!("{legend} | Compact layout")
+        format!("{legend} | COMPACT")
     } else {
         legend
     }
@@ -566,6 +567,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::ConflictChoice(_) => popup_rect(body_area, 72, 15),
         Overlay::MergeDiff(_) => popup_rect(body_area, 92, 18),
         Overlay::Search(_) => popup_rect(body_area, 90, 22),
+        Overlay::AiCoach(_) => popup_rect(body_area, 78, 13),
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
         Overlay::ExportPrompt(_) => popup_rect(body_area, 72, 9),
@@ -577,6 +579,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::Picker(_) => popup_rect(body_area, 76, 14),
         Overlay::RestorePrompt(_) => popup_rect(body_area, 76, 12),
         Overlay::RecoverDraft { .. } => popup_rect(body_area, 44, 5),
+        Overlay::PruneConfirm { .. } => popup_rect(body_area, 52, 6),
         Overlay::QuitConfirm => popup_rect(body_area, 44, 5),
     };
 
@@ -642,6 +645,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
             ))
         }
         Overlay::Search(search) => draw_search_overlay(frame, inner, app, search),
+        Overlay::AiCoach(coach) => draw_ai_coach_overlay(frame, inner, coach),
         Overlay::ReplacePrompt(prompt) => draw_replace_prompt_overlay(frame, inner, prompt),
         Overlay::ReplaceConfirm(confirm) => {
             let current = confirm
@@ -685,6 +689,17 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
             let lines = vec![
                 Line::from("RECOVER UNSAVED DRAFT? (Y/N)"),
                 Line::from("Y = load draft, N = keep latest revision"),
+            ];
+            frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
+            None
+        }
+        Overlay::PruneConfirm { prune_count } => {
+            let lines = vec![
+                Line::from("PRUNE OLD ENCRYPTED BACKUPS? (Y/N)"),
+                Line::from(format!(
+                    "Would remove {prune_count} backup(s) by current retention."
+                )),
+                Line::from("Y/Enter = prune now, N/Esc = cancel"),
             ];
             frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
             None
@@ -771,13 +786,16 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
         Line::from(version_line),
         Line::from("(c) 2026 Awassee LLC and Sean Heiney  sean@sean.net"),
-        Line::from("Quick start: TYPE -> F2 SAVE -> Alt+N NEW DAY."),
-        Line::from("Esc menus. Alt+F/E/S/G/T/U/H menu. Ctrl+O/E/W/Y/T/U/L menus."),
+        Line::from("Flow: TYPE -> F2 SAVE -> ALT+N NEW DAY."),
+        Line::from("ESC opens menus. Arrows move. ENTER selects."),
+        Line::from("ALT+F/E/S/G/T/U/H jumps menu tabs."),
+        Line::from("CTRL+O/E/W/Y/T/U/L also opens menus."),
+        Line::from("ALT+,/. day  ALT+[ ] saved jump  ALT+Y/0 today"),
+        Line::from("ALT+D dates  ALT+I index  ALT+K command palette"),
         Line::from(
-            "Alt+,/. day. Alt+[ ] saved jump. Alt+N new day. Alt+Y/0 today. Alt+D dates. Alt+I index.",
+            "ALT+- yesterday  ALT+= tomorrow  CTRL+SHIFT+S save+next day  CTRL+SHIFT+L save+lock",
         ),
-        Line::from("Ctrl+Shift+N new day. Ctrl+Shift+D dates. Ctrl+Shift+I index."),
-        Line::from("? or Ctrl+/ opens this key guide instantly."),
+        Line::from("? or Ctrl+/ opens this card instantly."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
         Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),
@@ -786,16 +804,16 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),
         Line::from("GO     Calendar, index, recents, favorites, random, today"),
         Line::from("TOOLS  Sync, soundtrack, verify, review, dashboard, prompts, doctor"),
+        Line::from("TOOLS  Today Brief + Week Compass for daily/weekly planning"),
+        Line::from("TOOLS  Optional AI Summary + AI Coach (Ctrl+Shift+A)"),
         Line::from("Calendar: YYYY-MM-DD jump, [ ] saved jump, < > months, N/P blank, T/0 today"),
         Line::from(
             "Index: type filter, / clear, 1-4 scopes, N/P blank, S sort, F favorite, C conflict",
         ),
-        Line::from(
-            "Search: Tab fields, / query focus, Esc results->query->close, T/W/M/Y/A scopes",
-        ),
+        Line::from("Search: Tab fields, / query, T/W/M/Y/A ranges, Enter opens result"),
         Line::from("Search: Ctrl+G close, Ctrl+B pin, Ctrl+Shift+B preset, Ctrl+1..9 slot"),
         Line::from("Old entries are deliberate: use Calendar/Index to browse archive dates."),
-        Line::from("Footer shows mode, context, stats, and status. Enter/Esc/F1 closes."),
+        Line::from("Footer keeps mode + status visible. Enter/Esc/F1 closes."),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
@@ -1047,6 +1065,44 @@ fn draw_search_overlay(
     Some((
         cursor_x.min(area.right().saturating_sub(1)),
         cursor_y.min(area.bottom().saturating_sub(1)),
+    ))
+}
+
+fn draw_ai_coach_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    coach: &AiCoachOverlay,
+) -> Option<(u16, u16)> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+
+    let question = coach.current_prompt().unwrap_or("[no question loaded]");
+    let mut lines = vec![
+        Line::from("AI Coach Mode (optional, nostalgia-safe)"),
+        Line::from(format!("Provider: {}", coach.provider)),
+        Line::from(format!(
+            "Question {}/{}",
+            coach.current_idx.saturating_add(1),
+            coach.prompts.len()
+        )),
+        Line::from(""),
+        Line::from(truncate_to_width(
+            question,
+            area.width.saturating_sub(1) as usize,
+        )),
+        Line::from(""),
+        Line::from(format!("> {}", coach.input)),
+        Line::from("Enter next/apply  Ctrl+U clear  Esc cancel"),
+    ];
+    if let Some(error) = coach.error.as_deref() {
+        lines.push(Line::from(error.to_string()));
+    }
+
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+    Some((
+        (area.x + 2 + coach.input.chars().count() as u16).min(area.right().saturating_sub(1)),
+        (area.y + 6).min(area.bottom().saturating_sub(1)),
     ))
 }
 
@@ -1749,6 +1805,7 @@ fn overlay_title(overlay: &Overlay) -> String {
         Overlay::FindPrompt { .. } => " Find (F4) ".to_string(),
         Overlay::ClosingPrompt { .. } => " Closing Thought (F9) ".to_string(),
         Overlay::Search(_) => " Search (F5) ".to_string(),
+        Overlay::AiCoach(_) => " AI Coach (Optional) ".to_string(),
         Overlay::ReplacePrompt(_) => " Replace (F6) ".to_string(),
         Overlay::ReplaceConfirm(_) => " Replace (F6) ".to_string(),
         Overlay::ExportPrompt(prompt) => format!(" Export {} ", prompt.format.label()),
@@ -1760,6 +1817,7 @@ fn overlay_title(overlay: &Overlay) -> String {
         Overlay::Picker(picker) => format!(" {} ", picker.title),
         Overlay::RestorePrompt(_) => " Restore ".to_string(),
         Overlay::RecoverDraft { .. } => " Recovery ".to_string(),
+        Overlay::PruneConfirm { .. } => " Prune Backups ".to_string(),
         Overlay::QuitConfirm => " Quit (F10) ".to_string(),
     }
 }
