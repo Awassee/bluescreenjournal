@@ -185,7 +185,7 @@ The app is direct by design:
 ### Protect and move data
 
 - `F8` or `TOOLS -> Sync Vault` syncs encrypted blobs
-- `TOOLS -> Toggle Soundtrack` plays/stops the configured MIDI theme source
+- `TOOLS -> Toggle Soundtrack` or `Alt+M` plays/stops the configured MIDI theme source
 - `TOOLS -> Verify Integrity` checks the revision chain
 - `bsj backup` creates an encrypted snapshot under `<vault>/backups/`
 - `bsj restore ... --into ...` restores a backup to another directory
@@ -226,10 +226,12 @@ Primary keys:
 - `F12` lock
 - `Ctrl+S` save fallback
 - `Ctrl+F` find fallback
+- `Alt+M` toggle soundtrack
 
 Additional screen-level controls:
 
 - soundtrack source defaults to `https://www.midi-karaoke.info/21b56501.mid` and can be changed in `SETUP -> Soundtrack URL/Path`
+- URL sources are cached locally before playback so macOS `afplay` can play MIDI reliably
 - search overlay: `T` today, `M` month, `A` all time, `C` clear filters
 - date picker: type `YYYY-MM-DD`, use `[` and `]` for saved-day jumps, `<` and `>` for months with entries
 - index overlay: type to filter, `Shift+S` sort, `Shift+F` favorites only, `Shift+C` conflicts only

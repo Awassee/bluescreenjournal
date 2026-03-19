@@ -200,9 +200,9 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let hint = if app.menu().is_some() {
         "LEFT/RIGHT MENU  UP/DOWN ITEM  ENTER SELECT  ESC CLOSE"
     } else if area.width >= 130 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+RIGHT NEXT DAY  ALT+N NEW ENTRY"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+RIGHT NEXT DAY  ALT+N NEW ENTRY  ALT+M THEME"
     } else if area.width >= 104 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+RIGHT NEXT DAY  ALT+N NEW"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+RIGHT NEXT DAY  ALT+N NEW  ALT+M THEME"
     } else {
         "ESC MENUS  ALT+F/E/S/G/T/U/H MENU"
     };
@@ -454,9 +454,9 @@ fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
     }
 
     let legend = if width >= 130 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H menu | Alt+Right next day | Alt+N next new entry | F2 Save | F10 Quit".to_string()
+        "Esc Menus | Alt+F/E/S/G/T/U/H menu | Alt+Right next day | Alt+N next new entry | Alt+M theme | F2 Save | F10 Quit".to_string()
     } else if width >= 108 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H | Alt+Right next day | Alt+N new | F2 Save | F10 Quit"
+        "Esc Menus | Alt+F/E/S/G/T/U/H | Alt+Right next day | Alt+N new | Alt+M theme | F2 Save | F10 Quit"
             .to_string()
     } else if width >= 90 {
         "Esc Menus | Alt+F/E/S/G/T/U/H | F1 Help | F2 Save | F10 Quit".to_string()

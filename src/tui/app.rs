@@ -17,6 +17,7 @@ use crate::{
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use secrecy::SecretString;
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     env,
@@ -30,6 +31,7 @@ const STATUS_DURATION: Duration = Duration::from_millis(1600);
 const AUTOSAVE_INTERVAL: Duration = Duration::from_millis(2500);
 const INDEX_PREVIEW_CHARS: usize = 54;
 const TAB_INSERT_TEXT: &str = "     ";
+const SOUNDTRACK_CACHE_DIR_NAME: &str = "bsj-soundtrack-cache";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Overlay {
@@ -2711,6 +2713,10 @@ impl App {
                 }
                 KeyCode::Char(ch) if ch.eq_ignore_ascii_case(&'n') => {
                     self.open_next_new_entry();
+                    return;
+                }
+                KeyCode::Char(ch) if ch.eq_ignore_ascii_case(&'m') => {
+                    self.toggle_soundtrack_playback();
                     return;
                 }
                 _ => {}
@@ -5447,7 +5453,8 @@ impl App {
             return Err("SOUNDTRACK SOURCE NOT SET.".to_string());
         }
         if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-            return Ok(trimmed.to_string());
+            let cached = cache_soundtrack_url(trimmed)?;
+            return Ok(cached.display().to_string());
         }
         let path = expand_tilde(trimmed);
         if !path.exists() {
@@ -6713,6 +6720,69 @@ fn sync_target_label_webdav() -> Result<String, String> {
         .map_err(|_| "BSJ_WEBDAV_URL is required for TUI WebDAV sync.".to_string())
 }
 
+fn cache_soundtrack_url(url: &str) -> Result<PathBuf, String> {
+    let cache_dir = env::temp_dir().join(SOUNDTRACK_CACHE_DIR_NAME);
+    secure_fs::ensure_private_dir(&cache_dir)
+        .map_err(|error| format!("SOUNDTRACK CACHE INIT FAILED: {error}"))?;
+    let cache_path = soundtrack_cache_path(&cache_dir, url);
+    if cache_path.exists()
+        && cache_path
+            .metadata()
+            .map(|metadata| metadata.len() > 0)
+            .unwrap_or(false)
+    {
+        return Ok(cache_path);
+    }
+
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("SOUNDTRACK HTTP CLIENT FAILED: {error}"))?
+        .get(url)
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| format!("SOUNDTRACK DOWNLOAD FAILED: {error}"))?;
+
+    let bytes = response
+        .bytes()
+        .map_err(|error| format!("SOUNDTRACK DOWNLOAD FAILED: {error}"))?;
+    if bytes.is_empty() {
+        return Err("SOUNDTRACK DOWNLOAD FAILED: EMPTY RESPONSE.".to_string());
+    }
+
+    secure_fs::atomic_write_private(&cache_path, bytes.as_ref())
+        .map_err(|error| format!("SOUNDTRACK CACHE WRITE FAILED: {error}"))?;
+    Ok(cache_path)
+}
+
+fn soundtrack_cache_path(cache_dir: &Path, url: &str) -> PathBuf {
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let digest = hex::encode(hasher.finalize());
+    let ext = soundtrack_cache_extension(url);
+    cache_dir.join(format!("theme-{digest}.{ext}"))
+}
+
+fn soundtrack_cache_extension(url: &str) -> String {
+    let base = url.split('?').next().unwrap_or(url);
+    let candidate = Path::new(base)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mid")
+        .to_ascii_lowercase();
+
+    let sanitized = candidate
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(8)
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "mid".to_string()
+    } else {
+        sanitized
+    }
+}
+
 fn default_export_path(date: NaiveDate, format: ExportFormatUi) -> PathBuf {
     let base = dirs::desktop_dir()
         .or_else(dirs::document_dir)
@@ -7232,6 +7302,7 @@ mod tests {
         SearchJump, SearchOverlay, SettingField, SettingPrompt, SetupWizard, SyncPhase,
         SyncRequest, SyncStatusOverlay, default_export_path, format_reveal_codes,
         macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
+        soundtrack_cache_extension, soundtrack_cache_path,
     };
     use crate::{
         config::RecentExportInfo,
@@ -8443,6 +8514,35 @@ mod tests {
 
         assert!(!app.soundtrack_loop_enabled);
         assert_eq!(app.status_text(), Some("SOUNDTRACK SOURCE NOT SET."));
+    }
+
+    #[test]
+    fn soundtrack_cache_extension_prefers_url_extension_and_sanitizes() {
+        assert_eq!(
+            soundtrack_cache_extension("https://example.com/theme.MID?download=1"),
+            "mid"
+        );
+        assert_eq!(
+            soundtrack_cache_extension("https://example.com/theme.bad-ext!?q=1"),
+            "badext"
+        );
+        assert_eq!(
+            soundtrack_cache_extension("https://example.com/no-extension"),
+            "mid"
+        );
+    }
+
+    #[test]
+    fn soundtrack_cache_path_is_stable_for_same_url() {
+        let cache_dir = Path::new("/tmp/bsj-soundtrack-cache-test");
+        let url = "https://example.com/theme.mid";
+        let first = soundtrack_cache_path(cache_dir, url);
+        let second = soundtrack_cache_path(cache_dir, url);
+        let other = soundtrack_cache_path(cache_dir, "https://example.com/other.mid");
+
+        assert_eq!(first, second);
+        assert_ne!(first, other);
+        assert_eq!(first.parent(), Some(cache_dir));
     }
 
     #[test]
