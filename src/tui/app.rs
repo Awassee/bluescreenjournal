@@ -10765,7 +10765,7 @@ mod tests {
     }
 
     #[test]
-    fn functional_index_filter_open_then_edit_and_save_roundtrip() {
+    fn functional_index_open_then_edit_and_save_roundtrip() {
         let temp = tempdir().expect("tempdir");
         let start = NaiveDate::from_ymd_opt(2026, 6, 1).expect("date");
         let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
@@ -10812,15 +10812,13 @@ mod tests {
             viewport_height,
             viewport_width,
         );
-        for ch in "alpha".chars() {
-            send_editor_key(
-                &mut app,
-                KeyCode::Char(ch),
-                KeyModifiers::empty(),
-                viewport_height,
-                viewport_width,
-            );
-        }
+        send_editor_key(
+            &mut app,
+            KeyCode::End,
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
         send_editor_key(
             &mut app,
             KeyCode::Enter,
