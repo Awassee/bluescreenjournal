@@ -18,7 +18,7 @@ FRAME_W = 1160
 FRAME_H = 820
 SCREEN_COLS = 80
 SCREEN_ROWS = 25
-RELEASE_LABEL = "v1.1.0"
+RELEASE_LABEL = "v1.1.1"
 
 BG_OUTER = "#0b1021"
 BG_TERMINAL = "#111827"
@@ -160,13 +160,13 @@ def editor_frame() -> Image.Image:
     draw_text(
         draw,
         0,
-        f"BLUESCREEN JOURNAL {RELEASE_LABEL:>6}  2026-03-19 09:11 PM  ENTRY NO. 000477",
+        f"BLUESCREEN JOURNAL [COMPACT]  TODAY THU 2026-03-19  ENTRY NO. 000477  {RELEASE_LABEL}",
     )
     draw_highlight_span(draw, 1, 0, "FILE")
     draw_text(
         draw,
         1,
-        " EDIT  SEARCH  GO  TOOLS  SETUP  HELP  ESC MENUS  CTRL+K COMMANDS",
+        " EDIT  SEARCH  GO  TOOLS  SETUP  HELP  ESC MENUS  F1 HELP  F2 SAVE",
         fill=FG_ACCENT,
         col=4,
     )
@@ -178,8 +178,8 @@ def editor_frame() -> Image.Image:
         "Quick save is simple: type **save** on its own line, press Enter,",
         "and bsj writes a new encrypted revision then opens a clean page.",
         "",
-        "Search, timeline, and calendar all stay inside this same screen.",
-        "Nothing plaintext is written to disk outside explicit exports.",
+        "Use GO for calendar/index. Use SEARCH for global vault lookup.",
+        "Everything here stays encrypted at rest (except explicit exports).",
         "",
         "This keeps the app feeling like a writing appliance, not a dashboard.",
         "",
@@ -199,7 +199,7 @@ def editor_frame() -> Image.Image:
     draw_text(
         draw,
         22,
-        "STATUS UNLOCKED | VERIFY OK | SAVED 09:10 PM | AUTOSAVED 09:11 PM",
+        "MODE EDIT | SAVE READY | Ln 8, Col 4 | Words 57 | VER v1.1.1",
         fill=FG_SUCCESS,
     )
     draw_footer(
@@ -223,10 +223,10 @@ def editor_frame() -> Image.Image:
 def calendar_frame() -> Image.Image:
     image = editor_frame()
     draw = ImageDraw.Draw(image)
-    draw_highlight_span(draw, 1, 18, "GO")
+    draw_highlight_span(draw, 1, 25, "GO")
     draw_overlay(
         draw,
-        "CALENDAR",
+        "GO -> CALENDAR",
         [
             "March 2026 (Entry Date Jump)",
             "",
@@ -237,24 +237,24 @@ def calendar_frame() -> Image.Image:
             "22 23 24 25 26 27 28",
             "29 30 31",
             "",
-            "PgUp/PgDn month, Enter open, Alt+N next blank date",
+            "PgUp/PgDn month  Enter open  [ ] jump saved day",
         ],
-        width_cols=36,
+        width_cols=40,
         height_rows=12,
-        start_col=22,
+        start_col=20,
         start_row=5,
     )
-    draw_text(draw, 18, "Saved days are bright. Today is bracketed.", fill=FG_ALERT)
+    draw_text(draw, 18, "Saved days are highlighted. Today is bracketed.", fill=FG_ALERT)
     return image
 
 
 def search_frame() -> Image.Image:
     image = editor_frame()
     draw = ImageDraw.Draw(image)
-    draw_highlight_span(draw, 1, 12, "SEARCH")
+    draw_highlight_span(draw, 1, 11, "SEARCH")
     draw_overlay(
         draw,
-        "SEARCH VAULT",
+        "SEARCH -> VAULT",
         [
             "Query: quiet",
             "From: 2026-03-01      To: 2026-03-31",
@@ -263,7 +263,7 @@ def search_frame() -> Image.Image:
             "2026-03-18  A [quiet] room makes the draft honest.",
             "2026-03-12  Nothing dramatic. Just a [quiet] win.",
             "",
-            "Enter opens match  Ctrl+Shift+B saves preset  Esc closes",
+            "Enter open  Ctrl+Shift+B save preset  Ctrl+1..9 recall",
         ],
         width_cols=58,
         height_rows=10,
@@ -277,10 +277,10 @@ def search_frame() -> Image.Image:
 def index_frame() -> Image.Image:
     image = editor_frame()
     draw = ImageDraw.Draw(image)
-    draw_highlight_span(draw, 1, 26, "GO")
+    draw_highlight_span(draw, 1, 25, "GO")
     draw_overlay(
         draw,
-        "INDEX TIMELINE",
+        "GO -> INDEX TIMELINE",
         [
             "Date         Entry No.   Preview",
             "",
@@ -288,7 +288,7 @@ def index_frame() -> Image.Image:
             "2026-03-18   000476      Setup complete. The screen already feels...",
             "2026-03-15   000473      CONFLICT  Two heads require merge.",
             "",
-            "Up/Down move  Enter open  Shift+F favorites  Shift+C conflicts",
+            "Up/Down move  Enter open  / filter  Shift+S sort toggle",
         ],
         width_cols=66,
         height_rows=9,

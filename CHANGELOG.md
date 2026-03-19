@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.1.1
+
+- fixed installer post-install launch path to open the TUI with a PTY wrapper, preventing `Failed to initialize input reader`
+- fixed bootstrap install/update flow to run the current top-level installer logic for release archives
+- removed manual PATH export prompts from installer completion copy and clarified next-step messaging
+- refreshed generated product screenshots and docs release surfaces for the current compact/menu-first UI
+
 ## v1.1.0
 
 - added search power controls: `--range`, `--match-mode all|any|phrase`, `--hits-per-entry`, `--sort newest|oldest|relevance`, and `--summary`

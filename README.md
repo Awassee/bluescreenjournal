@@ -22,13 +22,12 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with optional folder/S3/WebDAV encrypted sync
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v1.1.0
+## New in v1.1.1
 
-- added power search controls: `--range`, `--match-mode all|any|phrase`, `--hits-per-entry`, `--sort newest|oldest|relevance`, and `--summary`
-- added timeline preset management: `--save-preset`, `--preset`, `--list-presets`, and `--delete-preset`
-- added timeline grouping output: `--group-by day|week|month`
-- added optional AI reflection commands and menu surfaces: `bsj ai summary`, `bsj ai coach`, `TOOLS -> AI Summary (Optional)`, and `TOOLS -> AI Coach Mode (Optional)`
-- refreshed docs and screenshot assets to match the current menu-first `v1.1.0` UI
+- fixed installer launch behavior to avoid `Failed to initialize input reader` when starting the TUI from post-install flows
+- hardened bootstrap install flow so public one-line installs always run the current installer logic
+- refreshed docs and screenshot assets to match the current compact/menu-first interface
+- updated public release and install surfaces to `v1.1.1`
 
 ## Screenshots
 
@@ -77,7 +76,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.1.0.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.1.1.md) |
 
 ## Turnkey install
 
@@ -90,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.1.0
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.1.1
 ```
 
 Install from source instead of the prebuilt release:
@@ -410,7 +409,7 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v1.1.0.md)
+- [Release Notes](docs/releases/v1.1.1.md)
 - [Next 10 Feature Pack](docs/FEATURES_NEXT10.md)
 - [Feature Pass v1.0.3 (Archive)](docs/FEATURE_PASS_VNEXT.md)
 - [SYSOP Features](docs/SYSOP_FEATURES.md)
