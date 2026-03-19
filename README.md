@@ -393,6 +393,14 @@ Smoke-test a bundle install:
 ./scripts/smoke-release-install.sh
 ```
 
+Run the full QA gate (same checks enforced in CI):
+
+```bash
+./scripts/qa-gate.sh
+# or
+just qa
+```
+
 ## Non-goals
 
 bsj is intentionally not trying to be:

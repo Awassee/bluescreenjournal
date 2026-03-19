@@ -24,3 +24,6 @@ smoke-dist:
 
 audit-release:
     ./scripts/audit-release.sh
+
+qa:
+    ./scripts/qa-gate.sh
