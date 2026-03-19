@@ -2,14 +2,24 @@ use reqwest::blocking::Client;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
+    fs::{self, OpenOptions},
+    io::Write,
     path::Path,
+    path::PathBuf,
     process::{Command, Stdio},
     time::Duration,
 };
 
 const KEYCHAIN_SERVICE: &str = "com.awassee.bsj.passphrase";
 const RELEASES_URL: &str = "https://api.github.com/repos/Awassee/bluescreenjournal/releases/latest";
+const INSTALLER_SCRIPT_URL: &str =
+    "https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh";
+const UPDATER_TEMP_DIR_NAME: &str = "bsj-updater";
+const UPDATE_LOG_FILE_NAME: &str = "update.log";
+const MAX_TAG_LENGTH: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateInfo {
@@ -18,6 +28,14 @@ pub struct UpdateInfo {
     pub html_url: String,
     pub newer_available: bool,
     pub asset_names: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UpdateLaunch {
+    pub target_tag: String,
+    pub prefix: PathBuf,
+    pub log_path: PathBuf,
+    pub command_preview: String,
 }
 
 #[derive(Deserialize)]
@@ -136,12 +154,139 @@ pub fn check_for_updates(current_version: &str) -> Result<UpdateInfo, String> {
     })
 }
 
+pub fn updater_command_preview(target_tag: &str) -> Result<String, String> {
+    let normalized_tag = normalized_update_tag(target_tag)?;
+    let prefix = infer_install_prefix();
+    Ok(format!(
+        "curl -fsSL {} | bash -s -- --prebuilt --yes --version {} --prefix {}",
+        shell_quote(INSTALLER_SCRIPT_URL),
+        shell_quote(&normalized_tag),
+        shell_quote(&prefix.display().to_string()),
+    ))
+}
+
+pub fn start_background_update(target_tag: &str) -> Result<UpdateLaunch, String> {
+    let normalized_tag = normalized_update_tag(target_tag)?;
+    let prefix = infer_install_prefix();
+    let updater_root = std::env::temp_dir().join(UPDATER_TEMP_DIR_NAME);
+    fs::create_dir_all(&updater_root)
+        .map_err(|error| format!("failed to create updater temp directory: {error}"))?;
+    #[cfg(unix)]
+    fs::set_permissions(&updater_root, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("failed to secure updater temp directory: {error}"))?;
+
+    let script_path = updater_root.join(format!(
+        "install-{}-{}.sh",
+        normalized_tag,
+        std::process::id()
+    ));
+    let log_path = updater_root.join(UPDATE_LOG_FILE_NAME);
+
+    let script = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("failed to create updater HTTP client: {error}"))?
+        .get(INSTALLER_SCRIPT_URL)
+        .header("User-Agent", "bsj-updater")
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| format!("failed to download installer script: {error}"))?
+        .bytes()
+        .map_err(|error| format!("failed to read installer script: {error}"))?;
+    fs::write(&script_path, script.as_ref())
+        .map_err(|error| format!("failed to write updater script: {error}"))?;
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("failed to make updater script executable: {error}"))?;
+
+    let mut log_header = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|error| format!("failed to open updater log: {error}"))?;
+    let _ = writeln!(
+        log_header,
+        "bsj updater start: tag={} prefix={}",
+        normalized_tag,
+        prefix.display()
+    );
+    let stdout_log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|error| format!("failed to open updater stdout log: {error}"))?;
+    let stderr_log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|error| format!("failed to open updater stderr log: {error}"))?;
+
+    Command::new("/bin/bash")
+        .arg(&script_path)
+        .arg("--prebuilt")
+        .arg("--yes")
+        .arg("--version")
+        .arg(&normalized_tag)
+        .arg("--prefix")
+        .arg(&prefix)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout_log))
+        .stderr(Stdio::from(stderr_log))
+        .spawn()
+        .map_err(|error| format!("failed to start updater: {error}"))?;
+
+    let command_preview = updater_command_preview(&normalized_tag)?;
+    Ok(UpdateLaunch {
+        target_tag: normalized_tag,
+        prefix,
+        log_path,
+        command_preview,
+    })
+}
+
 fn normalize_tag(version: &str) -> String {
     if version.starts_with('v') {
         version.to_string()
     } else {
         format!("v{version}")
     }
+}
+
+fn normalized_update_tag(tag: &str) -> Result<String, String> {
+    let normalized = normalize_tag(tag.trim());
+    if normalized.len() > MAX_TAG_LENGTH {
+        return Err("update tag is too long".to_string());
+    }
+    let safe = normalized
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, 'v' | '.' | '-' | '_'));
+    if !safe {
+        return Err("update tag contains unsupported characters".to_string());
+    }
+    Ok(normalized)
+}
+
+fn infer_install_prefix() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(prefix) = infer_install_prefix_from_exe(&exe)
+    {
+        return prefix;
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".local")
+}
+
+fn infer_install_prefix_from_exe(exe: &Path) -> Option<PathBuf> {
+    let bin_dir = exe.parent()?;
+    if bin_dir.file_name().and_then(|value| value.to_str()) != Some("bin") {
+        return None;
+    }
+    bin_dir.parent().map(Path::to_path_buf)
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn strip_v_prefix(version: &str) -> &str {
@@ -163,7 +308,10 @@ fn parse_version_parts(version: &str) -> Vec<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReleaseResponse, compare_versions, keychain_account};
+    use super::{
+        ReleaseResponse, compare_versions, infer_install_prefix_from_exe, keychain_account,
+        normalized_update_tag, updater_command_preview,
+    };
     use std::path::Path;
 
     #[test]
@@ -208,5 +356,30 @@ mod tests {
             asset_names: Vec::new(),
         };
         assert!(info.current_version.starts_with('v'));
+    }
+
+    #[test]
+    fn normalized_update_tag_rejects_shell_chars() {
+        assert!(normalized_update_tag("v0.2.0").is_ok());
+        assert!(normalized_update_tag("0.2.0").is_ok());
+        assert!(normalized_update_tag("v0.2.0;rm -rf /").is_err());
+        assert!(normalized_update_tag("v0.2.0$(bad)").is_err());
+    }
+
+    #[test]
+    fn updater_command_preview_contains_expected_flags() {
+        let command = updater_command_preview("0.2.0").expect("command");
+        assert!(command.contains("install.sh"));
+        assert!(command.contains("--prebuilt"));
+        assert!(command.contains("--yes"));
+        assert!(command.contains("--version 'v0.2.0'"));
+        assert!(command.contains("--prefix"));
+    }
+
+    #[test]
+    fn infer_install_prefix_uses_parent_of_bin_directory() {
+        let exe = Path::new("/Users/test/.local/bin/bsj");
+        let prefix = infer_install_prefix_from_exe(exe).expect("prefix");
+        assert_eq!(prefix, Path::new("/Users/test/.local"));
     }
 }

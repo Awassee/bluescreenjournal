@@ -207,6 +207,7 @@ The menu bar is the primary discoverability surface.
 - `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
 - `TOOLS` includes sync, soundtrack toggle, integrity details, review mode, prompts, dashboard, updates, and doctor output
+- `TOOLS -> Check for Updates` now offers an in-app install action that runs the installer in the background
 - `SETUP` includes a live settings summary plus editable vault/sync/device/retention/clock/display values
 - `HELP` includes the key sheet, quick-start guide, and searchable guide topics inside the TUI
 
@@ -241,6 +242,7 @@ Additional screen-level controls:
 - date picker: type `YYYY-MM-DD`, use `[` and `]` for saved-day jumps, `<` and `>` for months with entries
 - index overlay: type to filter, `Shift+S` sort, `Shift+F` favorites only, `Shift+C` conflicts only
 - command palette: `Ctrl+K`
+- updater logs are written to `$TMPDIR/bsj-updater/update.log` when started from the TUI
 
 ## Security model
 

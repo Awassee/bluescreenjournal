@@ -495,6 +495,11 @@ pub enum PickerAction {
     Menu(MenuAction),
     OpenDate(NaiveDate),
     OpenSearch(String),
+    InstallUpdate {
+        tag: String,
+        release_url: String,
+        command: String,
+    },
     OpenExportPrompt {
         format: ExportFormatUi,
         path: String,
@@ -658,6 +663,15 @@ impl PickerOverlay {
                 | PickerAction::OpenExportPrompt { path: query, .. }
                 | PickerAction::InsertText(query) => {
                     query.zeroize();
+                }
+                PickerAction::InstallUpdate {
+                    tag,
+                    release_url,
+                    command,
+                } => {
+                    tag.zeroize();
+                    release_url.zeroize();
+                    command.zeroize();
                 }
                 PickerAction::OpenRestorePrompt { backup_path } => {
                     backup_path.as_mut_os_string().clear();
@@ -4734,6 +4748,12 @@ impl App {
     fn open_update_check_overlay(&mut self) {
         match platform::check_for_updates(env!("CARGO_PKG_VERSION")) {
             Ok(info) => {
+                let command = platform::updater_command_preview(&info.latest_tag).unwrap_or_else(
+                    |_| {
+                        "curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash"
+                            .to_string()
+                    },
+                );
                 let mut lines = vec![
                     format!("Current : {}", info.current_version),
                     format!("Latest  : {}", info.latest_tag),
@@ -4747,8 +4767,8 @@ impl App {
                     ),
                     format!("Release : {}", info.html_url),
                     String::new(),
-                    "Install".to_string(),
-                    "curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash".to_string(),
+                    "Install command".to_string(),
+                    command.clone(),
                 ];
                 if !info.asset_names.is_empty() {
                     lines.push(String::new());
@@ -4757,7 +4777,40 @@ impl App {
                         lines.push(format!("  {asset}"));
                     }
                 }
-                self.open_info_overlay("Updates", lines.join("\n"));
+                let details = lines.join("\n");
+                if info.newer_available {
+                    self.open_picker_overlay(PickerOverlay::new(
+                        "Updates",
+                        vec![
+                            PickerItem {
+                                title: format!("Install {}", info.latest_tag),
+                                detail: "BACKGROUND".to_string(),
+                                keywords: format!(
+                                    "update upgrade install {} {}",
+                                    info.latest_tag, info.current_version
+                                ),
+                                action: PickerAction::InstallUpdate {
+                                    tag: info.latest_tag.clone(),
+                                    release_url: info.html_url.clone(),
+                                    command: command.clone(),
+                                },
+                            },
+                            PickerItem {
+                                title: "View release details".to_string(),
+                                detail: "INFO".to_string(),
+                                keywords: "update release notes assets changelog".to_string(),
+                                action: PickerAction::ShowInfo {
+                                    title: "Updates".to_string(),
+                                    text: details.clone(),
+                                },
+                            },
+                        ],
+                        "No update actions available.",
+                    ));
+                    self.flash_status("UPDATE AVAILABLE.");
+                } else {
+                    self.open_info_overlay("Updates", details);
+                }
             }
             Err(error) => {
                 self.open_info_overlay("Updates", format!("Update check failed: {error}"))
@@ -5847,6 +5900,43 @@ impl App {
         }
     }
 
+    fn run_update_install(&mut self, tag: &str, release_url: &str, fallback_command: &str) {
+        match platform::start_background_update(tag) {
+            Ok(launch) => {
+                self.open_info_overlay(
+                    "Updater",
+                    [
+                        format!("Installer started in background for {}.", launch.target_tag),
+                        String::new(),
+                        format!("Install prefix: {}", launch.prefix.display()),
+                        format!("Log file      : {}", launch.log_path.display()),
+                        String::new(),
+                        "Keep writing if you want, then restart bsj after install finishes."
+                            .to_string(),
+                        "If install fails, run this manually:".to_string(),
+                        launch.command_preview,
+                    ]
+                    .join("\n"),
+                );
+                self.flash_status("UPDATER STARTED.");
+            }
+            Err(error) => {
+                self.open_info_overlay(
+                    "Updater",
+                    [
+                        format!("Failed to start updater: {error}"),
+                        String::new(),
+                        format!("Release: {release_url}"),
+                        "Manual install command:".to_string(),
+                        fallback_command.to_string(),
+                    ]
+                    .join("\n"),
+                );
+                self.flash_status("UPDATER FAILED.");
+            }
+        }
+    }
+
     fn apply_picker_action(&mut self, action: PickerAction, viewport_height: usize) {
         match action {
             PickerAction::Menu(action) => self.perform_menu_action(action, viewport_height),
@@ -5870,6 +5960,11 @@ impl App {
             PickerAction::OpenRestorePrompt { backup_path } => {
                 self.open_restore_prompt_with_selected_backup(&backup_path);
             }
+            PickerAction::InstallUpdate {
+                tag,
+                release_url,
+                command,
+            } => self.run_update_install(&tag, &release_url, &command),
             PickerAction::InsertText(text) => {
                 self.buffer.insert_text(&text);
                 self.finish_buffer_menu_edit(viewport_height, "TEXT INSERTED.");
