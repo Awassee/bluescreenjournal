@@ -506,7 +506,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
     let rect = match overlay {
         Overlay::SetupWizard(_) => popup_rect(body_area, 76, 10),
         Overlay::UnlockPrompt { .. } => popup_rect(body_area, 68, 8),
-        Overlay::Help => popup_rect(body_area, 72, 20),
+        Overlay::Help => popup_rect(body_area, 72, 21),
         Overlay::DatePicker(_) => popup_rect(body_area, 38, 13),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
         Overlay::ClosingPrompt { .. } => popup_rect(body_area, 58, 5),
@@ -726,7 +726,9 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("EDIT   Lines, stamps, metadata, favorite, reveal, typewriter"),
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),
         Line::from("GO     Calendar, index, recents, favorites, random, today"),
-        Line::from("TOOLS  Sync, soundtrack, verify, review, dashboard, prompts, doctor"),
+        Line::from(
+            "TOOLS  Sync, soundtrack source/toggle, verify, review, dashboard, prompts, doctor",
+        ),
         Line::from("Calendar: type YYYY-MM-DD, [ ] saved-day jump, < > entry months, T today"),
         Line::from("Index: type filter, S sort, Shift+F favorites, Shift+C conflicts"),
         Line::from("Search: Tab fields, Enter search/open, T/W/M/Y/A presets, Ctrl+R recall query"),

@@ -1430,6 +1430,7 @@ pub enum MenuAction {
     ReviewPrompts,
     SyncHistory,
     SessionReset,
+    About,
     HelpTopics,
     ToggleKeychainMemory,
     QuickStart,
@@ -2489,15 +2490,27 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
+                    label: "Soundtrack Source".to_string(),
+                    detail: if self.config.soundtrack_source.trim().is_empty() {
+                        "SET".to_string()
+                    } else {
+                        "READY".to_string()
+                    },
+                    action: MenuAction::EditSetting(SettingField::SoundtrackSource),
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Toggle Soundtrack".to_string(),
                     detail: if self.soundtrack_loop_enabled {
                         "ON"
+                    } else if self.config.soundtrack_source.trim().is_empty() {
+                        "SET"
                     } else {
                         "OFF"
                     }
                     .to_string(),
                     action: MenuAction::ToggleSoundtrack,
-                    enabled: !self.config.soundtrack_source.trim().is_empty(),
+                    enabled: true,
                 },
                 MenuItem {
                     label: "Verify Integrity".to_string(),
@@ -2580,6 +2593,12 @@ impl App {
                 self.setting_menu_item(SettingField::BackupMonthly),
             ],
             MenuId::Help => vec![
+                MenuItem {
+                    label: "About BlueScreen Journal".to_string(),
+                    detail: self.app_version_label(),
+                    action: MenuAction::About,
+                    enabled: true,
+                },
                 MenuItem {
                     label: "Key and Menu Guide".to_string(),
                     detail: "F1".to_string(),
@@ -4342,8 +4361,50 @@ impl App {
         self.open_info_overlay("Quick Start", help::render_quickstart_guide());
     }
 
+    fn open_about_overlay(&mut self) {
+        let soundtrack_source = if self.config.soundtrack_source.trim().is_empty() {
+            "[not configured]".to_string()
+        } else {
+            self.config.soundtrack_source.clone()
+        };
+        let text = [
+            format!("BlueScreen Journal {}", self.app_version_label()),
+            String::new(),
+            "(c) 2026 Awassee LLC and Sean Heiney".to_string(),
+            "sean@sean.net".to_string(),
+            String::new(),
+            "Menus".to_string(),
+            "  HELP  -> About BlueScreen Journal".to_string(),
+            "  TOOLS -> Soundtrack Source".to_string(),
+            "  TOOLS -> Toggle Soundtrack".to_string(),
+            String::new(),
+            format!("Soundtrack source: {soundtrack_source}"),
+            format!("Soundtrack state : {}", self.soundtrack_status_label()),
+            "Shortcut        : Alt+M toggles soundtrack".to_string(),
+            String::new(),
+            "Tip: if soundtrack is not configured, selecting Toggle Soundtrack opens setup."
+                .to_string(),
+        ]
+        .join("\n");
+        self.open_info_overlay("About", text);
+    }
+
     fn open_help_topics_overlay(&mut self) {
         let items = vec![
+            (
+                "About",
+                "Version, credits, and controls",
+                [
+                    format!("BlueScreen Journal {}", self.app_version_label()),
+                    "(c) 2026 Awassee LLC and Sean Heiney".to_string(),
+                    "sean@sean.net".to_string(),
+                    String::new(),
+                    "Help path: HELP -> About BlueScreen Journal".to_string(),
+                    "Soundtrack: TOOLS -> Soundtrack Source / Toggle Soundtrack".to_string(),
+                    "Shortcut: Alt+M".to_string(),
+                ]
+                .join("\n"),
+            ),
             (
                 "Quick Start",
                 "Daily use in five minutes",
@@ -5449,6 +5510,7 @@ impl App {
                 self.session_started_at = Instant::now();
                 self.flash_status("SESSION RESET.");
             }
+            MenuAction::About => self.open_about_overlay(),
             MenuAction::HelpTopics => self.open_help_topics_overlay(),
             MenuAction::ToggleKeychainMemory => self.toggle_keychain_memory(),
             MenuAction::QuickStart => self.open_quickstart_overlay(),
@@ -5602,6 +5664,12 @@ impl App {
     }
 
     fn toggle_soundtrack_playback(&mut self) {
+        if self.config.soundtrack_source.trim().is_empty() {
+            self.open_setting_prompt(SettingField::SoundtrackSource);
+            self.flash_status("SET SOUNDTRACK SOURCE.");
+            return;
+        }
+
         if self.soundtrack_loop_enabled {
             self.soundtrack_loop_enabled = false;
             self.stop_soundtrack_playback();
@@ -8829,6 +8897,7 @@ mod tests {
 
         assert!(labels.contains(&"Command Palette".to_string()));
         assert!(labels.contains(&"Writing Prompts".to_string()));
+        assert!(labels.contains(&"Soundtrack Source".to_string()));
         assert!(labels.contains(&"Toggle Soundtrack".to_string()));
     }
 
@@ -8840,7 +8909,38 @@ mod tests {
         app.toggle_soundtrack_playback();
 
         assert!(!app.soundtrack_loop_enabled);
-        assert_eq!(app.status_text(), Some("SOUNDTRACK SOURCE NOT SET."));
+        assert_eq!(app.status_text(), Some("SET SOUNDTRACK SOURCE."));
+        assert!(matches!(app.overlay(), Some(Overlay::SettingPrompt(_))));
+    }
+
+    #[test]
+    fn help_menu_lists_about_entry() {
+        let app = App::with_initial_date(None);
+        let labels = app
+            .menu_items(MenuId::Help)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"About BlueScreen Journal".to_string()));
+    }
+
+    #[test]
+    fn about_action_opens_info_overlay() {
+        let mut app = App::with_initial_date(None);
+
+        app.perform_menu_action(MenuAction::About, 20);
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "About");
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("Awassee LLC and Sean Heiney"));
+                assert!(rendered.contains("About BlueScreen Journal"));
+                assert!(rendered.contains("Toggle Soundtrack"));
+            }
+            other => panic!("expected about info overlay, got {other:?}"),
+        }
     }
 
     #[test]

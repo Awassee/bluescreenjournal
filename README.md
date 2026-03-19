@@ -185,6 +185,7 @@ The app is direct by design:
 ### Protect and move data
 
 - `F8` or `TOOLS -> Sync Vault` syncs encrypted blobs
+- `TOOLS -> Soundtrack Source` sets the MIDI URL/path used for playback
 - `TOOLS -> Toggle Soundtrack` or `Alt+M` plays/stops the configured MIDI theme source
 - `TOOLS -> Verify Integrity` checks the revision chain
 - `bsj backup` creates an encrypted snapshot under `<vault>/backups/`
@@ -206,10 +207,10 @@ The menu bar is the primary discoverability surface.
 - `EDIT` includes line tools, stamps, metadata, reveal, and writing-mode toggles
 - `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
-- `TOOLS` includes sync, soundtrack toggle, integrity details, review mode, prompts, dashboard, updates, and doctor output
+- `TOOLS` includes sync, soundtrack source + toggle, integrity details, review mode, prompts, dashboard, updates, and doctor output
 - `TOOLS -> Check for Updates` now offers an in-app install action that runs the installer in the background
 - `SETUP` includes a live settings summary plus editable vault/sync/device/retention/clock/display values
-- `HELP` includes the key sheet, quick-start guide, and searchable guide topics inside the TUI
+- `HELP` includes About (version/credits), the key sheet, quick-start guide, and searchable guide topics inside the TUI
 
 Primary keys:
 
@@ -237,6 +238,7 @@ Keyboard verification:
 Additional screen-level controls:
 
 - soundtrack source defaults to `https://www.midi-karaoke.info/21b56501.mid` and can be changed in `SETUP -> Soundtrack URL/Path`
+- soundtrack source can also be edited directly from `TOOLS -> Soundtrack Source`
 - URL sources are cached locally before playback so macOS `afplay` can play MIDI reliably
 - search overlay: `T` today, `M` month, `A` all time, `C` clear filters
 - date picker: type `YYYY-MM-DD`, use `[` and `]` for saved-day jumps, `<` and `>` for months with entries
