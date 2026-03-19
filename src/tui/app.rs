@@ -2813,7 +2813,7 @@ impl App {
         }
 
         if mutated {
-            self.buffer.wrap_current_line(self.last_viewport_width);
+            self.wrap_cursor_line();
             self.dirty = true;
             self.refresh_document_stats();
             self.refresh_find_matches();
@@ -3264,6 +3264,7 @@ impl App {
                     let replaced = self
                         .buffer
                         .replace_all(&confirm.find_text, &confirm.replace_text);
+                    self.wrap_all_lines();
                     self.dirty = replaced > 0;
                     if replaced > 0 {
                         self.refresh_document_stats();
@@ -3877,6 +3878,7 @@ impl App {
     }
 
     fn finish_buffer_menu_edit(&mut self, viewport_height: usize, status: &str) {
+        self.wrap_cursor_and_previous_line();
         self.dirty = true;
         self.refresh_document_stats();
         self.refresh_find_matches();
@@ -3924,6 +3926,58 @@ impl App {
     fn insert_text_snippet(&mut self, text: &str, viewport_height: usize, status: &str) {
         self.buffer.insert_text(text);
         self.finish_buffer_menu_edit(viewport_height, status);
+    }
+
+    fn wrap_cursor_line(&mut self) {
+        self.buffer
+            .wrap_current_line(self.last_viewport_width.max(1));
+    }
+
+    fn wrap_cursor_and_previous_line(&mut self) {
+        let row = self.buffer.cursor_row();
+        if row > 0 {
+            self.wrap_line_at(row - 1);
+        }
+        self.wrap_cursor_line();
+    }
+
+    fn wrap_line_at(&mut self, row: usize) {
+        if self.buffer.line_count() == 0 {
+            return;
+        }
+        let width = self.last_viewport_width.max(1);
+        let (saved_row, saved_col) = self.buffer.cursor();
+        let target_row = row.min(self.buffer.line_count().saturating_sub(1));
+        let target_col = self
+            .buffer
+            .line(target_row)
+            .map(|line| line.chars().count())
+            .unwrap_or(0);
+        self.buffer.set_cursor(target_row, target_col);
+        self.buffer.wrap_current_line(width);
+        let clamped_row = saved_row.min(self.buffer.line_count().saturating_sub(1));
+        self.buffer.set_cursor(clamped_row, saved_col);
+    }
+
+    fn wrap_all_lines(&mut self) {
+        let width = self.last_viewport_width.max(1);
+        let (saved_row, saved_col) = self.buffer.cursor();
+        let mut row = 0usize;
+        while row < self.buffer.line_count() {
+            let line_len = self
+                .buffer
+                .line(row)
+                .map(|line| line.chars().count())
+                .unwrap_or(0);
+            if line_len > width {
+                self.buffer.set_cursor(row, line_len);
+                self.buffer.wrap_current_line(width);
+            } else {
+                row += 1;
+            }
+        }
+        let clamped_row = saved_row.min(self.buffer.line_count().saturating_sub(1));
+        self.buffer.set_cursor(clamped_row, saved_col);
     }
 
     fn quick_export_current(&mut self, format: ExportFormatUi) {
@@ -6537,6 +6591,7 @@ impl App {
             return true;
         };
         self.buffer.replace_at(&current, &confirm.replace_text);
+        self.wrap_cursor_line();
         self.dirty = true;
         self.refresh_document_stats();
         confirm.matches = self.buffer.find(&confirm.find_text);
@@ -6593,6 +6648,7 @@ impl App {
         match action {
             MacroActionConfig::InsertTemplate { text } => {
                 self.buffer.insert_text(&text);
+                self.wrap_cursor_and_previous_line();
                 self.dirty = true;
                 self.refresh_document_stats();
                 self.refresh_find_matches();
@@ -6607,6 +6663,7 @@ impl App {
                         self.entry_number_label()
                     );
                     self.buffer.insert_text(&template);
+                    self.wrap_cursor_and_previous_line();
                     self.dirty = true;
                     self.refresh_document_stats();
                     self.refresh_find_matches();
@@ -7709,6 +7766,24 @@ mod tests {
 
         assert_eq!(app.buffer.to_text(), "     ");
         assert_eq!(app.buffer.cursor(), (0, 5));
+    }
+
+    #[test]
+    fn menu_insert_divider_wraps_previous_line_even_when_cursor_advances() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.last_viewport_width = 12;
+        app.buffer = TextBuffer::from_text("");
+
+        app.perform_menu_action(MenuAction::InsertDivider, 20);
+
+        let first_line_len = app
+            .buffer
+            .line(0)
+            .map(|line| line.chars().count())
+            .unwrap_or_default();
+        assert!(app.buffer.line_count() >= 2);
+        assert!(first_line_len <= 12);
     }
 
     #[test]
@@ -8916,6 +8991,15 @@ mod tests {
         assert!(rendered.contains("VERSION v"));
         assert!(rendered.contains("PERSONAL JOURNAL [COMPACT]"));
         assert!(rendered.contains("FILE"));
+    }
+
+    #[test]
+    fn standard_header_shows_version_label() {
+        let app = App::with_initial_date(None);
+
+        let rendered = render_app(&app, 100, 30);
+
+        assert!(rendered.contains("VERSION v"));
     }
 
     #[test]

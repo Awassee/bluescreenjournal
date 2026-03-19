@@ -132,14 +132,14 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let left = format!(
-        "PERSONAL JOURNAL{}{}  VERSION {}  [{}]  TIME {}  ENTRY NO. {}",
+        "VERSION {}  PERSONAL JOURNAL{}{}  [{}]  TIME {}  ENTRY NO. {}",
+        app.app_version_label(),
         if compact_mode { " [COMPACT]" } else { "" },
         if app.favorite_marker().is_empty() {
             ""
         } else {
             " *"
         },
-        app.app_version_label(),
         app.header_entry_focus_label(),
         app.header_time_label(),
         app.entry_number_label()
@@ -410,7 +410,8 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let context = format!(
-        "{} | {} | {} | {}",
+        "VER {} | {} | {} | {} | {}",
+        app.app_version_label(),
         app.footer_mode_label(),
         app.save_status_label(),
         app.footer_context_label(),
