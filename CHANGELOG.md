@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.2.1
+
+- upgraded CI/release workflow action versions for current GitHub runner compatibility
+- replaced workflow release publication action with `gh release` CLI publishing
+- added `scripts/manual-smoke-gui-terminals.sh` for Terminal.app and iTerm2 installer/launch smoke checks
+- added scoped `v1.3.0` milestone plan in `docs/V1_3_PLAN.md`
+- updated stable docs/install pointers and release notes to `v1.2.1`
+
 ## v1.2.0
 
 - added `HELP -> First-Run Tour` so onboarding is reachable from menus at any time

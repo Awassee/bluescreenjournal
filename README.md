@@ -22,12 +22,12 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with optional folder/S3/WebDAV encrypted sync
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v1.2.0
+## New in v1.2.1
 
-- added a menu-reachable First-Run Tour under `HELP` with a concise 2-minute guided workflow
-- added `TOOLS -> Journal Health` for fast trust checks (lock state, save state, integrity, backups, conflicts, sync target)
-- added a repeat-run stability gate script and wired it into QA and release workflows
-- refreshed release/docs surfaces to publish `v1.2.0` as the current stable
+- upgraded GitHub workflows to current action majors and switched release publishing to `gh release` CLI
+- added `scripts/manual-smoke-gui-terminals.sh` to run published installer checks in Terminal.app and iTerm2
+- added scoped [v1.3 milestone plan](docs/V1_3_PLAN.md) with issues and acceptance criteria
+- refreshed stable install/docs surfaces to publish `v1.2.1` as current stable
 
 ## Screenshots
 
@@ -76,7 +76,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.2.0.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.2.1.md) |
 
 ## Turnkey install
 
@@ -89,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.2.0
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.2.1
 ```
 
 Install from source instead of the prebuilt release:
@@ -409,7 +409,8 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v1.2.0.md)
+- [Release Notes](docs/releases/v1.2.1.md)
+- [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
 - [Next 10 Feature Pack](docs/FEATURES_NEXT10.md)
 - [Feature Pass v1.0.3 (Archive)](docs/FEATURE_PASS_VNEXT.md)
 - [SYSOP Features](docs/SYSOP_FEATURES.md)
