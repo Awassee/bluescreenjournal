@@ -54,6 +54,7 @@ INSTALL_HOME="$TMP_DIR/install-home"
 BOOTSTRAP_HOME="$TMP_DIR/bootstrap-home"
 BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
 BOOTSTRAP_BASH_HOME="$TMP_DIR/bootstrap-home-bash"
+SMOKE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -115,7 +116,7 @@ grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.config/fish/config.fish"
 
 # Regression guard: exercise bootstrap install with no forwarded install args.
 mkdir -p "$BOOTSTRAP_NOARGS_HOME"
-HOME="$BOOTSTRAP_NOARGS_HOME" SHELL=/bin/zsh bash -s -- --prebuilt --archive "$ARCHIVE" < "$ROOT_DIR/install.sh"
+PATH="$SMOKE_PATH" HOME="$BOOTSTRAP_NOARGS_HOME" SHELL=/bin/zsh bash -s -- --prebuilt --archive "$ARCHIVE" < "$ROOT_DIR/install.sh"
 "$BOOTSTRAP_NOARGS_HOME/.local/bin/bsj" --help >/dev/null
 test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/doc/bsj/README.md"
 test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/man/man1/bsj.1"
@@ -127,7 +128,7 @@ grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.config/fis
 
 # Bash profile fallback coverage.
 mkdir -p "$BOOTSTRAP_BASH_HOME"
-HOME="$BOOTSTRAP_BASH_HOME" SHELL=/bin/bash bash -s -- --prebuilt --archive "$ARCHIVE" < "$ROOT_DIR/install.sh"
+PATH="$SMOKE_PATH" HOME="$BOOTSTRAP_BASH_HOME" SHELL=/bin/bash bash -s -- --prebuilt --archive "$ARCHIVE" < "$ROOT_DIR/install.sh"
 "$BOOTSTRAP_BASH_HOME/.local/bin/bsj" --help >/dev/null
 grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.bash_profile"
 grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.bashrc"

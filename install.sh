@@ -452,6 +452,25 @@ expand_home_path() {
   fi
 }
 
+effective_prebuilt_prefix() {
+  local active_bsj active_dir
+  if [[ -n "$PREFIX" ]]; then
+    expand_home_path "$PREFIX"
+    return
+  fi
+
+  if command -v bsj >/dev/null 2>&1; then
+    active_bsj="$(command -v bsj)"
+    active_dir="$(dirname "$active_bsj")"
+    if [[ -d "$active_dir" && -w "$active_dir" ]]; then
+      dirname "$active_dir"
+      return
+    fi
+  fi
+
+  printf "%s" "$HOME/.local"
+}
+
 is_dangerous_delete_target() {
   local target="$1"
   local normalized="${target%/}"
@@ -496,6 +515,7 @@ collect_uninstall_targets() {
   if [[ -n "$PREFIX" ]]; then
     prefix_candidates+=("$(expand_home_path "$PREFIX")")
   fi
+  prefix_candidates+=("$(effective_prebuilt_prefix)")
   prefix_candidates+=("$HOME/.local")
   prefix_candidates+=("${CARGO_HOME:-$HOME/.cargo}")
 
@@ -802,7 +822,7 @@ run_doctor() {
 
   mode_selected="$(pick_mode)"
   if [[ "$mode_selected" == "prebuilt" ]]; then
-    install_prefix="$(expand_home_path "${PREFIX:-$HOME/.local}")"
+    install_prefix="$(effective_prebuilt_prefix)"
     install_bin_dir="${BIN_DIR:-$install_prefix/bin}"
   else
     install_prefix="$(expand_home_path "${PREFIX:-${CARGO_HOME:-$HOME/.cargo}}")"
@@ -890,7 +910,7 @@ run_path_repair() {
     candidate_path="$(command -v bsj)"
     candidate_dir="$(dirname "$candidate_path")"
   else
-    resolved_prefix="$(expand_home_path "${PREFIX:-$HOME/.local}")"
+    resolved_prefix="$(effective_prebuilt_prefix)"
     if [[ -n "$BIN_DIR" ]]; then
       candidate_path="$(expand_home_path "$BIN_DIR")/bsj"
       if [[ -x "$candidate_path" ]]; then
@@ -912,7 +932,7 @@ run_path_repair() {
   fi
 
   if [[ -z "$candidate_dir" ]]; then
-    resolved_prefix="$(expand_home_path "${PREFIX:-$HOME/.local}")"
+    resolved_prefix="$(effective_prebuilt_prefix)"
     candidate_dir="${BIN_DIR:-$resolved_prefix/bin}"
     warn "No bsj binary found yet; adding expected install bin dir: $candidate_dir"
   fi
@@ -923,7 +943,8 @@ run_path_repair() {
   if [[ ":$PATH:" == *":$candidate_dir:"* ]]; then
     info "Current shell already includes $candidate_dir."
   else
-    printf "Open a new terminal window, or run now:\n  export PATH=\"%s:\$PATH\"\n" "$candidate_dir"
+    printf "PATH updates were written to your shell config files.\n"
+    printf "Open a new terminal window/tab to load them automatically.\n"
   fi
 
   if [[ -n "$candidate_path" && -x "$candidate_path" ]]; then
@@ -943,7 +964,8 @@ ensure_path_hint() {
   persist_path_update "$path_entry"
   export PATH="$path_entry:$PATH"
   info "Added $path_entry to PATH for this installer session."
-  printf "Open a new terminal window, or run this now:\n  export PATH=\"%s:\$PATH\"\n" "$path_entry"
+  printf "PATH updates were written to your shell config files.\n"
+  printf "Open a new terminal window/tab to load them automatically.\n"
 }
 
 print_install_version_summary() {
@@ -1056,6 +1078,22 @@ Troubleshooting:
 EOF
 }
 
+launch_bsj_from_installer() {
+  local installed_bin="$1"
+
+  if tty_input_available && command -v script >/dev/null 2>&1; then
+    script -q /dev/null "$installed_bin"
+    return $?
+  fi
+
+  if tty_input_available; then
+    "$installed_bin" < /dev/tty > /dev/tty 2>&1
+    return $?
+  fi
+
+  "$installed_bin"
+}
+
 maybe_prompt_post_install_menu() {
   local installed_bin="$1"
   local help_ref="$2"
@@ -1081,7 +1119,9 @@ EOF
     normalized="$(printf "%s" "$selection" | tr '[:upper:]' '[:lower:]')"
     case "$normalized" in
       ""|1)
-        "$installed_bin"
+        if ! launch_bsj_from_installer "$installed_bin"; then
+          warn "Launch failed from installer. Run directly: $installed_bin"
+        fi
         return
         ;;
       2)
@@ -1304,18 +1344,16 @@ bootstrap_prebuilt_install() {
 
   bundle_dir="$(extract_archive_bundle "$archive_path" "$tmp_dir")"
   [[ -n "$bundle_dir" && -d "$bundle_dir" ]] || die "Extracted bundle directory not found"
-  [[ -x "$bundle_dir/install.sh" ]] || die "Bundled installer not found in archive"
+  [[ -x "$bundle_dir/bin/bsj" ]] || die "Bundled binary not found in archive"
 
-  info "Launching bundled installer"
-  local delegate_args=()
-  while IFS= read -r arg; do
-    [[ -n "$arg" ]] && delegate_args+=("$arg")
-  done < <(common_install_args)
-  if [[ "${#delegate_args[@]}" -gt 0 ]]; then
-    "$bundle_dir/install.sh" --prebuilt "${delegate_args[@]}"
-  else
-    "$bundle_dir/install.sh" --prebuilt
+  info "Installing from downloaded release bundle"
+  local original_root="$ROOT_DIR"
+  ROOT_DIR="$bundle_dir"
+  if ! install_prebuilt; then
+    ROOT_DIR="$original_root"
+    return 1
   fi
+  ROOT_DIR="$original_root"
 }
 
 bootstrap_source_install() {
@@ -1357,11 +1395,16 @@ install_prebuilt() {
     return
   fi
 
-  local prefix="${PREFIX:-$HOME/.local}"
+  local prefix
+  prefix="$(effective_prebuilt_prefix)"
   local final_bin_dir="${BIN_DIR:-$prefix/bin}"
   local final_doc_dir="${DOC_DIR:-$prefix/share/doc/bsj}"
   local final_man_dir="${MAN_DIR:-$prefix/share/man/man1}"
   local final_example_dir="$prefix/share/bsj/examples"
+
+  if [[ -z "$PREFIX" ]]; then
+    info "Selected install prefix: $prefix"
+  fi
 
   info "Installing bundled bsj into $final_bin_dir"
   mkdir -p "$final_bin_dir" "$final_doc_dir" "$final_man_dir" "$final_example_dir"
