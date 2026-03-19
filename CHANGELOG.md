@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.1.2
+
+- polished installer completion output with a clearer first-run flow and menu-first guidance
+- expanded the installer post-install menu with setup, keyboard cheat sheet, and doctor + PATH repair actions
+- improved in-app onboarding hints for menu discovery, unlock state guidance, and quick-save discoverability
+- expanded UX regression coverage with new functional tests for menu/help roundtrips and unlock/menu hint behavior
+- hardened release smoke tests to assert first-run installer messaging so docs/install copy regressions are caught earlier
+
 ## v1.1.1
 
 - fixed installer post-install launch path to open the TUI with a PTY wrapper, preventing `Failed to initialize input reader`
