@@ -7266,11 +7266,312 @@ mod tests {
         lines.join("\n")
     }
 
+    fn assert_editor_invariants(app: &App) {
+        let line_count = app.buffer.line_count();
+        assert!(
+            line_count >= 1,
+            "buffer should always contain at least one line"
+        );
+        let (row, col) = app.buffer.cursor();
+        assert!(
+            row < line_count,
+            "cursor row out of bounds: {row} >= {line_count}"
+        );
+        let line_len = app
+            .buffer
+            .line(row)
+            .expect("cursor line should exist")
+            .chars()
+            .count();
+        assert!(
+            col <= line_len,
+            "cursor col out of bounds: {col} > {line_len}"
+        );
+        assert!(
+            app.scroll_row() <= line_count.saturating_sub(1),
+            "scroll row out of bounds"
+        );
+        assert!(
+            !app.buffer.to_text().contains('\t'),
+            "editor should not store literal tab characters"
+        );
+    }
+
+    fn send_editor_key(
+        app: &mut App,
+        code: KeyCode,
+        modifiers: KeyModifiers,
+        viewport_height: usize,
+        viewport_width: usize,
+    ) {
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(code, modifiers)),
+            viewport_height,
+            viewport_width,
+        );
+        assert_editor_invariants(app);
+    }
+
+    fn type_editor_text(app: &mut App, text: &str, viewport_height: usize, viewport_width: usize) {
+        for ch in text.chars() {
+            match ch {
+                '\n' => send_editor_key(
+                    app,
+                    KeyCode::Enter,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                '\t' => send_editor_key(
+                    app,
+                    KeyCode::Tab,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                _ => send_editor_key(
+                    app,
+                    KeyCode::Char(ch),
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+            }
+        }
+    }
+
+    fn build_unlocked_test_app(vault_root: &Path, start_date: NaiveDate) -> App {
+        let passphrase = SecretString::new("test-passphrase".to_string().into_boxed_str());
+        let metadata =
+            vault::create_vault(vault_root, &passphrase, Some(start_date), "Test Device")
+                .expect("create test vault");
+        let device_id = metadata.device_id.clone();
+        let unlocked = vault::unlock_vault_with_device(vault_root, &passphrase, device_id.clone())
+            .expect("unlock test vault");
+
+        let mut app = App::with_initial_date(Some(start_date));
+        app.overlay = None;
+        app.vault_path = vault_root.to_path_buf();
+        app.config.vault_path = vault_root.to_path_buf();
+        app.config.local_device_id = Some(device_id);
+        app.config.device_nickname = "Test Device".to_string();
+        app.vault = Some(unlocked);
+        app.load_selected_date();
+        assert_editor_invariants(&app);
+        app
+    }
+
     #[test]
     fn resize_event_does_not_panic() {
         let mut app = App::new();
         app.handle_event(Event::Resize(80, 25), 23);
         assert_eq!(app.scroll_row(), 0);
+    }
+
+    #[test]
+    fn human_like_batch_entry_flow_saves_and_reloads_many_days() {
+        let temp = tempdir().expect("tempdir");
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
+        let viewport_height = 20;
+        let viewport_width = 80;
+
+        for day in 0..28 {
+            if day > 0 {
+                send_editor_key(
+                    &mut app,
+                    KeyCode::Right,
+                    KeyModifiers::ALT,
+                    viewport_height,
+                    viewport_width,
+                );
+            }
+            assert_eq!(app.selected_date, start + Duration::days(day));
+            type_editor_text(
+                &mut app,
+                &format!("Day {day:02} entry\tfocus\nSecond line for realism."),
+                viewport_height,
+                viewport_width,
+            );
+            send_editor_key(
+                &mut app,
+                KeyCode::F(2),
+                KeyModifiers::empty(),
+                viewport_height,
+                viewport_width,
+            );
+        }
+
+        app.open_date(start + Duration::days(7));
+        app.buffer.move_to_bottom();
+        app.buffer.move_to_line_end();
+        type_editor_text(
+            &mut app,
+            "\nFollow-up note.",
+            viewport_height,
+            viewport_width,
+        );
+        send_editor_key(
+            &mut app,
+            KeyCode::F(2),
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
+
+        let vault = app.vault.as_ref().expect("vault");
+        let dates = vault.list_entry_dates().expect("list dates");
+        assert_eq!(dates.len(), 28);
+        assert_eq!(dates.first().copied(), Some(start));
+        assert_eq!(dates.last().copied(), Some(start + Duration::days(27)));
+
+        for day in [0, 7, 13, 27] {
+            let date = start + Duration::days(day);
+            let exported = vault
+                .export_entry(date)
+                .expect("export entry")
+                .expect("entry exists");
+            assert!(exported.body.contains(&format!("Day {day:02} entry")));
+            assert!(!exported.body.contains('\t'));
+        }
+        let day_seven = vault
+            .export_entry(start + Duration::days(7))
+            .expect("export day seven")
+            .expect("entry exists");
+        assert!(day_seven.body.contains("Follow-up note."));
+    }
+
+    #[test]
+    fn mixed_input_stress_session_preserves_editor_invariants() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        for step in 0..400usize {
+            let width = 56 + (step % 35) as u16;
+            let height = 18 + (step % 10) as u16;
+            let viewport_width = width as usize;
+            let viewport_height = app.editor_viewport_height(height.saturating_sub(3) as usize);
+
+            match step % 16 {
+                0 => send_editor_key(
+                    &mut app,
+                    KeyCode::Char((b'a' + (step % 26) as u8) as char),
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                1 => send_editor_key(
+                    &mut app,
+                    KeyCode::Char(' '),
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                2 => send_editor_key(
+                    &mut app,
+                    KeyCode::Tab,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                3 => send_editor_key(
+                    &mut app,
+                    KeyCode::Char('\t'),
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                4 => send_editor_key(
+                    &mut app,
+                    KeyCode::Enter,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                5 => send_editor_key(
+                    &mut app,
+                    KeyCode::Backspace,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                6 => send_editor_key(
+                    &mut app,
+                    KeyCode::Delete,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                7 => send_editor_key(
+                    &mut app,
+                    KeyCode::Left,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                8 => send_editor_key(
+                    &mut app,
+                    KeyCode::Right,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                9 => send_editor_key(
+                    &mut app,
+                    KeyCode::Up,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                10 => send_editor_key(
+                    &mut app,
+                    KeyCode::Down,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                11 => send_editor_key(
+                    &mut app,
+                    KeyCode::PageUp,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                12 => send_editor_key(
+                    &mut app,
+                    KeyCode::PageDown,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                13 => send_editor_key(
+                    &mut app,
+                    KeyCode::Home,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                14 => send_editor_key(
+                    &mut app,
+                    KeyCode::End,
+                    KeyModifiers::empty(),
+                    viewport_height,
+                    viewport_width,
+                ),
+                _ => {
+                    app.handle_event_with_viewport(
+                        Event::Resize(width, height),
+                        viewport_height,
+                        viewport_width,
+                    );
+                    assert_editor_invariants(&app);
+                }
+            }
+
+            if step % 25 == 0 {
+                let _ = render_app(&app, width, height);
+            }
+        }
     }
 
     #[test]
