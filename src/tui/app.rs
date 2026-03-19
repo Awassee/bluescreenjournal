@@ -7970,6 +7970,163 @@ mod tests {
     }
 
     #[test]
+    fn keybinding_function_keys_route_to_expected_actions() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(1), KeyModifiers::empty())),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::Help)));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::empty())),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::DatePicker(_))));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(4), KeyModifiers::empty())),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::FindPrompt { .. })));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(5), KeyModifiers::empty())),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::Search(_))));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(6), KeyModifiers::empty())),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::ReplacePrompt(_))));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(7), KeyModifiers::empty())),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::Index(_))));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(8), KeyModifiers::empty())),
+            20,
+        );
+        assert_eq!(app.status_text(), Some("LOCKED."));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(9), KeyModifiers::empty())),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::ClosingPrompt { .. })));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(10), KeyModifiers::empty())),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::QuitConfirm)));
+
+        app.overlay = None;
+        let reveal_before = app.reveal_codes_enabled();
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(11), KeyModifiers::empty())),
+            20,
+        );
+        assert_ne!(app.reveal_codes_enabled(), reveal_before);
+    }
+
+    #[test]
+    fn keybinding_ctrl_fallbacks_route_to_expected_actions() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL)),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::FindPrompt { .. })));
+
+        app.overlay = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)),
+            20,
+        );
+        assert_eq!(app.status_text(), Some("LOCKED."));
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL)),
+            20,
+        );
+        assert!(matches!(
+            app.menu(),
+            Some(menu) if menu.selected_menu == MenuId::File
+        ));
+
+        app.menu = None;
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL)),
+            20,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::Picker(_))));
+    }
+
+    #[test]
+    fn keybinding_ctrl_menu_hotkeys_open_all_top_menus() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        let cases = [
+            ('o', MenuId::File),
+            ('e', MenuId::Edit),
+            ('w', MenuId::Search),
+            ('y', MenuId::Go),
+            ('t', MenuId::Tools),
+            ('u', MenuId::Setup),
+            ('l', MenuId::Help),
+        ];
+
+        for (key, expected_menu) in cases {
+            app.menu = None;
+            app.handle_event(
+                Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL)),
+                20,
+            );
+            assert!(matches!(
+                app.menu(),
+                Some(menu) if menu.selected_menu == expected_menu
+            ));
+        }
+    }
+
+    #[test]
+    fn keybinding_f12_locks_when_vault_is_unlocked() {
+        let temp = tempdir().expect("tempdir");
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
+        app.overlay = None;
+        assert!(app.vault.is_some());
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::F(12), KeyModifiers::empty())),
+            20,
+        );
+
+        assert!(app.vault.is_none());
+        assert!(matches!(app.overlay(), Some(Overlay::UnlockPrompt { .. })));
+        assert_eq!(app.lock_status_label(), "LOCKED");
+    }
+
+    #[test]
     fn esc_in_setup_wizard_does_not_quit_app() {
         let mut app = App::with_initial_date(None);
         app.overlay = Some(Overlay::SetupWizard(SetupWizard::new(Path::new(

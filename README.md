@@ -228,6 +228,11 @@ Primary keys:
 - `Ctrl+F` find fallback
 - `Alt+M` toggle soundtrack
 
+Keyboard verification:
+
+- run `cargo test keybinding_ -- --nocapture` to exercise function-key and Ctrl fallback routing in tests
+- on Mac laptops, press `fn` with `F1`..`F12` unless system settings already treat them as standard function keys
+
 Additional screen-level controls:
 
 - soundtrack source defaults to `https://www.midi-karaoke.info/21b56501.mid` and can be changed in `SETUP -> Soundtrack URL/Path`
