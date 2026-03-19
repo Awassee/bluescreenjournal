@@ -35,7 +35,10 @@ done
 
 if [[ -z "$ARCHIVE" ]]; then
   "$ROOT_DIR/scripts/package-release.sh"
-  mapfile -t versioned_archives < <(find "$ROOT_DIR/dist" -maxdepth 1 -type f -name 'bsj-[0-9]*-*.tar.gz')
+  versioned_archives=()
+  while IFS= read -r -d '' archive_path; do
+    versioned_archives+=("$archive_path")
+  done < <(find "$ROOT_DIR/dist" -maxdepth 1 -type f -name 'bsj-[0-9]*-*.tar.gz' -print0)
   [[ "${#versioned_archives[@]}" -gt 0 ]] || { echo "No versioned archives found under $ROOT_DIR/dist" >&2; exit 1; }
   ARCHIVE="$(ls -t "${versioned_archives[@]}" | head -n 1)"
 fi
