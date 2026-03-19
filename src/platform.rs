@@ -378,8 +378,8 @@ mod tests {
 
     #[test]
     fn infer_install_prefix_uses_parent_of_bin_directory() {
-        let exe = Path::new("/Users/test/.local/bin/bsj");
+        let exe = Path::new("/tmp/test-home/.local/bin/bsj");
         let prefix = infer_install_prefix_from_exe(exe).expect("prefix");
-        assert_eq!(prefix, Path::new("/Users/test/.local"));
+        assert_eq!(prefix, Path::new("/tmp/test-home/.local"));
     }
 }

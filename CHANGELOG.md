@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.17
+
+- added an in-app updater action from `TOOLS -> Check for Updates` that can launch the installer in the background
+- added `HELP -> About BlueScreen Journal` plus clearer `TOOLS` soundtrack controls (`Soundtrack Source` and `Toggle Soundtrack`)
+- enabled soundtrack autoplay on launch when a soundtrack source is configured (default source remains the Doogie-style MIDI URL)
+- fixed installer update behavior so reruns on already-installed systems default to latest `main` source update flow
+- added installer output verification for installed version and active `PATH` resolution to reduce stale-binary confusion
+
 ## v0.1.16
 
 - improved installer completion messaging to be menu-first and first-run friendly
