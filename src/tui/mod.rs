@@ -133,8 +133,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let left = format!(
-        "VERSION {}  PERSONAL JOURNAL{}{}  [{}]  TIME {}  ENTRY NO. {}",
-        app.app_version_label(),
+        "BLUESCREEN JOURNAL{}{}  ENTRY DATE {} [{}]  ENTRY NO. {}  PAGE {}  TIME {}  VER {}",
         if compact_mode { " [COMPACT]" } else { "" },
         if app.favorite_marker().is_empty() {
             ""
@@ -142,19 +141,37 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
             " *"
         },
         app.header_entry_focus_label(),
+        app.header_day_delta_label(),
+        app.entry_number_label(),
+        app.header_page_state_label(),
         app.header_time_label(),
-        app.entry_number_label()
+        app.app_version_label(),
     );
-    let mut right_parts = vec![
-        app.lock_status_label().to_string(),
-        app.integrity_status_label(),
-        app.soundtrack_status_label().to_string(),
-        app.word_goal_status_label(),
-        app.session_status_label(),
+    let right_candidates = vec![
         app.save_status_label(),
+        app.lock_status_label().to_string(),
+        app.save_reminder_label().to_string(),
         app.draft_recovered_label().to_string(),
+        app.integrity_status_label(),
+        app.word_goal_status_label(),
+        app.soundtrack_status_label().to_string(),
+        app.streak_status_label(),
+        app.sprint_status_label(),
+        app.session_status_label(),
     ];
-    right_parts.retain(|part| !part.is_empty());
+    let left_len = left.chars().count();
+    let budget = area.width as usize - left_len.min(area.width as usize);
+    let mut right_parts = Vec::new();
+    let mut used = 0usize;
+    for part in right_candidates.into_iter().filter(|part| !part.is_empty()) {
+        let part_len = part.chars().count();
+        let separator = if right_parts.is_empty() { 0 } else { 3 };
+        if used + separator + part_len > budget.saturating_sub(1) {
+            continue;
+        }
+        used += separator + part_len;
+        right_parts.push(part);
+    }
     let right = right_parts.join(" | ");
     let content = join_left_right(area.width as usize, &left, &right);
     frame.render_widget(
@@ -199,25 +216,34 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let hint = if app.menu().is_some() {
-        "LEFT/RIGHT MENU  UP/DOWN ITEM  ENTER SELECT  ESC CLOSE"
+        "LEFT/RIGHT MENU  UP/DOWN ITEM  ENTER SELECT  ESC CLOSE  ALT+F/E/S/G/T/U/H JUMP"
+    } else if app.should_show_menu_discovery_hint() {
+        if area.width >= 130 {
+            "ESC MENUS  ? HELP  ALT+,/. DAY  ALT+[ ] SAVED  ALT+N NEW  ALT+Y/0 TODAY  ALT+D DATES  ALT+I INDEX  ALT+K COMMANDS"
+        } else if area.width >= 104 {
+            "ESC MENUS  ? HELP  ALT+,/. DAY  ALT+[ ] SAVED  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
+        } else {
+            "ESC MENUS  ? HELP  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
+        }
     } else if area.width >= 130 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+RIGHT NEXT DAY  ALT+N NEW ENTRY  ALT+M THEME"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H OR CTRL+O/E/W/Y/T/U/L  ALT+,/. DAY  ALT+[ ] SAVED  ALT+N NEW  ALT+Y/0 TODAY  ALT+D DATES  ALT+I INDEX  ALT+K COMMANDS"
     } else if area.width >= 104 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU  ALT+RIGHT NEXT DAY  ALT+N NEW  ALT+M THEME"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H OR CTRL+O/E/W/Y/T/U/L  ALT+,/. DAY  ALT+[ ] SAVED  ALT+N NEW  ALT+Y/0 TODAY  ALT+D/ALT+I"
     } else {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H MENU"
+        "ESC MENUS  ? HELP  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
     };
     let left_width = spans
         .iter()
         .map(|span| span.content.chars().count())
         .sum::<usize>();
-    let hint_width = hint.chars().count();
-    if area.width as usize > left_width + hint_width + 1 {
+    let available = area.width as usize - left_width;
+    if available > 1 {
+        let rendered_hint = truncate_to_width(hint, available.saturating_sub(1));
         spans.push(Span::raw(
-            " ".repeat(area.width as usize - left_width - hint_width),
+            " ".repeat(available - rendered_hint.chars().count()),
         ));
         spans.push(Span::styled(
-            hint.to_string(),
+            rendered_hint,
             screen_style().add_modifier(Modifier::UNDERLINED),
         ));
     }
@@ -381,11 +407,17 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
     }
 
     if show_closing {
-        let closing_text = app.closing_thought().unwrap_or("[none]");
+        let (closing_text, closing_hint) = match app.closing_thought() {
+            Some(text) => (truncate_to_width(text, 48), "F9 EDIT/CLEAR (EDIT MENU)"),
+            None => (
+                "[none - press F9 to add] (closing thought)".to_string(),
+                "F9 ADD",
+            ),
+        };
         let closing_line = join_left_right(
             chunks[chunk_index + 1].width as usize,
-            &format!("CLOSING THOUGHT: {}", truncate_to_width(closing_text, 48)),
-            "F9 EDIT",
+            &format!("CLOSING THOUGHT: {closing_text}"),
+            closing_hint,
         );
         frame.render_widget(
             Paragraph::new(Line::from(closing_line))
@@ -411,16 +443,20 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let context = format!(
-        "VER {} | {} | {} | {} | {}",
-        app.app_version_label(),
+        "MODE {} | SAVE {} | {} | {} | VER {}",
         app.footer_mode_label(),
         app.save_status_label(),
         app.footer_context_label(),
         app.footer_stats_label(),
+        app.app_version_label(),
     );
     let status = app.status_text().unwrap_or("");
     let left = if status.is_empty() {
-        context
+        if let Some(next_hint) = app.footer_next_hint() {
+            format!("{context} | {next_hint}")
+        } else {
+            context
+        }
     } else {
         format!("{context} | {status}")
     };
@@ -443,27 +479,28 @@ fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
 
     if app.menu().is_some() {
         if width >= 96 {
-            return "Menu: Left/Right switch | Up/Down move | Enter select | Esc close".to_string();
+            return "Menu: Left/Right switch | Up/Down move | Enter select | Esc close | Alt+F/E/S/G/T/U/H jump".to_string();
         }
-        return "Menu: Arrows move | Enter select | Esc close".to_string();
+        return "Menu: Arrows move | Enter select | Esc close | Alt+menu".to_string();
     }
 
-    if app.overlay().is_some() {
-        if width >= 90 {
-            return "Esc close prompt | Enter confirm | F1 keys | Ctrl+K commands".to_string();
+    if let Some(hint) = app.overlay_footer_hint() {
+        if width >= hint.chars().count() {
+            return hint.to_string();
         }
-        return "Esc close | Enter confirm | F1 keys".to_string();
+        return truncate_to_width(hint, width.max(1));
     }
 
     let legend = if width >= 130 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H menu | Alt+Right next day | Alt+N next new entry | **save** Enter quick-next | F2 Save | F10 Quit".to_string()
+        "Esc menus | ? help | Alt+F/E/S/G/T/U/H | Alt+,/. day | Alt+[ ] saved | Alt+N new | Alt+Y/0 today | Alt+D dates | Alt+I index | Alt+K commands | Ctrl+Shift+N/D/I/Y fallbacks | **save** Enter quick-next | F2 save | F9 closing | F10 quit".to_string()
     } else if width >= 108 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H | Alt+Right next day | Alt+N new | **save** Enter quick-next | F2 Save | F10 Quit"
+        "Esc menus | ? help | Alt+F/E/S/G/T/U/H | Alt+,/. day | Alt+[ ] saved | Alt+N new | Alt+Y/0 today | Alt+D dates | Alt+I index | Ctrl+Shift+N new | **save** Enter quick-next | F2 save | F10 quit"
             .to_string()
     } else if width >= 90 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H | **save** Enter quick-next | F2 Save | F10 Quit".to_string()
+        "Esc menus | ? help | Alt+,/. day | Alt+N new | Alt+D dates | Alt+I index | **save** Enter quick-next | F2 save"
+            .to_string()
     } else {
-        "Esc Menus | Alt+N new | **save** Enter quick-next | F2 Save".to_string()
+        "Esc menus | ? help | Alt+N new | F2 save".to_string()
     };
 
     if compact_mode && width >= 100 {
@@ -487,6 +524,14 @@ fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
         ),
         centered_line(
             area.width as usize,
+            &format!(
+                "Missing: {} cols, {} rows",
+                MIN_WIDTH.saturating_sub(area.width),
+                MIN_HEIGHT.saturating_sub(area.height)
+            ),
+        ),
+        centered_line(
+            area.width as usize,
             "Current size is below the usable minimum.",
         ),
         centered_line(
@@ -497,7 +542,14 @@ fn draw_small_terminal_warning(frame: &mut Frame<'_>, area: Rect) {
             ),
         ),
         Line::from(""),
-        centered_line(area.width as usize, "Resize, then press Esc for menus."),
+        centered_line(
+            area.width as usize,
+            "Tip: maximize terminal and reduce font size one step.",
+        ),
+        centered_line(
+            area.width as usize,
+            "After resize: press ? for help or Esc for menus.",
+        ),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
@@ -507,13 +559,13 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
     let rect = match overlay {
         Overlay::SetupWizard(_) => popup_rect(body_area, 76, 10),
         Overlay::UnlockPrompt { .. } => popup_rect(body_area, 68, 8),
-        Overlay::Help => popup_rect(body_area, 72, 22),
+        Overlay::Help => popup_rect(body_area, 76, 26),
         Overlay::DatePicker(_) => popup_rect(body_area, 38, 13),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
-        Overlay::ClosingPrompt { .. } => popup_rect(body_area, 58, 5),
+        Overlay::ClosingPrompt { .. } => popup_rect(body_area, 72, 7),
         Overlay::ConflictChoice(_) => popup_rect(body_area, 72, 15),
         Overlay::MergeDiff(_) => popup_rect(body_area, 92, 18),
-        Overlay::Search(_) => popup_rect(body_area, 84, 16),
+        Overlay::Search(_) => popup_rect(body_area, 90, 22),
         Overlay::ReplacePrompt(_) => popup_rect(body_area, 58, 8),
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
         Overlay::ExportPrompt(_) => popup_rect(body_area, 72, 9),
@@ -577,9 +629,11 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         }
         Overlay::ClosingPrompt { input } => {
             let lines = vec![
-                Line::from("Closing Thought:"),
+                Line::from("Edit Closing Thought:"),
                 Line::from(format!("> {input}")),
-                Line::from("Enter save  Esc close"),
+                Line::from("Tip: Keep it short, intentional, and ending-focused."),
+                Line::from("Example: \"Tomorrow I choose calm focus over noise.\""),
+                Line::from("Enter save  Esc cancel  blank + Enter clears"),
             ];
             frame.render_widget(Paragraph::new(lines).style(screen_style()), inner);
             Some((
@@ -587,7 +641,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
                 (inner.y + 1).min(inner.bottom().saturating_sub(1)),
             ))
         }
-        Overlay::Search(search) => draw_search_overlay(frame, inner, search),
+        Overlay::Search(search) => draw_search_overlay(frame, inner, app, search),
         Overlay::ReplacePrompt(prompt) => draw_replace_prompt_overlay(frame, inner, prompt),
         Overlay::ReplaceConfirm(confirm) => {
             let current = confirm
@@ -716,24 +770,31 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     );
     let lines = vec![
         Line::from(version_line),
+        Line::from("(c) 2026 Awassee LLC and Sean Heiney  sean@sean.net"),
+        Line::from("Quick start: TYPE -> F2 SAVE -> Alt+N NEW DAY."),
         Line::from("Esc menus. Alt+F/E/S/G/T/U/H menu. Ctrl+O/E/W/Y/T/U/L menus."),
-        Line::from("Alt+Right next day. Alt+N next blank new entry."),
-        Line::from("Type **save** + Enter for quick-save to the next same-day entry."),
+        Line::from(
+            "Alt+,/. day. Alt+[ ] saved jump. Alt+N new day. Alt+Y/0 today. Alt+D dates. Alt+I index.",
+        ),
+        Line::from("Ctrl+Shift+N new day. Ctrl+Shift+D dates. Ctrl+Shift+I index."),
+        Line::from("? or Ctrl+/ opens this key guide instantly."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
         Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),
-        Line::from("Ctrl+S Save  Ctrl+F Find"),
         Line::from("FILE   Save, export, backup, restore, lock, quit"),
         Line::from("EDIT   Lines, stamps, metadata, favorite, reveal, typewriter"),
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),
         Line::from("GO     Calendar, index, recents, favorites, random, today"),
+        Line::from("TOOLS  Sync, soundtrack, verify, review, dashboard, prompts, doctor"),
+        Line::from("Calendar: YYYY-MM-DD jump, [ ] saved jump, < > months, N/P blank, T/0 today"),
         Line::from(
-            "TOOLS  Sync, soundtrack source/toggle, verify, review, dashboard, prompts, doctor",
+            "Index: type filter, / clear, 1-4 scopes, N/P blank, S sort, F favorite, C conflict",
         ),
-        Line::from("Calendar: type YYYY-MM-DD, [ ] saved-day jump, < > entry months, T today"),
-        Line::from("Index: type filter, S sort, Shift+F favorites, Shift+C conflicts"),
-        Line::from("Search: Tab fields, Enter search/open, T/W/M/Y/A presets, Ctrl+R recall query"),
-        Line::from("(c) 2026 Awassee LLC and Sean Heiney  sean@sean.net"),
+        Line::from(
+            "Search: Tab fields, / query focus, Esc results->query->close, T/W/M/Y/A scopes",
+        ),
+        Line::from("Search: Ctrl+G close, Ctrl+B pin, Ctrl+Shift+B preset, Ctrl+1..9 slot"),
+        Line::from("Old entries are deliberate: use Calendar/Index to browse archive dates."),
         Line::from("Footer shows mode, context, stats, and status. Enter/Esc/F1 closes."),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
@@ -776,6 +837,30 @@ fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePick
         lines.push(Line::from(spans));
     }
 
+    let saved_this_month = picker
+        .entry_dates
+        .iter()
+        .filter(|date| date.year() == picker.month.year() && date.month() == picker.month.month())
+        .count();
+    let selected_state = if picker.has_entry(picker.selected_date) {
+        "SAVED"
+    } else {
+        "BLANK"
+    };
+    let day_offset = (picker.selected_date - Local::now().date_naive()).num_days();
+    lines.push(Line::from(format!(
+        "Saved this month: {saved_this_month}  Total saved dates: {}",
+        picker.entry_dates.len()
+    )));
+    lines.push(Line::from(format!(
+        "Selected: {}  Status: {}  Delta from today: {:+} day(s)",
+        picker.selected_date.format("%Y-%m-%d"),
+        selected_state,
+        day_offset
+    )));
+    lines.push(Line::from(
+        "Archive flow is intentional: use Calendar/Index when opening older dates.",
+    ));
     lines.push(Line::from("Bold = saved day  Underline = today"));
     lines.push(Line::from("Reverse = selected  [ ] saved day jump"));
     lines.push(Line::from(format!(
@@ -786,9 +871,11 @@ fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePick
             picker.jump_input.clone()
         }
     )));
-    lines.push(Line::from("Arrows move  PgUp/PgDn month  < > entry months"));
     lines.push(Line::from(
-        "Home/End month bounds  T today  Enter open  Esc close",
+        "Arrows or H/J/K/L move  PgUp/PgDn month  < > entry months  N/P blank day",
+    ));
+    lines.push(Line::from(
+        "Home/End month bounds  T/0/G today  / clear jump  Enter open  Esc close",
     ));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
@@ -796,6 +883,7 @@ fn draw_date_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &DatePick
 fn draw_search_overlay(
     frame: &mut Frame<'_>,
     area: Rect,
+    app: &App,
     search: &SearchOverlay,
 ) -> Option<(u16, u16)> {
     if area.width == 0 || area.height == 0 {
@@ -835,6 +923,23 @@ fn draw_search_overlay(
             },
             search.range_label(),
         )),
+        Line::from(format!(
+            "Query chars: {}  Pinned: {}  Presets: {}  Filters: {}",
+            search.query_input.chars().count(),
+            app.pinned_query_count(),
+            app.search_preset_count(),
+            usize::from(!search.from_input.trim().is_empty())
+                + usize::from(!search.to_input.trim().is_empty())
+        )),
+        Line::from(format!(
+            "Cache: {} (in-memory only, no plaintext index on disk)",
+            if app.search_cache_ready() {
+                "READY"
+            } else {
+                "BUILDING"
+            }
+        )),
+        Line::from("Examples: launch plan | mood:7 | #work | closing thought"),
         Line::from("DATE         ENTRY NO  LOCATION  SNIPPET"),
         Line::from("----------------------------------------"),
     ];
@@ -852,9 +957,9 @@ fn draw_search_overlay(
                 2
             } else {
                 0
-            } + 3
+            } + 7
                 + if search.error.is_some() { 1 } else { 0 };
-        let visible_rows = area.height.saturating_sub((7 + footer_rows) as u16).max(1) as usize;
+        let visible_rows = area.height.saturating_sub((10 + footer_rows) as u16).max(1) as usize;
         let (start, end) = search.window(visible_rows);
         let preview_width = area.width.saturating_sub(34) as usize;
         for (offset, result) in search.results[start..end].iter().enumerate() {
@@ -903,14 +1008,23 @@ fn draw_search_overlay(
         )));
     }
     lines.push(Line::from(
-        "Tab fields  Enter search/open  Ctrl+N/Ctrl+P move",
+        "Tab fields  / query focus  Enter search/open  Ctrl+J focus results",
+    ));
+    lines.push(Line::from(
+        "Ctrl+N/Ctrl+P move results  Up/Down/PgUp/PgDn also work",
     ));
     lines.push(Line::from("T today  W week  M month  Y year  A all"));
     lines.push(Line::from(
-        "C clear filters  Ctrl+L clear all  Ctrl+R recall query",
+        "C clear filters  Ctrl+B pin query  Ctrl+Shift+B save preset",
     ));
     lines.push(Line::from(
-        "Up/Down/PgUp/PgDn move results  Home/End jump  Esc close",
+        "Ctrl+I load pinned  Ctrl+U clear query  Ctrl+1..9 preset slots",
+    ));
+    lines.push(Line::from(
+        "Ctrl+L clear all  Ctrl+R recall query  Home/End jump  Ctrl+G close",
+    ));
+    lines.push(Line::from(
+        "Esc in results returns to query. Esc again closes search.",
     ));
     if let Some(error) = &search.error {
         lines.push(Line::from(error.clone()));
@@ -1211,10 +1325,32 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
         return;
     }
 
+    let total_favorites = index
+        .all_items
+        .iter()
+        .filter(|entry| index.favorite_dates.contains(&entry.date))
+        .count();
+    let shown_favorites = index
+        .items
+        .iter()
+        .filter(|entry| index.favorite_dates.contains(&entry.date))
+        .count();
+    let total_conflicts = index
+        .all_items
+        .iter()
+        .filter(|entry| entry.has_conflict)
+        .count();
+    let shown_conflicts = index
+        .items
+        .iter()
+        .filter(|entry| entry.has_conflict)
+        .count();
+
     let mut lines = vec![
         Line::from(format!(
-            "Saved entries: {}  Selected: {}",
+            "Saved entries: {} shown / {} total  Selected: {}",
             index.items.len(),
+            index.all_items.len(),
             index
                 .items
                 .get(index.selected)
@@ -1222,7 +1358,8 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
                 .unwrap_or_else(|| "none".to_string())
         )),
         Line::from(format!(
-            "Filter: {}  Sort: {}  FavOnly: {}  ConfOnly: {}",
+            "Scope: {}  Filter: {}  Sort: {}  FavOnly: {}  ConfOnly: {}",
+            index.scope_label(),
             if index.filter_input.trim().is_empty() {
                 "[all]".to_string()
             } else {
@@ -1236,6 +1373,9 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
             if index.favorites_only { "YES" } else { "NO" },
             if index.conflicts_only { "YES" } else { "NO" },
         )),
+        Line::from(format!(
+            "Favorites: {shown_favorites}/{total_favorites} shown  Conflicts: {shown_conflicts}/{total_conflicts} shown",
+        )),
         Line::from("DATE         ENTRY NO  FLAGS     PREVIEW"),
         Line::from("----------------------------------------"),
     ];
@@ -1243,7 +1383,7 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
     if index.items.is_empty() {
         lines.push(Line::from("No saved entries match the current filter."));
     } else {
-        let visible_rows = area.height.saturating_sub(11).max(1) as usize;
+        let visible_rows = area.height.saturating_sub(12).max(1) as usize;
         let (start, end) = index.window(visible_rows);
         let preview_width = area.width.saturating_sub(31) as usize;
         for (offset, entry) in index.items[start..end].iter().enumerate() {
@@ -1274,11 +1414,15 @@ fn draw_index_overlay(frame: &mut Frame<'_>, area: Rect, index: &IndexState) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(
-        "Type to filter  Backspace clear  S sort  T today",
+        "Type to filter  / clear filter  Backspace delete  S sort  * toggle favorite",
     ));
-    lines.push(Line::from("Shift+F favorites  Shift+C conflicts"));
-    lines.push(Line::from("Up/Down/PgUp/PgDn move  Home/End jump"));
-    lines.push(Line::from("Enter open  Esc close"));
+    lines.push(Line::from(
+        "F favorites  C conflicts  1 all 2 last7 3 last30 4 ytd  T today",
+    ));
+    lines.push(Line::from(
+        "Up/Down/PgUp/PgDn move  Home/End jump  [ ] month jump  N/P blank day",
+    ));
+    lines.push(Line::from("Enter open selected date  Esc close"));
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 
@@ -1536,14 +1680,19 @@ fn menu_item_line(width: usize, item: &MenuItem, selected: bool) -> Line<'static
     if !item.enabled {
         style = style.add_modifier(Modifier::DIM);
     }
-    let label_width = item.label.chars().count();
+    let label = if item.enabled {
+        item.label.clone()
+    } else {
+        format!("{} [UNAVAILABLE]", item.label)
+    };
+    let label_width = label.chars().count();
     let detail_width = item.detail.chars().count();
     let content = if label_width + detail_width + 1 > width {
-        truncate_to_width(&format!("{} {}", item.label, item.detail), width)
+        truncate_to_width(&format!("{} {}", label, item.detail), width)
     } else {
         format!(
             "{}{}{}",
-            item.label,
+            label,
             " ".repeat(width - label_width - detail_width),
             item.detail
         )
@@ -1593,25 +1742,25 @@ fn overlay_title(overlay: &Overlay) -> String {
     match overlay {
         Overlay::SetupWizard(_) => " Setup ".to_string(),
         Overlay::UnlockPrompt { .. } => " Unlock ".to_string(),
-        Overlay::Help => " Help ".to_string(),
-        Overlay::DatePicker(_) => " Dates ".to_string(),
+        Overlay::Help => " Help (F1) ".to_string(),
+        Overlay::DatePicker(_) => " Dates (F3) ".to_string(),
         Overlay::ConflictChoice(_) => " Conflict ".to_string(),
         Overlay::MergeDiff(_) => " Merge ".to_string(),
-        Overlay::FindPrompt { .. } => " Find ".to_string(),
-        Overlay::ClosingPrompt { .. } => " Closing ".to_string(),
-        Overlay::Search(_) => " Search ".to_string(),
-        Overlay::ReplacePrompt(_) => " Replace ".to_string(),
-        Overlay::ReplaceConfirm(_) => " Replace ".to_string(),
+        Overlay::FindPrompt { .. } => " Find (F4) ".to_string(),
+        Overlay::ClosingPrompt { .. } => " Closing Thought (F9) ".to_string(),
+        Overlay::Search(_) => " Search (F5) ".to_string(),
+        Overlay::ReplacePrompt(_) => " Replace (F6) ".to_string(),
+        Overlay::ReplaceConfirm(_) => " Replace (F6) ".to_string(),
         Overlay::ExportPrompt(prompt) => format!(" Export {} ", prompt.format.label()),
         Overlay::SettingPrompt(_) => " Setup ".to_string(),
         Overlay::MetadataPrompt(_) => " Metadata ".to_string(),
-        Overlay::Index(_) => " Index ".to_string(),
-        Overlay::SyncStatus(_) => " Sync ".to_string(),
+        Overlay::Index(_) => " Index (F7) ".to_string(),
+        Overlay::SyncStatus(_) => " Sync (F8) ".to_string(),
         Overlay::Info(info) => format!(" {} ", info.title),
         Overlay::Picker(picker) => format!(" {} ", picker.title),
         Overlay::RestorePrompt(_) => " Restore ".to_string(),
         Overlay::RecoverDraft { .. } => " Recovery ".to_string(),
-        Overlay::QuitConfirm => " Quit ".to_string(),
+        Overlay::QuitConfirm => " Quit (F10) ".to_string(),
     }
 }
 

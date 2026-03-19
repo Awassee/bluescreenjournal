@@ -673,6 +673,7 @@ mod tests {
             sync_history: Vec::new(),
             favorite_dates: vec!["2026-03-17".to_string()],
             export_history: Vec::new(),
+            search_presets: Vec::new(),
             backup_retention: BackupRetentionConfig {
                 daily: 7,
                 weekly: 4,

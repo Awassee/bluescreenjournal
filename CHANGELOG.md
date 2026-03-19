@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.3
+
+- added advanced review and timeline CLI capabilities: range-bounded review, JSON review output, minimum top-count thresholds, weekday/mood/metadata-presence timeline filters, and timeline summary/CSV/JSON output formats
+- added JSON output support for prompt listing and deterministic prompt picking for automation workflows
+- expanded automated coverage for new CLI parsing and analytics/filtering behavior, including CSV escaping and timeline summary tests
+- revalidated end-to-end release quality with full QA gate, packaging, artifact audit, and installer smoke tests
+
 ## v1.0.2
 
 - fixed macOS soundtrack failures for unsupported QuickTime MIDI files by removing QuickTime as the MIDI backend

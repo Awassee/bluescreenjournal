@@ -329,6 +329,7 @@ mod tests {
             sync_history: Vec::new(),
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
+            search_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };
@@ -375,6 +376,7 @@ mod tests {
             sync_history: Vec::new(),
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
+            search_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };

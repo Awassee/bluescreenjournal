@@ -159,7 +159,7 @@ def editor_frame() -> Image.Image:
     draw_text(
         draw,
         0,
-        "PERSONAL JOURNAL           2026-03-17 03:52 PM           ENTRY NO. 0000002",
+        "BLUESCREEN JOURNAL         2026-03-17 03:52 PM           ENTRY NO. 000002",
     )
     draw_highlight_span(draw, 1, 0, "FILE")
     draw_text(draw, 1, "  EDIT  SEARCH  GO  TOOLS  SETUP  HELP", fill=FG_ACCENT, col=4)

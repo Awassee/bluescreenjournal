@@ -18,6 +18,23 @@ pub struct SearchQuery {
     pub to: Option<NaiveDate>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SearchOptions {
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub context_chars: usize,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            case_sensitive: false,
+            whole_word: false,
+            context_chars: SNIPPET_CONTEXT_CHARS,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snippet {
     pub text: String,
@@ -78,14 +95,26 @@ impl SearchIndex {
     }
 
     pub fn search(&self, query: &SearchQuery) -> Vec<SearchResult> {
+        self.search_with_options(query, &SearchOptions::default())
+    }
+
+    pub fn search_with_options(
+        &self,
+        query: &SearchQuery,
+        options: &SearchOptions,
+    ) -> Vec<SearchResult> {
         let query_text = query.text.trim();
         if query_text.is_empty() {
             return Vec::new();
         }
 
-        let query_tokens = tokenize(query_text);
+        let query_tokens = tokenize_with_mode(query_text, options.case_sensitive);
         let lowered_query = query_text.to_lowercase();
-        let candidate_ids = self.candidate_documents(&query_tokens);
+        let candidate_ids = if options.case_sensitive {
+            None
+        } else {
+            self.candidate_documents(&query_tokens)
+        };
 
         let mut results = Vec::new();
         for (doc_id, document) in self.documents.iter().enumerate() {
@@ -98,7 +127,13 @@ impl SearchIndex {
                 continue;
             }
 
-            let Some(raw_match) = locate_match(document, &lowered_query, &query_tokens) else {
+            let Some(raw_match) = locate_match_with_options(
+                document,
+                query_text,
+                &lowered_query,
+                &query_tokens,
+                options,
+            ) else {
                 continue;
             };
 
@@ -109,7 +144,7 @@ impl SearchIndex {
             );
             let line =
                 line_for_byte_range(&document.body, raw_match.start_byte, raw_match.end_byte);
-            let snippet = generate_snippet(&line, start_col, end_col, SNIPPET_CONTEXT_CHARS);
+            let snippet = generate_snippet(&line, start_col, end_col, options.context_chars);
             let matched_text = document
                 .body
                 .get(raw_match.start_byte..raw_match.end_byte)
@@ -167,12 +202,20 @@ impl SearchIndex {
 }
 
 pub fn tokenize(input: &str) -> Vec<String> {
+    tokenize_with_mode(input, false)
+}
+
+fn tokenize_with_mode(input: &str, case_sensitive: bool) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
 
     for ch in input.chars() {
         if ch.is_alphanumeric() {
-            current.extend(ch.to_lowercase());
+            if case_sensitive {
+                current.push(ch);
+            } else {
+                current.extend(ch.to_lowercase());
+            }
         } else if !current.is_empty() {
             tokens.push(std::mem::take(&mut current));
         }
@@ -248,14 +291,42 @@ pub fn format_cli_snippet(snippet: &Snippet) -> String {
     format!("{before}[{highlight}]{after}")
 }
 
-fn locate_match(
+fn locate_match_with_options(
     document: &IndexedDocument,
+    query_text: &str,
     lowered_query: &str,
     query_tokens: &[String],
+    options: &SearchOptions,
 ) -> Option<RawMatch> {
-    if let Some(start_byte) = document.body_lower.find(lowered_query) {
-        let end_byte = start_byte + lowered_query.len();
-        if document.body.get(start_byte..end_byte).is_some() {
+    if options.case_sensitive {
+        if let Some((start_byte, end_byte)) =
+            find_match(&document.body, query_text, options.whole_word)
+        {
+            return Some(RawMatch {
+                start_byte,
+                end_byte,
+            });
+        }
+    } else if let Some((start_byte, end_byte)) =
+        find_match(&document.body_lower, lowered_query, options.whole_word)
+        && document.body.get(start_byte..end_byte).is_some()
+    {
+        return Some(RawMatch {
+            start_byte,
+            end_byte,
+        });
+    }
+
+    for token in query_tokens {
+        let candidate = if options.case_sensitive {
+            find_match(&document.body, token, options.whole_word)
+        } else {
+            find_match(&document.body_lower, token, options.whole_word)
+        };
+        if let Some((start_byte, end_byte)) = candidate
+            && document.body.get(start_byte..end_byte).is_some()
+            && (!options.whole_word || is_word_boundary_match(&document.body, start_byte, end_byte))
+        {
             return Some(RawMatch {
                 start_byte,
                 end_byte,
@@ -263,19 +334,38 @@ fn locate_match(
         }
     }
 
-    for token in query_tokens {
-        if let Some(start_byte) = document.body_lower.find(token) {
-            let end_byte = start_byte + token.len();
-            if document.body.get(start_byte..end_byte).is_some() {
-                return Some(RawMatch {
-                    start_byte,
-                    end_byte,
-                });
-            }
+    None
+}
+
+fn find_match(haystack: &str, needle: &str, whole_word: bool) -> Option<(usize, usize)> {
+    if needle.is_empty() {
+        return None;
+    }
+
+    let mut search_start = 0usize;
+    while let Some(relative) = haystack[search_start..].find(needle) {
+        let start = search_start + relative;
+        let end = start + needle.len();
+        if !whole_word || is_word_boundary_match(haystack, start, end) {
+            return Some((start, end));
         }
+        if end >= haystack.len() {
+            break;
+        }
+        search_start = end;
     }
 
     None
+}
+
+fn is_word_boundary_match(haystack: &str, start_byte: usize, end_byte: usize) -> bool {
+    let left = haystack[..start_byte].chars().next_back();
+    let right = haystack[end_byte..].chars().next();
+    !left.is_some_and(is_word_char) && !right.is_some_and(is_word_char)
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
 }
 
 fn byte_range_to_match_position(
@@ -318,8 +408,8 @@ struct RawMatch {
 #[cfg(test)]
 mod tests {
     use super::{
-        SearchDocument, SearchIndex, SearchQuery, format_cli_snippet, generate_snippet,
-        matches_date_filter, tokenize,
+        SearchDocument, SearchIndex, SearchOptions, SearchQuery, format_cli_snippet,
+        generate_snippet, matches_date_filter, tokenize,
     };
     use chrono::NaiveDate;
 
@@ -392,5 +482,75 @@ mod tests {
     fn cli_snippet_marks_highlight_with_brackets() {
         let snippet = generate_snippet("Blue screen work note", 5, 11, 5);
         assert_eq!(format_cli_snippet(&snippet), "Blue [screen] work...");
+    }
+
+    #[test]
+    fn case_sensitive_search_only_matches_exact_case() {
+        let index = SearchIndex::build(vec![SearchDocument {
+            date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+            entry_number: "0000001".to_string(),
+            body: "Work started.\nwork paused.".to_string(),
+        }]);
+
+        let strict = index.search_with_options(
+            &SearchQuery {
+                text: "Work".to_string(),
+                from: None,
+                to: None,
+            },
+            &SearchOptions {
+                case_sensitive: true,
+                ..SearchOptions::default()
+            },
+        );
+        assert_eq!(strict.len(), 1);
+        assert_eq!(strict[0].matched_text, "Work");
+    }
+
+    #[test]
+    fn whole_word_search_ignores_partial_matches() {
+        let index = SearchIndex::build(vec![SearchDocument {
+            date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+            entry_number: "0000001".to_string(),
+            body: "noteworthy note".to_string(),
+        }]);
+
+        let options = SearchOptions {
+            whole_word: true,
+            ..SearchOptions::default()
+        };
+        let results = index.search_with_options(
+            &SearchQuery {
+                text: "note".to_string(),
+                from: None,
+                to: None,
+            },
+            &options,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].matched_text, "note");
+    }
+
+    #[test]
+    fn snippet_context_size_follows_options() {
+        let index = SearchIndex::build(vec![SearchDocument {
+            date: NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+            entry_number: "0000001".to_string(),
+            body: "alpha bravo charlie delta echo".to_string(),
+        }]);
+
+        let short = index.search_with_options(
+            &SearchQuery {
+                text: "charlie".to_string(),
+                from: None,
+                to: None,
+            },
+            &SearchOptions {
+                context_chars: 2,
+                ..SearchOptions::default()
+            },
+        );
+        assert_eq!(short.len(), 1);
+        assert_eq!(short[0].snippet.text, "...o charlie d...");
     }
 }

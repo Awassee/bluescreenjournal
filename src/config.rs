@@ -21,6 +21,7 @@ const READABLE_SETTING_KEYS: &[&str] = &[
     "backup_retention.monthly",
     "local_device_id",
     "export_history",
+    "search_presets",
 ];
 
 const EDITABLE_SETTING_KEYS: &[&str] = &[
@@ -40,6 +41,8 @@ const EDITABLE_SETTING_KEYS: &[&str] = &[
     "backup_retention.weekly",
     "backup_retention.monthly",
 ];
+
+const MAX_SEARCH_PRESETS: usize = 24;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -90,6 +93,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub export_history: Vec<RecentExportInfo>,
     #[serde(default)]
+    pub search_presets: Vec<SearchPresetConfig>,
+    #[serde(default)]
     pub backup_retention: BackupRetentionConfig,
     #[serde(default)]
     pub macros: Vec<MacroConfig>,
@@ -114,6 +119,16 @@ pub struct RecentExportInfo {
     pub date: String,
     pub format: String,
     pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SearchPresetConfig {
+    pub name: String,
+    pub query: String,
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -171,7 +186,10 @@ impl AppConfig {
 
     pub fn load_or_default() -> Self {
         match Self::load() {
-            Ok(Some(config)) => config,
+            Ok(Some(mut config)) => {
+                normalize_search_presets(&mut config.search_presets);
+                config
+            }
             Ok(None) | Err(_) => Self {
                 vault_path: default_vault_path(),
                 sync_target_path: None,
@@ -191,6 +209,7 @@ impl AppConfig {
                 sync_history: Vec::new(),
                 favorite_dates: Vec::new(),
                 export_history: Vec::new(),
+                search_presets: Vec::new(),
                 backup_retention: BackupRetentionConfig::default(),
                 macros: Vec::new(),
             },
@@ -202,6 +221,36 @@ impl AppConfig {
         let bytes = serde_json::to_vec_pretty(self)?;
         secure_fs::atomic_write_private(&path, &bytes)?;
         Ok(())
+    }
+
+    pub fn search_preset(&self, name: &str) -> Option<&SearchPresetConfig> {
+        let needle = name.trim();
+        if needle.is_empty() {
+            return None;
+        }
+        self.search_presets
+            .iter()
+            .find(|preset| preset.name.eq_ignore_ascii_case(needle))
+    }
+
+    pub fn upsert_search_preset(&mut self, preset: SearchPresetConfig) -> Result<(), String> {
+        let preset = normalize_search_preset(preset)?;
+        self.search_presets
+            .retain(|existing| !existing.name.eq_ignore_ascii_case(&preset.name));
+        self.search_presets.insert(0, preset);
+        self.search_presets.truncate(MAX_SEARCH_PRESETS);
+        Ok(())
+    }
+
+    pub fn remove_search_preset(&mut self, name: &str) -> bool {
+        let needle = name.trim();
+        if needle.is_empty() {
+            return false;
+        }
+        let before = self.search_presets.len();
+        self.search_presets
+            .retain(|preset| !preset.name.eq_ignore_ascii_case(needle));
+        self.search_presets.len() != before
     }
 }
 
@@ -256,6 +305,7 @@ pub fn get_setting_value(config: &AppConfig, key: &str) -> Result<String, String
             .clone()
             .unwrap_or_else(|| "null".to_string())),
         "export_history" => Ok(config.export_history.len().to_string()),
+        "search_presets" => Ok(config.search_presets.len().to_string()),
         _ => Err(format!(
             "unknown setting '{key}'. Known keys: {}",
             READABLE_SETTING_KEYS.join(", ")
@@ -370,6 +420,50 @@ fn normalize_optional_path(value: &str) -> Option<PathBuf> {
     }
 }
 
+fn normalize_search_presets(presets: &mut Vec<SearchPresetConfig>) {
+    let source = std::mem::take(presets);
+    let mut normalized = Vec::new();
+    for preset in source {
+        let Ok(preset) = normalize_search_preset(preset) else {
+            continue;
+        };
+        if normalized
+            .iter()
+            .any(|existing: &SearchPresetConfig| existing.name.eq_ignore_ascii_case(&preset.name))
+        {
+            continue;
+        }
+        normalized.push(preset);
+        if normalized.len() >= MAX_SEARCH_PRESETS {
+            break;
+        }
+    }
+    *presets = normalized;
+}
+
+fn normalize_search_preset(mut preset: SearchPresetConfig) -> Result<SearchPresetConfig, String> {
+    let name = preset.name.trim();
+    if name.is_empty() {
+        return Err("search preset name cannot be empty".to_string());
+    }
+    let query = preset.query.trim();
+    if query.is_empty() {
+        return Err("search preset query cannot be empty".to_string());
+    }
+    preset.name = name.to_string();
+    preset.query = query.to_string();
+    preset.from = normalize_optional_text(preset.from.as_deref());
+    preset.to = normalize_optional_text(preset.to.as_deref());
+    Ok(preset)
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
 fn parse_retention_value(value: &str, key: &str) -> Result<usize, String> {
     value
         .trim()
@@ -435,10 +529,36 @@ fn default_opening_line_template() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, BackupRetentionConfig, RecentExportInfo, default_vault_path, get_setting_value,
-        set_setting_value,
+        AppConfig, BackupRetentionConfig, RecentExportInfo, SearchPresetConfig, default_vault_path,
+        get_setting_value, set_setting_value,
     };
     use std::path::PathBuf;
+
+    fn empty_test_config() -> AppConfig {
+        AppConfig {
+            vault_path: PathBuf::from("/tmp/vault"),
+            sync_target_path: None,
+            local_device_id: None,
+            device_nickname: "This Mac".to_string(),
+            typewriter_mode: false,
+            clock_12h: false,
+            show_seconds: false,
+            show_ruler: true,
+            show_footer_legend: true,
+            soundtrack_source: String::new(),
+            opening_line_template: "JOURNAL ENTRY {DATE}".to_string(),
+            daily_word_goal: None,
+            remember_passphrase_in_keychain: false,
+            first_run_coach_completed: false,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: Vec::new(),
+            export_history: Vec::new(),
+            search_presets: Vec::new(),
+            backup_retention: BackupRetentionConfig::default(),
+            macros: Vec::new(),
+        }
+    }
 
     #[test]
     fn default_vault_path_targets_documents_bluescreenjournal() {
@@ -479,6 +599,7 @@ mod tests {
                 format: "text".to_string(),
                 path: "/tmp/entry.txt".to_string(),
             }],
+            search_presets: Vec::new(),
             backup_retention: BackupRetentionConfig {
                 daily: 5,
                 weekly: 4,
@@ -546,6 +667,7 @@ mod tests {
             sync_history: Vec::new(),
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
+            search_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };
@@ -603,11 +725,92 @@ mod tests {
             sync_history: Vec::new(),
             favorite_dates: Vec::new(),
             export_history: Vec::new(),
+            search_presets: Vec::new(),
             backup_retention: BackupRetentionConfig::default(),
             macros: Vec::new(),
         };
 
         set_setting_value(&mut config, "sync_target_path", "unset").expect("unset");
         assert!(config.sync_target_path.is_none());
+    }
+
+    #[test]
+    fn upsert_search_preset_inserts_and_reorders_by_name() {
+        let mut config = empty_test_config();
+
+        config
+            .upsert_search_preset(SearchPresetConfig {
+                name: "Work".to_string(),
+                query: "project alpha".to_string(),
+                from: Some("2026-03-01".to_string()),
+                to: Some("2026-03-19".to_string()),
+            })
+            .expect("insert preset");
+        config
+            .upsert_search_preset(SearchPresetConfig {
+                name: "Morning".to_string(),
+                query: "coffee".to_string(),
+                from: None,
+                to: None,
+            })
+            .expect("second preset");
+        config
+            .upsert_search_preset(SearchPresetConfig {
+                name: "work".to_string(),
+                query: "project beta".to_string(),
+                from: None,
+                to: None,
+            })
+            .expect("update preset");
+
+        assert_eq!(config.search_presets.len(), 2);
+        assert_eq!(config.search_presets[0].name, "work");
+        assert_eq!(config.search_presets[0].query, "project beta");
+        assert_eq!(config.search_presets[1].name, "Morning");
+    }
+
+    #[test]
+    fn upsert_search_preset_rejects_blank_name_or_query() {
+        let mut config = empty_test_config();
+
+        let missing_name = config.upsert_search_preset(SearchPresetConfig {
+            name: "   ".to_string(),
+            query: "value".to_string(),
+            from: None,
+            to: None,
+        });
+        assert!(missing_name.is_err());
+
+        let missing_query = config.upsert_search_preset(SearchPresetConfig {
+            name: "Name".to_string(),
+            query: "   ".to_string(),
+            from: None,
+            to: None,
+        });
+        assert!(missing_query.is_err());
+    }
+
+    #[test]
+    fn remove_search_preset_matches_case_insensitive_name() {
+        let mut config = empty_test_config();
+        config.search_presets = vec![
+            SearchPresetConfig {
+                name: "Work".to_string(),
+                query: "project".to_string(),
+                from: None,
+                to: None,
+            },
+            SearchPresetConfig {
+                name: "Personal".to_string(),
+                query: "family".to_string(),
+                from: None,
+                to: None,
+            },
+        ];
+
+        assert!(config.remove_search_preset("work"));
+        assert_eq!(config.search_presets.len(), 1);
+        assert_eq!(config.search_presets[0].name, "Personal");
+        assert!(!config.remove_search_preset("missing"));
     }
 }

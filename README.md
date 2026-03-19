@@ -68,7 +68,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.0.2.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.0.3.md) |
 
 ## Turnkey install
 
@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.0.2
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.0.3
 ```
 
 Install from source instead of the prebuilt release:
@@ -213,7 +213,13 @@ The app is direct by design:
 - `F4` or `EDIT -> Find in Entry` searches inside the current entry
 - `F6` or `EDIT -> Replace in Entry` runs replace confirmation in a retro style
 - `F5` or `SEARCH -> Search Vault` searches across saved entries
+- `SEARCH -> Saved Presets` reopens named query+range presets
+- in Search overlay: `Ctrl+Shift+B` saves current query as a preset and `Ctrl+1..9` loads preset slots
 - `bsj search "query" --from YYYY-MM-DD --to YYYY-MM-DD` searches from the CLI
+- `bsj search --preset "Weekly Review"` runs a saved preset
+- `bsj search --list-presets` lists saved presets
+- `bsj search "query" --save-preset "Name"` saves and runs a preset in one command
+- `bsj search --delete-preset "Name"` removes a saved preset
 
 ### Protect and move data
 
@@ -241,7 +247,7 @@ The menu bar is the primary discoverability surface.
 - `EDIT` includes line tools, stamps, metadata, reveal, and writing-mode toggles
 - `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
-- `TOOLS` includes sync, soundtrack source + toggle, integrity details, review mode, prompts, dashboard, updates, and doctor output
+- `TOOLS` includes sync, soundtrack source + toggle, integrity details, review mode, prompts, dashboard, updates, doctor output, and a `SYSOP Center` menu for operator audits/runbooks
 - `TOOLS -> Check for Updates` now offers an in-app install action that runs the installer in the background
 - `SETUP` includes a live settings summary plus editable vault/sync/device/opening-line/retention/clock/display values
 - `HELP` includes About (version/credits), the key sheet, quick-start guide, and searchable guide topics inside the TUI
@@ -326,6 +332,10 @@ bsj guide distribution
 bsj
 bsj open 2026-03-16
 bsj search "quiet morning" --from 2026-03-01 --to 2026-03-31
+bsj search "focus" --whole-word --case-sensitive --limit 20
+bsj search "mood:7" --json --context 40
+bsj search "ship" --count-only
+bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata
 bsj export 2026-03-16
 bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md
 bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
@@ -333,6 +343,9 @@ bsj backup
 bsj backup list
 bsj backup prune
 bsj backup prune --apply
+bsj sysop dashboard
+bsj sysop runbook
+bsj sysop sync-preview --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
 bsj restore ~/Documents/BlueScreenJournal/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore
 bsj verify
 ```
@@ -353,7 +366,9 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v1.0.2.md)
+- [Release Notes](docs/releases/v1.0.3.md)
+- [Feature Pass (Next 10)](docs/FEATURE_PASS_VNEXT.md)
+- [SYSOP Features](docs/SYSOP_FEATURES.md)
 - [Setup Guide](docs/SETUP_GUIDE.md)
 - [Settings Guide](docs/SETTINGS_GUIDE.md)
 - [Distribution Guide](docs/DISTRIBUTION.md)

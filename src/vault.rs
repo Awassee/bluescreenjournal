@@ -1121,7 +1121,7 @@ pub fn random_device_id() -> String {
 pub fn compute_entry_number(epoch: NaiveDate, entry_date: NaiveDate) -> String {
     let days = (entry_date - epoch).num_days() + 1;
     let value = if days < 1 { 0 } else { days as u64 };
-    let width = 7usize.max(value.to_string().len());
+    let width = 6usize.max(value.to_string().len());
     format!("{value:0width$}")
 }
 
@@ -1992,14 +1992,14 @@ mod tests {
     #[test]
     fn entry_number_edge_cases() {
         let epoch = NaiveDate::from_ymd_opt(2026, 3, 16).expect("epoch");
-        assert_eq!(compute_entry_number(epoch, epoch), "0000001");
+        assert_eq!(compute_entry_number(epoch, epoch), "000001");
         assert_eq!(
             compute_entry_number(epoch, NaiveDate::from_ymd_opt(2026, 3, 17).expect("date")),
-            "0000002"
+            "000002"
         );
         assert_eq!(
             compute_entry_number(epoch, NaiveDate::from_ymd_opt(2026, 3, 15).expect("date")),
-            "0000000"
+            "000000"
         );
         assert_eq!(
             compute_entry_number(
@@ -2008,7 +2008,7 @@ mod tests {
                     .checked_add_signed(chrono::Duration::days(4_772))
                     .expect("shift")
             ),
-            "0004773"
+            "004773"
         );
     }
 
@@ -2063,7 +2063,7 @@ mod tests {
         let entries = vault.list_index_entries(12).expect("index entries");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].date, date);
-        assert_eq!(entries[0].entry_number, "0000016");
+        assert_eq!(entries[0].entry_number, "000016");
         assert_eq!(entries[0].preview, "updated prev...");
         assert!(!entries[0].has_conflict);
     }
