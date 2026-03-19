@@ -19,9 +19,9 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use secrecy::SecretString;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     env,
-    fs::File,
+    fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -36,6 +36,9 @@ const TAB_INSERT_TEXT: &str = "     ";
 const SOUNDTRACK_CACHE_DIR_NAME: &str = "bsj-soundtrack-cache";
 const QUICK_SAVE_LINE_COMMAND: &str = "**save**";
 const ENTRY_MARKER_PREFIX: &str = "[ENTRY ";
+const SOUNDTRACK_MIDI_SAMPLE_RATE: u32 = 22_050;
+const SOUNDTRACK_MIDI_MAX_SECONDS: f64 = 180.0;
+const SOUNDTRACK_MIDI_MIN_SECONDS: f64 = 1.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Overlay {
@@ -1640,12 +1643,6 @@ impl From<BufferStats> for DocumentStats {
     }
 }
 
-#[derive(Debug)]
-enum SoundtrackRuntime {
-    Afplay(Child),
-    QuickTimeMidi { document_id: i64 },
-}
-
 pub struct App {
     config: AppConfig,
     buffer: TextBuffer,
@@ -1685,7 +1682,7 @@ pub struct App {
     search_scope_to: String,
     document_stats: DocumentStats,
     menu_coach_shown: bool,
-    soundtrack_runtime: Option<SoundtrackRuntime>,
+    soundtrack_child: Option<Child>,
     soundtrack_loop_enabled: bool,
 }
 
@@ -1766,7 +1763,7 @@ impl App {
                 chars: 0,
             }),
             menu_coach_shown: false,
-            soundtrack_runtime: None,
+            soundtrack_child: None,
             soundtrack_loop_enabled: false,
         };
         app.try_keychain_auto_unlock();
@@ -2680,7 +2677,7 @@ impl App {
     pub fn tick(&mut self) {
         self.reap_soundtrack_process();
         if self.soundtrack_loop_enabled
-            && self.soundtrack_runtime.is_none()
+            && self.soundtrack_child.is_none()
             && let Err(error) = self.start_soundtrack_playback()
         {
             log::warn!("soundtrack restart failed: {error}");
@@ -5676,51 +5673,37 @@ impl App {
 
     fn start_soundtrack_playback(&mut self) -> Result<(), String> {
         self.reap_soundtrack_process();
-        if self.soundtrack_runtime.is_some() {
+        if self.soundtrack_child.is_some() {
             return Ok(());
         }
         let source = self.soundtrack_source_for_playback()?;
-        if soundtrack_source_is_midi(Path::new(&source)) {
-            let document_id = start_quicktime_midi(&source)?;
-            self.soundtrack_runtime = Some(SoundtrackRuntime::QuickTimeMidi { document_id });
-            return Ok(());
-        }
+        let playback_source = prepare_soundtrack_playback_source(Path::new(&source))?;
 
         let child = Command::new("afplay")
-            .arg(&source)
+            .arg(&playback_source)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .map_err(|error| format!("SOUNDTRACK START FAILED: {error}"))?;
-        self.soundtrack_runtime = Some(SoundtrackRuntime::Afplay(child));
+        self.soundtrack_child = Some(child);
         Ok(())
     }
 
     fn stop_soundtrack_playback(&mut self) {
-        if let Some(runtime) = self.soundtrack_runtime.take() {
-            match runtime {
-                SoundtrackRuntime::Afplay(mut child) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
-                SoundtrackRuntime::QuickTimeMidi { document_id } => {
-                    if let Err(error) = stop_quicktime_midi(document_id) {
-                        log::warn!("failed to stop QuickTime soundtrack: {error}");
-                    }
-                }
-            }
+        if let Some(mut child) = self.soundtrack_child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 
     fn reap_soundtrack_process(&mut self) {
-        let ended = if let Some(SoundtrackRuntime::Afplay(child)) = self.soundtrack_runtime.as_mut()
-        {
+        let ended = if let Some(child) = self.soundtrack_child.as_mut() {
             matches!(child.try_wait(), Ok(Some(_)))
         } else {
             false
         };
         if ended {
-            self.soundtrack_runtime = None;
+            self.soundtrack_child = None;
         }
     }
 
@@ -7171,76 +7154,247 @@ fn soundtrack_source_is_midi(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn start_quicktime_midi(source: &str) -> Result<i64, String> {
-    let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg("tell application \"QuickTime Player\"")
-        .arg("-e")
-        .arg(format!(
-            "set soundtrackDoc to open POSIX file \"{escaped}\""
-        ))
-        .arg("-e")
-        .arg("try")
-        .arg("-e")
-        .arg("set looping of soundtrackDoc to true")
-        .arg("-e")
-        .arg("end try")
-        .arg("-e")
-        .arg("play soundtrackDoc")
-        .arg("-e")
-        .arg("return (id of soundtrackDoc) as text")
-        .arg("-e")
-        .arg("end tell")
-        .output()
-        .map_err(|error| format!("SOUNDTRACK START FAILED: {error}"))?;
-
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if detail.is_empty() {
-            return Err(
-                "SOUNDTRACK START FAILED: QuickTime could not play this MIDI file.".to_string(),
-            );
-        }
-        return Err(format!("SOUNDTRACK START FAILED: {detail}"));
+fn prepare_soundtrack_playback_source(source_path: &Path) -> Result<String, String> {
+    if soundtrack_source_is_midi(source_path) {
+        let rendered = render_midi_to_wav_cached(source_path)?;
+        Ok(rendered.display().to_string())
+    } else {
+        Ok(source_path.display().to_string())
     }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
-        .trim()
-        .parse::<i64>()
-        .map_err(|_| "SOUNDTRACK START FAILED: QuickTime did not return document id.".to_string())
 }
 
-fn stop_quicktime_midi(document_id: i64) -> Result<(), String> {
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg("tell application \"QuickTime Player\"")
-        .arg("-e")
-        .arg(format!("if exists (document id {document_id}) then"))
-        .arg("-e")
-        .arg(format!("set soundtrackDoc to document id {document_id}"))
-        .arg("-e")
-        .arg("stop soundtrackDoc")
-        .arg("-e")
-        .arg("close soundtrackDoc saving no")
-        .arg("-e")
-        .arg("end if")
-        .arg("-e")
-        .arg("end tell")
-        .output()
-        .map_err(|error| format!("SOUNDTRACK STOP FAILED: {error}"))?;
+#[derive(Clone, Copy, Debug)]
+struct MidiNoteEvent {
+    start_sec: f64,
+    end_sec: f64,
+    key: u8,
+    velocity: u8,
+}
 
-    if output.status.success() {
-        return Ok(());
+fn render_midi_to_wav_cached(source_path: &Path) -> Result<PathBuf, String> {
+    let midi_bytes =
+        fs::read(source_path).map_err(|error| format!("SOUNDTRACK READ FAILED: {error}"))?;
+    let cache_dir = env::temp_dir().join(SOUNDTRACK_CACHE_DIR_NAME);
+    secure_fs::ensure_private_dir(&cache_dir)
+        .map_err(|error| format!("SOUNDTRACK CACHE INIT FAILED: {error}"))?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(&midi_bytes);
+    let digest = hex::encode(hasher.finalize());
+    let cache_path = cache_dir.join(format!("theme-{digest}.wav"));
+    if cache_path.exists()
+        && cache_path
+            .metadata()
+            .map(|metadata| metadata.len() > 44)
+            .unwrap_or(false)
+    {
+        return Ok(cache_path);
     }
 
-    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if detail.is_empty() {
-        Err("SOUNDTRACK STOP FAILED.".to_string())
-    } else {
-        Err(format!("SOUNDTRACK STOP FAILED: {detail}"))
+    let (notes, duration_sec) = extract_midi_note_events(&midi_bytes)?;
+    let pcm = synthesize_midi_notes(&notes, duration_sec, SOUNDTRACK_MIDI_SAMPLE_RATE);
+    let wav = encode_wav_pcm16_mono(&pcm, SOUNDTRACK_MIDI_SAMPLE_RATE);
+    secure_fs::atomic_write_private(&cache_path, &wav)
+        .map_err(|error| format!("SOUNDTRACK CACHE WRITE FAILED: {error}"))?;
+    Ok(cache_path)
+}
+
+fn extract_midi_note_events(midi_bytes: &[u8]) -> Result<(Vec<MidiNoteEvent>, f64), String> {
+    let smf = midly::Smf::parse(midi_bytes)
+        .map_err(|error| format!("SOUNDTRACK MIDI PARSE FAILED: {error}"))?;
+    let midly::Timing::Metrical(ppq) = smf.header.timing else {
+        return Err("SOUNDTRACK MIDI FAILED: unsupported timecode timing.".to_string());
+    };
+    let ticks_per_quarter = ppq.as_int() as u32;
+    if ticks_per_quarter == 0 {
+        return Err("SOUNDTRACK MIDI FAILED: invalid timing.".to_string());
     }
+
+    let mut tempo_events = vec![(0_u64, 500_000_u32)];
+    let mut track_ticks = vec![0_u64; smf.tracks.len()];
+    for (track_idx, track) in smf.tracks.iter().enumerate() {
+        let mut tick = 0_u64;
+        for event in track {
+            tick = tick.saturating_add(event.delta.as_int() as u64);
+            if let midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(tempo)) = event.kind {
+                tempo_events.push((tick, tempo.as_int()));
+            }
+        }
+        track_ticks[track_idx] = tick;
+    }
+    let final_tick = track_ticks.into_iter().max().unwrap_or(0);
+    tempo_events.sort_by_key(|(tick, _)| *tick);
+    tempo_events.dedup_by(|left, right| {
+        if left.0 == right.0 {
+            left.1 = right.1;
+            true
+        } else {
+            false
+        }
+    });
+
+    let mut notes = Vec::new();
+    for track in &smf.tracks {
+        let mut tick = 0_u64;
+        let mut active: HashMap<(u8, u8), Vec<(u64, u8)>> = HashMap::new();
+        for event in track {
+            tick = tick.saturating_add(event.delta.as_int() as u64);
+            if let midly::TrackEventKind::Midi { channel, message } = event.kind {
+                let channel = channel.as_int();
+                match message {
+                    midly::MidiMessage::NoteOn { key, vel } => {
+                        let key = key.as_int();
+                        let velocity = vel.as_int();
+                        if velocity > 0 {
+                            active
+                                .entry((channel, key))
+                                .or_default()
+                                .push((tick, velocity));
+                        } else if let Some(starts) = active.get_mut(&(channel, key))
+                            && let Some((start_tick, start_velocity)) = starts.pop()
+                        {
+                            notes.push((start_tick, tick, key, start_velocity));
+                        }
+                    }
+                    midly::MidiMessage::NoteOff { key, .. } => {
+                        let key = key.as_int();
+                        if let Some(starts) = active.get_mut(&(channel, key))
+                            && let Some((start_tick, start_velocity)) = starts.pop()
+                        {
+                            notes.push((start_tick, tick, key, start_velocity));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for ((_, key), starts) in active {
+            for (start_tick, start_velocity) in starts {
+                notes.push((start_tick, final_tick, key, start_velocity));
+            }
+        }
+    }
+
+    let mut note_events = Vec::new();
+    for (start_tick, end_tick, key, velocity) in notes {
+        if end_tick <= start_tick {
+            continue;
+        }
+        let start_sec = tick_to_seconds(start_tick, ticks_per_quarter, &tempo_events);
+        let end_sec = tick_to_seconds(end_tick, ticks_per_quarter, &tempo_events);
+        if end_sec <= start_sec || start_sec >= SOUNDTRACK_MIDI_MAX_SECONDS {
+            continue;
+        }
+        note_events.push(MidiNoteEvent {
+            start_sec,
+            end_sec: end_sec.min(SOUNDTRACK_MIDI_MAX_SECONDS),
+            key,
+            velocity,
+        });
+    }
+
+    let mut duration_sec = note_events
+        .iter()
+        .map(|note| note.end_sec)
+        .fold(0.0_f64, f64::max)
+        + 0.15;
+    duration_sec = duration_sec.clamp(SOUNDTRACK_MIDI_MIN_SECONDS, SOUNDTRACK_MIDI_MAX_SECONDS);
+    Ok((note_events, duration_sec))
+}
+
+fn tick_to_seconds(tick: u64, ppq: u32, tempo_events: &[(u64, u32)]) -> f64 {
+    let mut seconds = 0.0_f64;
+    let mut prev_tick = 0_u64;
+    let mut tempo = 500_000_u32;
+
+    for &(tempo_tick, tempo_value) in tempo_events {
+        if tempo_tick > tick {
+            break;
+        }
+        if tempo_tick > prev_tick {
+            let delta_ticks = tempo_tick - prev_tick;
+            seconds += (delta_ticks as f64 * tempo as f64) / (ppq as f64 * 1_000_000.0);
+            prev_tick = tempo_tick;
+        }
+        tempo = tempo_value;
+    }
+
+    if tick > prev_tick {
+        let delta_ticks = tick - prev_tick;
+        seconds += (delta_ticks as f64 * tempo as f64) / (ppq as f64 * 1_000_000.0);
+    }
+    seconds
+}
+
+fn synthesize_midi_notes(notes: &[MidiNoteEvent], duration_sec: f64, sample_rate: u32) -> Vec<i16> {
+    let sample_count = (duration_sec * sample_rate as f64).ceil().max(1.0) as usize;
+    let mut mix = vec![0.0_f32; sample_count];
+    let sample_rate_f64 = sample_rate as f64;
+    let attack_samples = (sample_rate as usize / 100).max(1);
+    let release_samples = (sample_rate as usize / 16).max(1);
+
+    for note in notes {
+        let start = (note.start_sec * sample_rate_f64).floor() as usize;
+        let end = (note.end_sec * sample_rate_f64).ceil() as usize;
+        if start >= sample_count {
+            continue;
+        }
+        let end = end.min(sample_count);
+        if end <= start {
+            continue;
+        }
+
+        let duration_samples = end - start;
+        let freq = 440.0_f64 * 2.0_f64.powf((note.key as f64 - 69.0) / 12.0);
+        let amplitude = (note.velocity as f32 / 127.0) * 0.12;
+
+        for idx in 0..duration_samples {
+            let global = start + idx;
+            let t = idx as f64 / sample_rate_f64;
+            let mut env = 1.0_f32;
+            if idx < attack_samples {
+                env = idx as f32 / attack_samples as f32;
+            }
+            let tail = duration_samples - idx;
+            if tail < release_samples {
+                env *= tail as f32 / release_samples as f32;
+            }
+            let sample = (2.0 * std::f64::consts::PI * freq * t).sin() as f32;
+            mix[global] += sample * amplitude * env;
+        }
+    }
+
+    let peak = mix.iter().fold(0.0_f32, |acc, value| acc.max(value.abs()));
+    let gain = if peak > 0.95 { 0.95 / peak } else { 1.0 };
+    mix.into_iter()
+        .map(|sample| {
+            let scaled =
+                (sample * gain * i16::MAX as f32).clamp(i16::MIN as f32 + 1.0, i16::MAX as f32);
+            scaled as i16
+        })
+        .collect()
+}
+
+fn encode_wav_pcm16_mono(samples: &[i16], sample_rate: u32) -> Vec<u8> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut bytes = Vec::with_capacity(44 + data_len as usize);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36_u32 + data_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+    bytes.extend_from_slice(&2_u16.to_le_bytes());
+    bytes.extend_from_slice(&16_u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    bytes
 }
 
 fn default_export_path(date: NaiveDate, format: ExportFormatUi) -> PathBuf {
@@ -7760,7 +7914,8 @@ mod tests {
         App, ConflictOverlay, DatePicker, ExportFormatUi, ExportPrompt, IndexState, MenuAction,
         MenuId, Overlay, PickerAction, PickerItem, PickerOverlay, RestorePrompt, SearchField,
         SearchJump, SearchOverlay, SettingField, SettingPrompt, SetupWizard, SyncPhase,
-        SyncRequest, SyncStatusOverlay, default_export_path, format_reveal_codes,
+        SyncRequest, SyncStatusOverlay, default_export_path, encode_wav_pcm16_mono,
+        extract_midi_note_events, format_reveal_codes, is_quick_save_command_line,
         macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
         soundtrack_cache_extension, soundtrack_cache_path, soundtrack_source_is_midi,
     };
@@ -7799,6 +7954,21 @@ mod tests {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
         render_into_terminal(&mut terminal, app)
+    }
+
+    fn simple_test_midi_bytes() -> Vec<u8> {
+        vec![
+            0x4d, 0x54, 0x68, 0x64, // MThd
+            0x00, 0x00, 0x00, 0x06, // header length
+            0x00, 0x00, // format 0
+            0x00, 0x01, // one track
+            0x00, 0x60, // 96 ticks per quarter
+            0x4d, 0x54, 0x72, 0x6b, // MTrk
+            0x00, 0x00, 0x00, 0x0c, // track length 12
+            0x00, 0x90, 0x3c, 0x40, // note on C4
+            0x60, 0x80, 0x3c, 0x00, // note off after 96 ticks
+            0x00, 0xff, 0x2f, 0x00, // end of track
+        ]
     }
 
     fn assert_editor_invariants(app: &App) {
@@ -8757,6 +8927,30 @@ mod tests {
         );
 
         assert_eq!(app.buffer.to_text(), "save\n");
+    }
+
+    #[test]
+    fn quick_save_command_line_match_is_case_insensitive_and_trimmed() {
+        assert!(is_quick_save_command_line("**save**"));
+        assert!(is_quick_save_command_line("  **SAVE**  "));
+        assert!(!is_quick_save_command_line("save"));
+    }
+
+    #[test]
+    fn midi_extraction_parses_basic_note_event() {
+        let bytes = simple_test_midi_bytes();
+        let (events, duration) = extract_midi_note_events(&bytes).expect("extract");
+
+        assert_eq!(events.len(), 1);
+        assert!(duration >= 1.0);
+        assert_eq!(events[0].key, 60);
+    }
+
+    #[test]
+    fn wav_encoder_outputs_riff_header() {
+        let wav = encode_wav_pcm16_mono(&[0, 1024, -1024, 0], 22_050);
+        assert!(wav.starts_with(b"RIFF"));
+        assert_eq!(&wav[8..12], b"WAVE");
     }
 
     #[test]

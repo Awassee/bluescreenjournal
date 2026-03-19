@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.2
+
+- fixed macOS soundtrack failures for unsupported QuickTime MIDI files by removing QuickTime as the MIDI backend
+- added internal MIDI rendering fallback (MIDI -> WAV) and playback through `afplay` to avoid QuickTime compatibility popups
+- added regression tests for quick-save command matching, MIDI event extraction, and WAV encoding
+
 ## v1.0.1
 
 - added quick-save flow for rapid same-day journaling: type `**save**` on its own line and press `Enter` to save and continue into the next entry block
