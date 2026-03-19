@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v1.3.1
+
+- added `TOOLS -> Insights Center` as a menu-first picker with ten report modules:
+- Momentum Snapshot
+- Save Readiness
+- Word Volume
+- Streak Tracker
+- Mood Mix
+- Tag Radar
+- People Radar
+- Project Radar
+- Gap Finder
+- Conflict & Backup Risk
+- added new TUI tests covering insights menu visibility, picker population, and report formatting helpers
+- updated in-app help text to advertise Insights Center from the `TOOLS` section
+
 ## v1.3.0
 
 - added spellcheck core module with in-entry misspelling detection, suggestion generation, and typo correction support

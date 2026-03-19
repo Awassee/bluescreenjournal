@@ -147,3 +147,18 @@ Acceptance criteria:
 8. `HELP -> Daily Flow Coach` in-app guidance for write/save/next flow.
 9. Archive guard for deep backward date jumps (repeat to confirm).
 10. New functional regression tests for spellcheck, save receipt, and archive guard.
+
+## Delivered in v1.3.1 (feature-count correction pass)
+
+`TOOLS -> Insights Center` now ships ten distinct report modules:
+
+1. Momentum Snapshot report.
+2. Save Readiness report.
+3. Word Volume report.
+4. Streak Tracker report.
+5. Mood Mix report.
+6. Tag Radar report.
+7. People Radar report.
+8. Project Radar report.
+9. Gap Finder report.
+10. Conflict & Backup Risk report.

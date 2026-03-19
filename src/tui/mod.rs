@@ -805,6 +805,7 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),
         Line::from("GO     Calendar, index, recents, favorites, random, today"),
         Line::from("TOOLS  Sync, soundtrack, verify, review, dashboard, prompts, doctor"),
+        Line::from("TOOLS  Insights Center: 10 writing/safety reports in one picker"),
         Line::from("TOOLS  Today Brief + Week Compass for daily/weekly planning"),
         Line::from("TOOLS  Optional AI Summary + AI Coach (Ctrl+Shift+A)"),
         Line::from("Calendar: YYYY-MM-DD jump, [ ] saved jump, < > months, N/P blank, T/0 today"),

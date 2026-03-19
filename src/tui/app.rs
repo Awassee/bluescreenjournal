@@ -1572,6 +1572,7 @@ pub enum MenuAction {
     JournalHealth,
     TodayBrief,
     WeekCompass,
+    InsightsCenter,
     SyncCenter,
     ToggleSoundtrack,
     AiSummary,
@@ -3126,6 +3127,12 @@ impl App {
                     detail: "7D".to_string(),
                     action: MenuAction::WeekCompass,
                     enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Insights Center".to_string(),
+                    detail: "10X".to_string(),
+                    action: MenuAction::InsightsCenter,
+                    enabled: true,
                 },
                 MenuItem {
                     label: "Start Sprint (15m)".to_string(),
@@ -7104,6 +7111,466 @@ impl App {
         }
     }
 
+    fn open_insights_center_overlay(&mut self) {
+        let items = vec![
+            PickerItem {
+                title: "Momentum Snapshot".to_string(),
+                detail: "SESSION".to_string(),
+                keywords: "insights momentum words session pace".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Momentum Snapshot".to_string(),
+                    text: self.insight_momentum_report(),
+                },
+            },
+            PickerItem {
+                title: "Save Readiness".to_string(),
+                detail: "QUALITY".to_string(),
+                keywords: "insights save readiness typos closing metadata".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Save Readiness".to_string(),
+                    text: self.insight_save_readiness_report(),
+                },
+            },
+            PickerItem {
+                title: "Word Volume".to_string(),
+                detail: "7D/30D".to_string(),
+                keywords: "insights words volume totals average".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Word Volume".to_string(),
+                    text: self.insight_word_volume_report(),
+                },
+            },
+            PickerItem {
+                title: "Streak Tracker".to_string(),
+                detail: "CONSISTENCY".to_string(),
+                keywords: "insights streak consistency cadence".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Streak Tracker".to_string(),
+                    text: self.insight_streak_report(),
+                },
+            },
+            PickerItem {
+                title: "Mood Mix".to_string(),
+                detail: "LAST30".to_string(),
+                keywords: "insights mood distribution".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Mood Mix".to_string(),
+                    text: self.insight_mood_mix_report(),
+                },
+            },
+            PickerItem {
+                title: "Tag Radar".to_string(),
+                detail: "LAST30".to_string(),
+                keywords: "insights tags metadata radar".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Tag Radar".to_string(),
+                    text: self.insight_tag_radar_report(),
+                },
+            },
+            PickerItem {
+                title: "People Radar".to_string(),
+                detail: "LAST30".to_string(),
+                keywords: "insights people metadata radar".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "People Radar".to_string(),
+                    text: self.insight_people_radar_report(),
+                },
+            },
+            PickerItem {
+                title: "Project Radar".to_string(),
+                detail: "LAST30".to_string(),
+                keywords: "insights project metadata radar".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Project Radar".to_string(),
+                    text: self.insight_project_radar_report(),
+                },
+            },
+            PickerItem {
+                title: "Gap Finder".to_string(),
+                detail: "CADENCE".to_string(),
+                keywords: "insights gap missing days cadence".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Gap Finder".to_string(),
+                    text: self.insight_gap_finder_report(),
+                },
+            },
+            PickerItem {
+                title: "Conflict & Backup Risk".to_string(),
+                detail: "SAFETY".to_string(),
+                keywords: "insights conflict backup risk integrity".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Conflict & Backup Risk".to_string(),
+                    text: self.insight_conflict_backup_report(),
+                },
+            },
+        ];
+
+        self.open_picker_overlay(PickerOverlay::new(
+            "Insights Center",
+            items,
+            "No insights available.",
+        ));
+    }
+
+    fn insight_index_entries(&self) -> Vec<IndexEntry> {
+        let Some(vault) = &self.vault else {
+            return Vec::new();
+        };
+        vault.list_index_entries(64).unwrap_or_default()
+    }
+
+    fn insight_recent_entries(&self, days: i64) -> Vec<IndexEntry> {
+        let entries = self.insight_index_entries();
+        let from = self.selected_date - ChronoDuration::days(days.saturating_sub(1));
+        entries
+            .into_iter()
+            .filter(|entry| entry.date >= from && entry.date <= self.selected_date)
+            .collect()
+    }
+
+    fn insight_saved_word_total_for_dates(&self, dates: &[NaiveDate]) -> usize {
+        let Some(vault) = &self.vault else {
+            return 0;
+        };
+        dates
+            .iter()
+            .filter_map(|date| vault.export_entry(*date).ok().flatten())
+            .map(|entry| {
+                let mut words = entry.body.split_whitespace().count();
+                if let Some(closing) = entry.closing_thought.as_deref() {
+                    words += closing.split_whitespace().count();
+                }
+                words
+            })
+            .sum()
+    }
+
+    fn insight_word_totals_by_date(&self, dates: &[NaiveDate]) -> Vec<(NaiveDate, usize)> {
+        let Some(vault) = &self.vault else {
+            return Vec::new();
+        };
+        let mut totals = dates
+            .iter()
+            .filter_map(|date| {
+                vault.export_entry(*date).ok().flatten().map(|entry| {
+                    let mut words = entry.body.split_whitespace().count();
+                    if let Some(closing) = entry.closing_thought.as_deref() {
+                        words += closing.split_whitespace().count();
+                    }
+                    (*date, words)
+                })
+            })
+            .collect::<Vec<_>>();
+        totals.sort_by(|left, right| left.0.cmp(&right.0));
+        totals
+    }
+
+    fn insight_momentum_report(&self) -> String {
+        let mut lines = vec![
+            format!(
+                "Date            : {}",
+                self.selected_date.format("%Y-%m-%d")
+            ),
+            format!("Page words      : {}", self.document_stats.words),
+            format!("Page lines      : {}", self.document_stats.lines),
+            format!("Page chars      : {}", self.document_stats.chars),
+            format!(
+                "Session elapsed : {}m",
+                self.session_started_at.elapsed().as_secs() / 60
+            ),
+            format!("Save state      : {}", self.save_status_label()),
+        ];
+
+        if self.vault.is_none() {
+            lines.push(String::new());
+            lines.push("Unlock vault to compute saved-entry momentum trends.".to_string());
+            return lines.join("\n");
+        }
+
+        let recent = self.insight_recent_entries(7);
+        let dates = recent.iter().map(|entry| entry.date).collect::<Vec<_>>();
+        let total_words = self.insight_saved_word_total_for_dates(&dates);
+        let avg_words = if dates.is_empty() {
+            0
+        } else {
+            total_words / dates.len()
+        };
+        let delta = self.document_stats.words as isize - avg_words as isize;
+
+        lines.push(String::new());
+        lines.push("Saved-entry baseline (last 7 days)".to_string());
+        lines.push(format!("Saved days      : {}", dates.len()));
+        lines.push(format!("Saved words     : {}", total_words));
+        lines.push(format!("Avg/day (saved) : {}", avg_words));
+        lines.push(format!(
+            "Current delta   : {}{} words",
+            if delta >= 0 { "+" } else { "" },
+            delta
+        ));
+        lines.join("\n")
+    }
+
+    fn insight_save_readiness_report(&self) -> String {
+        let typo_hits = self.spell_hits_for_current_entry();
+        let has_body = !self.buffer.to_text().trim().is_empty();
+        let has_closing = self
+            .closing_thought
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_metadata =
+            !self.entry_metadata.tags.is_empty() || self.entry_metadata.mood.is_some();
+        let mut readiness_score = 0usize;
+        if has_body {
+            readiness_score += 1;
+        }
+        if typo_hits.is_empty() {
+            readiness_score += 1;
+        }
+        if has_closing {
+            readiness_score += 1;
+        }
+        if has_metadata {
+            readiness_score += 1;
+        }
+        if !self.dirty {
+            readiness_score += 1;
+        }
+
+        [
+            "Save Readiness".to_string(),
+            String::new(),
+            format!("Page has body     : {}", on_off(has_body)),
+            format!("Misspellings open : {}", typo_hits.len()),
+            format!("Closing thought   : {}", on_off(has_closing)),
+            format!("Metadata stamped  : {}", on_off(has_metadata)),
+            format!("Unsaved changes   : {}", on_off(self.dirty)),
+            format!("Readiness score   : {readiness_score}/5"),
+            String::new(),
+            if self.dirty {
+                "Suggestion: run FILE -> Save Entry after fixing typos/metadata as needed."
+                    .to_string()
+            } else {
+                "Suggestion: page is already persisted; keep writing or move to next entry."
+                    .to_string()
+            },
+        ]
+        .join("\n")
+    }
+
+    fn insight_word_volume_report(&self) -> String {
+        if self.vault.is_none() {
+            return "Unlock vault to compute word volume.".to_string();
+        }
+
+        let week = self.insight_recent_entries(7);
+        let month = self.insight_recent_entries(30);
+        let week_dates = week.iter().map(|entry| entry.date).collect::<Vec<_>>();
+        let month_dates = month.iter().map(|entry| entry.date).collect::<Vec<_>>();
+        let week_words = self.insight_saved_word_total_for_dates(&week_dates);
+        let month_words = self.insight_saved_word_total_for_dates(&month_dates);
+        let week_avg = if week_dates.is_empty() {
+            0
+        } else {
+            week_words / week_dates.len()
+        };
+        let month_avg = if month_dates.is_empty() {
+            0
+        } else {
+            month_words / month_dates.len()
+        };
+        let mut top_days = self.insight_word_totals_by_date(&month_dates);
+        top_days.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| right.0.cmp(&left.0)));
+
+        let mut lines = vec![
+            format!(
+                "Window end      : {}",
+                self.selected_date.format("%Y-%m-%d")
+            ),
+            format!(
+                "7-day words     : {} ({} saved day(s), avg {})",
+                week_words,
+                week_dates.len(),
+                week_avg
+            ),
+            format!(
+                "30-day words    : {} ({} saved day(s), avg {})",
+                month_words,
+                month_dates.len(),
+                month_avg
+            ),
+            String::new(),
+            "Top word-volume days (30d)".to_string(),
+        ];
+        if top_days.is_empty() {
+            lines.push("  No saved entries in this window.".to_string());
+        } else {
+            for (date, words) in top_days.into_iter().take(5) {
+                lines.push(format!("  {}  {}", date.format("%Y-%m-%d"), words));
+            }
+        }
+        lines.join("\n")
+    }
+
+    fn insight_streak_report(&self) -> String {
+        let Some(vault) = &self.vault else {
+            return "Unlock vault to compute streaks.".to_string();
+        };
+        let dates = vault.list_entry_dates().unwrap_or_default();
+        let set = dates.into_iter().collect::<BTreeSet<_>>();
+        let (current, best, last_30) = compute_streak_metrics(&set, self.selected_date);
+
+        [
+            format!(
+                "As of date      : {}",
+                self.selected_date.format("%Y-%m-%d")
+            ),
+            format!("Current streak  : {} day(s)", current),
+            format!("Best streak     : {} day(s)", best),
+            format!("Active in last30: {} day(s)", last_30),
+            format!("Saved dates     : {}", set.len()),
+        ]
+        .join("\n")
+    }
+
+    fn insight_mood_mix_report(&self) -> String {
+        if self.vault.is_none() {
+            return "Unlock vault to inspect mood mix.".to_string();
+        }
+        let recent = self.insight_recent_entries(30);
+        let moods = top_mood_counts(recent.iter().filter_map(|entry| entry.metadata.mood));
+        let mut lines = vec![
+            format!(
+                "Window end      : {}",
+                self.selected_date.format("%Y-%m-%d")
+            ),
+            format!("Entries scanned : {}", recent.len()),
+            String::new(),
+            "Mood distribution (30d)".to_string(),
+        ];
+        if moods.is_empty() {
+            lines.push("  No mood metadata in this window.".to_string());
+        } else {
+            for (mood, count) in moods {
+                lines.push(format!("  Mood {mood}: {count}"));
+            }
+        }
+        lines.join("\n")
+    }
+
+    fn insight_tag_radar_report(&self) -> String {
+        self.insight_ranked_metadata_report(
+            "Tag Radar (30d)",
+            self.insight_recent_entries(30)
+                .into_iter()
+                .flat_map(|entry| entry.metadata.tags)
+                .collect(),
+        )
+    }
+
+    fn insight_people_radar_report(&self) -> String {
+        self.insight_ranked_metadata_report(
+            "People Radar (30d)",
+            self.insight_recent_entries(30)
+                .into_iter()
+                .flat_map(|entry| entry.metadata.people)
+                .collect(),
+        )
+    }
+
+    fn insight_project_radar_report(&self) -> String {
+        self.insight_ranked_metadata_report(
+            "Project Radar (30d)",
+            self.insight_recent_entries(30)
+                .into_iter()
+                .filter_map(|entry| entry.metadata.project)
+                .collect(),
+        )
+    }
+
+    fn insight_ranked_metadata_report(&self, heading: &str, values: Vec<String>) -> String {
+        if self.vault.is_none() {
+            return "Unlock vault to inspect metadata trends.".to_string();
+        }
+        let ranked = top_string_counts(values, 10);
+        let mut lines = vec![
+            format!(
+                "Window end      : {}",
+                self.selected_date.format("%Y-%m-%d")
+            ),
+            String::new(),
+            heading.to_string(),
+        ];
+        lines.extend(render_rank_lines(&ranked));
+        lines.join("\n")
+    }
+
+    fn insight_gap_finder_report(&self) -> String {
+        let Some(vault) = &self.vault else {
+            return "Unlock vault to detect cadence gaps.".to_string();
+        };
+        let mut dates = vault.list_entry_dates().unwrap_or_default();
+        dates.sort();
+
+        let mut gaps = Vec::new();
+        for pair in dates.windows(2) {
+            let left = pair[0];
+            let right = pair[1];
+            let missing = (right - left).num_days() - 1;
+            if missing >= 2 {
+                gaps.push((left, right, missing));
+            }
+        }
+        gaps.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| b.0.cmp(&a.0)));
+
+        let mut lines = vec![format!("Saved dates     : {}", dates.len()), String::new()];
+        if gaps.is_empty() {
+            lines.push("No 2+ day gaps found between saved entries.".to_string());
+        } else {
+            lines.push("Largest gaps between saved entries".to_string());
+            for (left, right, missing) in gaps.into_iter().take(8) {
+                lines.push(format!(
+                    "  {} -> {}  missing {} day(s)",
+                    left.format("%Y-%m-%d"),
+                    right.format("%Y-%m-%d"),
+                    missing
+                ));
+            }
+        }
+        lines.join("\n")
+    }
+
+    fn insight_conflict_backup_report(&self) -> String {
+        let Some(vault) = &self.vault else {
+            return "Unlock vault to inspect conflict and backup risk.".to_string();
+        };
+        let conflicts = vault.list_conflicted_dates().unwrap_or_default();
+        let backups = vault.list_backups().unwrap_or_default();
+        let prune = vault
+            .preview_backup_prune(&self.config.backup_retention)
+            .unwrap_or_default();
+
+        let mut lines = vec![
+            format!("Conflicted dates: {}", conflicts.len()),
+            format!("Backups present : {}", backups.len()),
+            format!("Prune candidates: {}", prune.len()),
+            format!("Integrity badge : {}", self.integrity_status_label()),
+            String::new(),
+        ];
+        if conflicts.is_empty() {
+            lines.push("Conflict status : clean".to_string());
+        } else {
+            lines.push("Conflict status : review these dates".to_string());
+            for date in conflicts.iter().take(6) {
+                lines.push(format!("  {}", date.format("%Y-%m-%d")));
+            }
+        }
+        if backups.is_empty() {
+            lines.push(String::new());
+            lines.push("Backup status   : create first encrypted backup.".to_string());
+        }
+        lines.join("\n")
+    }
+
     fn open_review_overlay(&mut self) {
         let Some(vault) = &self.vault else {
             self.flash_status("LOCKED.");
@@ -7761,6 +8228,7 @@ impl App {
             MenuAction::JournalHealth => self.open_journal_health_overlay(),
             MenuAction::TodayBrief => self.open_today_brief_overlay(),
             MenuAction::WeekCompass => self.open_week_compass_overlay(),
+            MenuAction::InsightsCenter => self.open_insights_center_overlay(),
             MenuAction::SyncCenter => self.open_sync_center_overlay(),
             MenuAction::ToggleSoundtrack => self.toggle_soundtrack_playback(),
             MenuAction::AiSummary => self.open_ai_summary_overlay(),
@@ -10387,6 +10855,24 @@ fn render_rank_lines(items: &[(String, usize)]) -> Vec<String> {
         .iter()
         .map(|(label, count)| format!("  {:<18} {}", label, count))
         .collect()
+}
+
+fn top_string_counts(values: Vec<String>, limit: usize) -> Vec<(String, usize)> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let mut counts = HashMap::<String, usize>::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.to_ascii_lowercase();
+        *counts.entry(key).or_insert(0) += 1;
+    }
+    let mut ranked = counts.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    ranked.into_iter().take(limit).collect()
 }
 
 fn top_mood_counts<I>(moods: I) -> Vec<(u8, usize)>
@@ -13575,6 +14061,23 @@ mod tests {
     }
 
     #[test]
+    fn top_string_counts_normalizes_case_and_applies_limit() {
+        let ranked = super::top_string_counts(
+            vec![
+                "Work".to_string(),
+                "work".to_string(),
+                "Family".to_string(),
+                "work".to_string(),
+            ],
+            2,
+        );
+        assert_eq!(
+            ranked,
+            vec![("work".to_string(), 3), ("family".to_string(), 1)]
+        );
+    }
+
+    #[test]
     fn footer_context_prefers_find_progress_over_cursor_position() {
         let mut app = App::with_initial_date(None);
         app.overlay = None;
@@ -13776,8 +14279,46 @@ mod tests {
         assert!(labels.contains(&"Toggle Soundtrack".to_string()));
         assert!(labels.contains(&"Today Brief".to_string()));
         assert!(labels.contains(&"Week Compass".to_string()));
+        assert!(labels.contains(&"Insights Center".to_string()));
         assert!(labels.contains(&"AI Summary (Optional)".to_string()));
         assert!(labels.contains(&"AI Coach Mode (Optional)".to_string()));
+    }
+
+    #[test]
+    fn insights_center_action_opens_ten_report_picker_items() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::InsightsCenter, 20);
+
+        match app.overlay() {
+            Some(Overlay::Picker(picker)) => {
+                assert_eq!(picker.title, "Insights Center");
+                assert_eq!(picker.items.len(), 10);
+                assert_eq!(picker.items[0].title, "Momentum Snapshot");
+                assert!(
+                    picker
+                        .items
+                        .iter()
+                        .any(|item| item.title == "Conflict & Backup Risk")
+                );
+            }
+            other => panic!("expected insights picker overlay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn insight_save_readiness_reports_open_misspellings() {
+        let mut app = App::with_initial_date(None);
+        app.buffer.insert_text("teh ship log");
+        app.refresh_document_stats();
+        app.dirty = true;
+
+        let report = app.insight_save_readiness_report();
+
+        assert!(report.contains("Misspellings open :"));
+        assert!(report.contains("Readiness score"));
+        assert!(report.contains("Unsaved changes"));
     }
 
     #[test]

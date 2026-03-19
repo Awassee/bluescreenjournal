@@ -22,14 +22,14 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with optional folder/S3/WebDAV encrypted sync
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v1.3.0
+## New in v1.3.1
 
-- added spellcheck engine + menu-first correction picker (`EDIT -> Spellcheck Entry`)
-- added `bsj spellcheck` CLI with `--date`, `--from/--to`, `--range`, `--json`, and `--count-only`
-- added `FILE -> Save Receipt` for explicit persisted-state confirmation
-- added `HELP -> Daily Flow Coach` for write/save/next flow guidance
-- added deep-archive backward-jump confirmation to reduce accidental old-entry opens
-- added scoped UX checklist and regression tests for spellcheck/save/archive flows
+- added `TOOLS -> Insights Center` with ten menu-driven report modules:
+- Momentum Snapshot, Save Readiness, Word Volume, Streak Tracker
+- Mood Mix, Tag Radar, People Radar, Project Radar
+- Gap Finder, Conflict & Backup Risk
+- added regression tests for insights menu discovery and report behavior
+- kept all quality gates green (`fmt`, `clippy -D warnings`, `test`, `qa-gate`)
 
 ## Screenshots
 
@@ -78,7 +78,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.3.0.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.3.1.md) |
 
 ## Turnkey install
 
@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.3.0
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.3.1
 ```
 
 Install from source instead of the prebuilt release:
@@ -198,6 +198,7 @@ The app is direct by design:
 | Encrypted sync | Syncs encrypted revision blobs to folder, S3, or WebDAV targets | Lets you use cloud storage without uploading plaintext |
 | Integrity verify | Checks revision hashchains | Detects missing or tampered history |
 | Review and dashboard surfaces | Show streaks, mood distribution, backup policy, sync preview, and doctor output | Keeps operational awareness inside the product |
+| Insights Center | Adds ten actionable reports (momentum, readiness, volume, streak, metadata trends, cadence gaps, conflict/backup risk) | Turns journal history into immediate writing and safety feedback from menus |
 | Reveal Codes | Shows metadata inline in a retro-friendly way | Gives structural visibility without cluttering normal view |
 | Opening Line Template | Auto-seeds a configurable header line on blank entry pages | Gives each entry a consistent, personal starting line |
 | Closing Thought | Dedicated final line field for each entry | Encourages deliberate endings and cleaner exports |
@@ -241,6 +242,7 @@ The app is direct by design:
 - `bsj review --range last30 --goal 750 --json` exports range-bounded review metrics plus word-goal hit rate
 - `bsj timeline --summary --format json` outputs aggregate timeline analytics
 - `bsj timeline --group-by week --range last30` rolls entries into weekly groups
+- `TOOLS -> Insights Center` opens ten focused writing/safety reports without leaving the TUI flow
 - `bsj timeline --save-preset "Recent Work" --query ship --tag work` stores a reusable timeline filter
 - `bsj timeline --preset "Recent Work"` applies a saved timeline preset
 - `bsj prompts pick --category reflection --json` returns deterministic prompt payloads
@@ -419,7 +421,7 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v1.3.0.md)
+- [Release Notes](docs/releases/v1.3.1.md)
 - [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
 - [v1.3 UX Checklist](docs/V1_3_UX_CHECKLIST.md)
 - [Next 10 Feature Pack](docs/FEATURES_NEXT10.md)
