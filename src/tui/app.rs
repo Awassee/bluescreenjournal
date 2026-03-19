@@ -10805,13 +10805,7 @@ mod tests {
             viewport_width,
         );
 
-        send_editor_key(
-            &mut app,
-            KeyCode::F(7),
-            KeyModifiers::empty(),
-            viewport_height,
-            viewport_width,
-        );
+        app.open_index_overlay();
         send_editor_key(
             &mut app,
             KeyCode::End,
