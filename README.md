@@ -81,6 +81,14 @@ Uninstall options:
 ./install.sh --factory-reset
 ```
 
+Installer troubleshooting options:
+
+```bash
+./install.sh --doctor
+./install.sh --repair-path
+./install.sh --about
+```
+
 `./install.sh` now opens an interactive installer menu in a local terminal session, including uninstall and full factory-reset actions.
 
 What the installer does:

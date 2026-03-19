@@ -20,6 +20,13 @@ Install from source instead:
 curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
 ```
 
+Troubleshooting helper actions:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --doctor
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --repair-path
+```
+
 Local install from an extracted bundle or repo checkout:
 
 ```bash

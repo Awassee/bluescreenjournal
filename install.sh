@@ -29,6 +29,12 @@ declare -a DATA_TARGETS
 declare -a KEYCHAIN_VAULT_PATHS
 declare -a CONFIG_TARGETS
 
+PRODUCT_NAME="BlueScreen Journal"
+PRODUCT_COPYRIGHT="(c) 2026 Awassee LLC and Sean Heiney"
+PRODUCT_CONTACT="sean@sean.net"
+PRODUCT_REPO_URL="https://github.com/Awassee/bluescreenjournal"
+BANNER_PRINTED=0
+
 if [[ -t 1 ]]; then
   BLUE="$(printf '\033[34m')"
   GREEN="$(printf '\033[32m')"
@@ -58,6 +64,36 @@ die() {
   exit 1
 }
 
+print_installer_banner() {
+  if [[ "$BANNER_PRINTED" -eq 1 ]]; then
+    return
+  fi
+  local line
+  line="=============================================================="
+  printf "\n%s%s%s\n" "$BLUE$BOLD" "$line" "$RESET"
+  printf "%s%s Installer%s\n" "$BLUE$BOLD" "$PRODUCT_NAME" "$RESET"
+  printf "%sNostalgia-first encrypted journal setup for macOS%s\n" "$BLUE" "$RESET"
+  printf "%s%s%s\n" "$BLUE$BOLD" "$line" "$RESET"
+  BANNER_PRINTED=1
+}
+
+print_about() {
+  cat <<EOF
+$PRODUCT_NAME Installer
+
+$PRODUCT_COPYRIGHT
+Contact: $PRODUCT_CONTACT
+Repository: $PRODUCT_REPO_URL
+
+This installer can:
+  - install/update stable prebuilt bundles
+  - build latest source from main
+  - run troubleshooting diagnostics
+  - repair PATH integration
+  - uninstall or factory reset
+EOF
+}
+
 usage() {
   cat <<'EOF'
 bsj installer
@@ -69,7 +105,7 @@ Usage:
   ./install.sh [--source|--prebuilt] [--prefix PATH] [--bin-dir PATH] [--doc-dir PATH] [--man-dir PATH]
                [--bash-completion-dir PATH] [--zsh-completion-dir PATH] [--fish-completion-dir PATH]
                [--repo OWNER/REPO] [--version TAG] [--archive PATH_OR_URL] [--skip-checksum]
-               [--uninstall|--factory-reset] [--yes]
+               [--uninstall|--factory-reset|--doctor|--repair-path|--about] [--yes]
   ./install.sh --help
 
 Modes:
@@ -89,6 +125,9 @@ Bootstrap options:
 Reset options:
   --uninstall         Remove bsj binaries/docs/completions. Keeps journal vault data.
   --factory-reset     Remove bsj install plus config/logs/keychain and local vault data.
+  --doctor            Run installer diagnostics and troubleshooting checks.
+  --repair-path       Add a bsj binary directory to shell startup PATH files.
+  --about             Print installer about/copyright info.
 
 Install location options:
   --prefix PATH   Install prefix for prebuilt installs or cargo --root for source installs
@@ -114,8 +153,10 @@ Environment overrides:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
-  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.16
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v0.1.17
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --doctor
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --repair-path
   ./install.sh --uninstall
   ./install.sh --factory-reset
 EOF
@@ -146,6 +187,22 @@ while [[ $# -gt 0 ]]; do
       ACTION="factory_reset"
       ACTION_EXPLICIT=1
       shift
+      ;;
+    --doctor)
+      [[ "$ACTION" == "install" ]] || die "Choose one action at a time (--doctor cannot be combined with uninstall/reset)."
+      ACTION="doctor"
+      ACTION_EXPLICIT=1
+      shift
+      ;;
+    --repair-path)
+      [[ "$ACTION" == "install" ]] || die "Choose one action at a time (--repair-path cannot be combined with uninstall/reset)."
+      ACTION="path_repair"
+      ACTION_EXPLICIT=1
+      shift
+      ;;
+    --about)
+      print_about
+      exit 0
       ;;
     --yes|-y)
       ASSUME_YES=1
@@ -298,28 +355,26 @@ maybe_prompt_action_menu() {
     return
   fi
 
-  if [[ -w /dev/tty ]]; then
-    cat > /dev/tty <<'EOF'
+  print_installer_banner
+  cat <<EOF
+$PRODUCT_COPYRIGHT
+Contact: $PRODUCT_CONTACT
 
-BlueScreen Journal Installer
-  1) Install / Update
-  2) Uninstall app files (keep journal data)
-  3) Factory reset (remove app + settings + local journal data)
+Choose what to do:
+  1) Install / Update (Recommended smart mode)
+  2) Install stable prebuilt release
+  3) Update from latest main source
+  4) Troubleshoot (doctor diagnostics)
+  5) Repair PATH integration
+  6) Uninstall app files (keep journal data)
+  7) Factory reset (remove app + settings + local journal data)
+  a) About installer
+  h) Help/options
   q) Quit
 EOF
-  else
-    cat <<'EOF'
-
-BlueScreen Journal Installer
-  1) Install / Update
-  2) Uninstall app files (keep journal data)
-  3) Factory reset (remove app + settings + local journal data)
-  q) Quit
-EOF
-  fi
 
   while true; do
-    read_line_interactive "Select an option [1-3,q]: " || die "Failed to read installer menu selection."
+    read_line_interactive "Select an option [1-7,a,h,q]: " || die "Failed to read installer menu selection."
     selection="$REPLY"
     normalized="$(printf "%s" "$selection" | tr '[:upper:]' '[:lower:]')"
     case "$normalized" in
@@ -328,21 +383,50 @@ EOF
         return
         ;;
       2)
-        ACTION="uninstall"
+        ACTION="install"
+        MODE="prebuilt"
         ACTION_EXPLICIT=1
         return
         ;;
       3)
+        ACTION="install"
+        MODE="source"
+        RELEASE_VERSION="latest"
+        ACTION_EXPLICIT=1
+        return
+        ;;
+      4)
+        ACTION="doctor"
+        ACTION_EXPLICIT=1
+        return
+        ;;
+      5)
+        ACTION="path_repair"
+        ACTION_EXPLICIT=1
+        return
+        ;;
+      6)
+        ACTION="uninstall"
+        ACTION_EXPLICIT=1
+        return
+        ;;
+      7)
         ACTION="factory_reset"
         ACTION_EXPLICIT=1
         return
+        ;;
+      a|about)
+        print_about
+        ;;
+      h|help)
+        usage
         ;;
       q|quit|exit)
         info "Installer canceled."
         exit 0
         ;;
       *)
-        warn "Please choose 1, 2, 3, or q."
+        warn "Please choose 1-7, a, h, or q."
         ;;
     esac
   done
@@ -654,6 +738,190 @@ EOF
   cat <<'EOF'
 You can now run the installer again for a clean first-run setup.
 EOF
+}
+
+doctor_row() {
+  local level="$1"
+  local label="$2"
+  local detail="$3"
+  printf "  %-8s %-24s %s\n" "$level" "$label" "$detail"
+}
+
+run_doctor() {
+  local failures warnings
+  local os_name arch_name shell_name mode_selected
+  local release_api_url release_asset
+  local tmp_root tmp_free_kb tmp_free_mb
+  local install_prefix install_bin_dir
+  local active_bsj candidate
+  failures=0
+  warnings=0
+
+  print_installer_banner
+  printf "\nInstaller Doctor\n"
+  printf "Checks your environment and surfaces likely install/update blockers.\n\n"
+
+  os_name="$(uname -s 2>/dev/null || printf "unknown")"
+  arch_name="$(uname -m 2>/dev/null || printf "unknown")"
+  if [[ "$os_name" == "Darwin" ]]; then
+    doctor_row "[OK]" "Platform" "$os_name ($arch_name)"
+  else
+    doctor_row "[FAIL]" "Platform" "Expected Darwin, got $os_name"
+    failures=$((failures + 1))
+  fi
+
+  shell_name="$(basename "${SHELL:-unknown}")"
+  doctor_row "[INFO]" "Shell" "$shell_name"
+
+  for candidate in curl tar shasum; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      doctor_row "[OK]" "Command $candidate" "$(command -v "$candidate")"
+    else
+      doctor_row "[FAIL]" "Command $candidate" "missing"
+      failures=$((failures + 1))
+    fi
+  done
+
+  for candidate in security xcode-select cargo rustc; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      doctor_row "[OK]" "Optional $candidate" "$(command -v "$candidate")"
+    else
+      doctor_row "[WARN]" "Optional $candidate" "not found"
+      warnings=$((warnings + 1))
+    fi
+  done
+
+  mode_selected="$(pick_mode)"
+  if [[ "$mode_selected" == "prebuilt" ]]; then
+    install_prefix="$(expand_home_path "${PREFIX:-$HOME/.local}")"
+    install_bin_dir="${BIN_DIR:-$install_prefix/bin}"
+  else
+    install_prefix="$(expand_home_path "${PREFIX:-${CARGO_HOME:-$HOME/.cargo}}")"
+    install_bin_dir="${BIN_DIR:-$install_prefix/bin}"
+  fi
+
+  if mkdir -p "$install_bin_dir" >/dev/null 2>&1; then
+    doctor_row "[OK]" "Install bin dir" "$install_bin_dir"
+  else
+    doctor_row "[FAIL]" "Install bin dir" "not writable: $install_bin_dir"
+    failures=$((failures + 1))
+  fi
+
+  tmp_root="${TMPDIR:-/tmp}"
+  tmp_free_kb="$(df -Pk "$tmp_root" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  if [[ "$tmp_free_kb" =~ ^[0-9]+$ ]]; then
+    tmp_free_mb=$((tmp_free_kb / 1024))
+    if [[ "$tmp_free_kb" -lt 524288 ]]; then
+      doctor_row "[FAIL]" "Free space ($tmp_root)" "${tmp_free_mb}MB (<512MB)"
+      failures=$((failures + 1))
+    elif [[ "$tmp_free_kb" -lt 1048576 ]]; then
+      doctor_row "[WARN]" "Free space ($tmp_root)" "${tmp_free_mb}MB (<1024MB)"
+      warnings=$((warnings + 1))
+    else
+      doctor_row "[OK]" "Free space ($tmp_root)" "${tmp_free_mb}MB"
+    fi
+  else
+    doctor_row "[WARN]" "Free space ($tmp_root)" "unknown"
+    warnings=$((warnings + 1))
+  fi
+
+  if command -v bsj >/dev/null 2>&1; then
+    active_bsj="$(command -v bsj)"
+    doctor_row "[OK]" "Active bsj on PATH" "$active_bsj"
+  else
+    doctor_row "[WARN]" "Active bsj on PATH" "not found"
+    warnings=$((warnings + 1))
+  fi
+
+  release_api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+  if command -v curl >/dev/null 2>&1; then
+    if curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error --max-time 12 --head "$release_api_url" >/dev/null 2>&1; then
+      doctor_row "[OK]" "GitHub API reachability" "$release_api_url"
+    else
+      doctor_row "[WARN]" "GitHub API reachability" "cannot reach $release_api_url"
+      warnings=$((warnings + 1))
+    fi
+  fi
+
+  release_asset="$(release_bundle_url)"
+  if command -v curl >/dev/null 2>&1; then
+    if curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error --max-time 12 --head "$release_asset" >/dev/null 2>&1; then
+      doctor_row "[OK]" "Release asset URL" "$release_asset"
+    else
+      doctor_row "[WARN]" "Release asset URL" "cannot reach $release_asset"
+      warnings=$((warnings + 1))
+    fi
+  fi
+
+  collect_data_targets
+  if [[ "${#DATA_TARGETS[@]}" -gt 0 ]]; then
+    doctor_row "[INFO]" "Known data paths" "${#DATA_TARGETS[@]} discovered"
+  fi
+
+  printf "\nTroubleshooting hints\n"
+  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v0.1.17\n"
+  printf "  - Latest main build: ./install.sh --source\n"
+  printf "  - PATH repair:       ./install.sh --repair-path\n"
+  printf "  - About:             ./install.sh --about\n"
+
+  printf "\nDoctor summary: %s failure(s), %s warning(s)\n" "$failures" "$warnings"
+  if [[ "$failures" -gt 0 ]]; then
+    warn "Doctor found blocking issues."
+    return 1
+  fi
+  info "Doctor found no blocking issues."
+}
+
+run_path_repair() {
+  local candidate_path candidate_dir resolved_prefix
+  candidate_path=""
+  candidate_dir=""
+
+  if command -v bsj >/dev/null 2>&1; then
+    candidate_path="$(command -v bsj)"
+    candidate_dir="$(dirname "$candidate_path")"
+  else
+    resolved_prefix="$(expand_home_path "${PREFIX:-$HOME/.local}")"
+    if [[ -n "$BIN_DIR" ]]; then
+      candidate_path="$(expand_home_path "$BIN_DIR")/bsj"
+      if [[ -x "$candidate_path" ]]; then
+        candidate_dir="$(dirname "$candidate_path")"
+      fi
+    fi
+    if [[ -z "$candidate_dir" ]]; then
+      candidate_path="$resolved_prefix/bin/bsj"
+      if [[ -x "$candidate_path" ]]; then
+        candidate_dir="$(dirname "$candidate_path")"
+      fi
+    fi
+    if [[ -z "$candidate_dir" ]]; then
+      candidate_path="${CARGO_HOME:-$HOME/.cargo}/bin/bsj"
+      if [[ -x "$candidate_path" ]]; then
+        candidate_dir="$(dirname "$candidate_path")"
+      fi
+    fi
+  fi
+
+  if [[ -z "$candidate_dir" ]]; then
+    resolved_prefix="$(expand_home_path "${PREFIX:-$HOME/.local}")"
+    candidate_dir="${BIN_DIR:-$resolved_prefix/bin}"
+    warn "No bsj binary found yet; adding expected install bin dir: $candidate_dir"
+  fi
+
+  print_installer_banner
+  info "Repairing PATH integration for $candidate_dir"
+  persist_path_update "$candidate_dir"
+  if [[ ":$PATH:" == *":$candidate_dir:"* ]]; then
+    info "Current shell already includes $candidate_dir."
+  else
+    printf "Open a new terminal window, or run now:\n  export PATH=\"%s:\$PATH\"\n" "$candidate_dir"
+  fi
+
+  if [[ -n "$candidate_path" && -x "$candidate_path" ]]; then
+    print_install_version_summary "$candidate_path"
+  else
+    warn "Install bsj first, then re-run --repair-path if needed."
+  fi
 }
 
 ensure_path_hint() {
@@ -1059,6 +1327,8 @@ Next steps:
   3. In the app, press Esc to open menus (FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP).
   4. Need key reminders? Press F1 for the keyboard cheat sheet.
   5. Optional CLI reference: man $final_man_dir/bsj.1
+  6. Troubleshoot install issues: ./install.sh --doctor
+  7. Repair PATH integration:   ./install.sh --repair-path
 EOF
 }
 
@@ -1122,12 +1392,18 @@ Next steps:
   3. In the app, press Esc to open menus (FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP).
   4. Need key reminders? Press F1 for the keyboard cheat sheet.
   5. Optional CLI reference: $bsj_bin --help
+  6. Troubleshoot install issues: ./install.sh --doctor
+  7. Repair PATH integration:   ./install.sh --repair-path
 EOF
 }
 
 maybe_prompt_action_menu
 
-if [[ "$ACTION" != "install" ]]; then
+if [[ -t 1 ]]; then
+  print_installer_banner
+fi
+
+if [[ "$ACTION" == "uninstall" || "$ACTION" == "factory_reset" ]]; then
   if [[ "$MODE" != "auto" ]]; then
     warn "--source/--prebuilt is ignored for uninstall modes."
   fi
@@ -1158,6 +1434,12 @@ case "$ACTION" in
     ;;
   factory_reset)
     run_factory_reset
+    ;;
+  doctor)
+    run_doctor
+    ;;
+  path_repair)
+    run_path_repair
     ;;
   *)
     die "Unsupported installer action"
