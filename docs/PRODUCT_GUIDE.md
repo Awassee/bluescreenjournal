@@ -4,6 +4,15 @@
 
 BlueScreen Journal is a local-first encrypted journal for people who want the focus of an old full-screen word processor without giving up modern safety features.
 
+In one sentence:
+bsj is a blue-screen writing appliance for macOS terminals that keeps journal content encrypted at rest while preserving a fast keyboard-only flow.
+
+Primary differentiators:
+
+- always-on writing surface with menu discoverability instead of hidden command complexity
+- append-only encrypted history rather than mutable plaintext files
+- operational safety surfaces (sync, verify, backups, doctor) inside the same TUI
+
 The product is built around four ideas:
 
 1. Write immediately, without hunting for files or forms.

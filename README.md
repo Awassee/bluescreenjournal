@@ -4,6 +4,7 @@
 [![License](https://img.shields.io/github/license/Awassee/bluescreenjournal?color=0f172a)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-0b1021)](docs/DATASHEET.md)
 [![Terminal](https://img.shields.io/badge/interface-Terminal.app%20%2B%20iTerm2-1d4ed8)](docs/PRODUCT_GUIDE.md)
+[![Docs](https://img.shields.io/badge/docs-start%20here-2563eb)](docs/START_HERE.md)
 
 BlueScreen Journal is an encrypted, local-first journaling app for macOS terminals.
 It is built for people who want the focused feel of an old DOS word processor, but with modern safety features: encrypted storage, append-only history, encrypted drafts, encrypted backups, and encrypted sync.
@@ -12,13 +13,23 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 
 ![BlueScreen Journal hero](docs/assets/bsj-hero.gif)
 
-Representative product renders of the current UI surface:
+## At a glance
 
-| Editor | Search |
+- write-first terminal experience with a consistent DOS-style workspace
+- encrypted vault, drafts, backups, and sync blobs
+- append-only revisions and integrity verification
+- menu-driven discoverability so new users are not blocked by key memorization
+- local-first design with optional folder/S3/WebDAV encrypted sync
+
+## Screenshots
+
+| Writing View | Search View |
 | --- | --- |
 | ![Editor view](docs/assets/bsj-editor.png) | ![Search view](docs/assets/bsj-search.png) |
-| Calendar | Index |
+| Full-screen editor with persistent menu and command strip. | Global search with filters and quick-open results. |
+| Calendar View | Index View |
 | ![Calendar view](docs/assets/bsj-calendar.png) | ![Index view](docs/assets/bsj-index.png) |
+| Month grid with saved-day highlights and fast date jump. | Real timeline with entry previews and conflict indicators. |
 
 ## Why bsj exists
 
@@ -47,6 +58,17 @@ It gives you:
 - sync model: encrypted folder sync, plus S3 and WebDAV backends
 - history model: append-only revisions plus encrypted per-date autosave drafts
 - search model: in-memory index after unlock, with no plaintext search index on disk
+
+## Documentation by task
+
+| Goal | Read this first |
+| --- | --- |
+| Install and get writing quickly | [README install section](#turnkey-install), [Quickstart](docs/QUICKSTART.md), [Setup Guide](docs/SETUP_GUIDE.md) |
+| Understand product capabilities | [Product Guide](docs/PRODUCT_GUIDE.md), [Datasheet](docs/DATASHEET.md), [Compare](docs/COMPARE.md) |
+| Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
+| Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
+| Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v0.1.17.md) |
 
 ## Turnkey install
 

@@ -1,52 +1,35 @@
 # Start Here
 
-If you are new to BlueScreen Journal, use this page to choose the right next document.
+Use this page as the docs control panel for BlueScreen Journal.
 
-## By goal
+## Fast paths
 
-- I want to install and be writing in a few minutes:
-  - `README.md`
-  - `docs/QUICKSTART.md`
-  - `docs/SETUP_GUIDE.md`
-- I want to understand the product before I install it:
-  - `docs/PRODUCT_GUIDE.md`
-  - `docs/DATASHEET.md`
-  - `docs/COMPARE.md`
-- I want to understand config, environment variables, and settings:
-  - `docs/SETTINGS_GUIDE.md`
-- I want to understand daily operations, privacy, and failure recovery:
-  - `docs/TROUBLESHOOTING.md`
-  - `docs/SYNC_GUIDE.md`
-  - `docs/BACKUP_RESTORE.md`
-  - `docs/TERMINAL_GUIDE.md`
-  - `docs/PRIVACY.md`
-  - `docs/MACRO_GUIDE.md`
-- I want to understand packaging, release bundles, and installer behavior:
-  - `docs/DISTRIBUTION.md`
-- I want to understand the project plan or contribute:
-  - `ROADMAP.md`
-  - `CONTRIBUTING.md`
-- I have a question or a problem:
-  - `docs/FAQ.md`
-  - `SUPPORT.md`
-  - `SECURITY.md`
-- I want to see what changed recently:
-  - `CHANGELOG.md`
-  - `docs/releases/`
+| I want to... | Start here | Then read |
+| --- | --- | --- |
+| Install and write in under 10 minutes | [README](../README.md) | [QUICKSTART.md](QUICKSTART.md), [SETUP_GUIDE.md](SETUP_GUIDE.md) |
+| Evaluate the product before installing | [PRODUCT_GUIDE.md](PRODUCT_GUIDE.md) | [DATASHEET.md](DATASHEET.md), [COMPARE.md](COMPARE.md) |
+| Troubleshoot installer or runtime issues | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | [TERMINAL_GUIDE.md](TERMINAL_GUIDE.md), [SUPPORT.md](../SUPPORT.md) |
+| Configure settings and behavior | [SETTINGS_GUIDE.md](SETTINGS_GUIDE.md) | [config.example.json](config.example.json) |
+| Operate sync/backup safely | [SYNC_GUIDE.md](SYNC_GUIDE.md) | [BACKUP_RESTORE.md](BACKUP_RESTORE.md), [PRIVACY.md](PRIVACY.md) |
+| Package or distribute releases | [DISTRIBUTION.md](DISTRIBUTION.md) | [docs/releases/](releases/), [CHANGELOG.md](../CHANGELOG.md) |
 
-## Best first steps
+## Visual tour
 
-1. Install with the one-line command from `README.md`
-2. Run `bsj`
-3. Complete the setup wizard
-4. Save one entry with `F2`
-5. Press `Esc`, then open `HELP -> First 2 Minutes`
-6. Open `SETUP -> Settings Summary` to confirm vault and sync paths
-7. Optional CLI docs: `bsj guide quickstart` and `bsj guide product`
+See live product images in the root README screenshot gallery:
 
-## Built-in guides
+- [README screenshots](../README.md#screenshots)
 
-The app can print the main operator docs directly:
+## Best first run sequence
+
+1. Install with the one-line command in [README](../README.md#turnkey-install).
+2. Run `bsj`.
+3. Complete the setup wizard (vault path, passphrase, optional epoch date).
+4. Type immediately and save with `F2`.
+5. Press `Esc` and open `HELP` for in-app guidance.
+
+## Built-in guide commands
+
+These are optional CLI mirrors of the docs:
 
 - `bsj guide docs`
 - `bsj guide quickstart`
