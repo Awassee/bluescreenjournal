@@ -32,6 +32,9 @@ for test_name in "${UX_TESTS[@]}"; do
   cargo test --all-targets "$test_name"
 done
 
+echo "==> QA gate: critical UX stability loop"
+./scripts/stability-gate.sh
+
 echo "==> QA gate: full tests"
 cargo test --all-targets
 

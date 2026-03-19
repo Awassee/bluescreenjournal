@@ -29,6 +29,11 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test --all-targets
 
+      - name: Stability gate
+        env:
+          BSJ_STABILITY_ITERATIONS: 3
+        run: ./scripts/stability-gate.sh
+
       - name: Build universal release bundle
         run: ./scripts/package-release.sh --universal
 

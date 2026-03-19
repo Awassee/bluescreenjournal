@@ -1540,6 +1540,7 @@ pub enum MenuAction {
     Backup,
     RestoreBackup,
     Dashboard,
+    JournalHealth,
     TodayBrief,
     WeekCompass,
     SyncCenter,
@@ -1636,6 +1637,7 @@ pub enum MenuAction {
     About,
     HelpTopics,
     ToggleKeychainMemory,
+    FirstRunTour,
     QuickStart,
     EditSetting(SettingField),
     Help,
@@ -2990,6 +2992,12 @@ impl App {
                     enabled: true,
                 },
                 MenuItem {
+                    label: "Journal Health".to_string(),
+                    detail: "SAFE".to_string(),
+                    action: MenuAction::JournalHealth,
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Today Brief".to_string(),
                     detail: "NOW".to_string(),
                     action: MenuAction::TodayBrief,
@@ -3179,6 +3187,12 @@ impl App {
                     label: "Quick Start".to_string(),
                     detail: "START".to_string(),
                     action: MenuAction::QuickStart,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "First-Run Tour".to_string(),
+                    detail: "2 MIN".to_string(),
+                    action: MenuAction::FirstRunTour,
                     enabled: true,
                 },
             ],
@@ -5810,7 +5824,7 @@ impl App {
             "The app autosaves encrypted drafts, but manual Save creates history.".to_string(),
             "F1 opens the key cheatsheet. HELP has first-run and operator guides.".to_string(),
         ];
-        self.open_info_overlay("First 2 Minutes", lines.join("\n"));
+        self.open_info_overlay("First-Run Tour", lines.join("\n"));
     }
 
     fn open_settings_summary_overlay(&mut self) {
@@ -7130,6 +7144,64 @@ impl App {
         self.open_info_overlay("Dashboard", output);
     }
 
+    fn open_journal_health_overlay(&mut self) {
+        let vault_state = if self.vault.is_some() {
+            "UNLOCKED"
+        } else {
+            "LOCKED"
+        };
+        let sync_target = self
+            .config
+            .sync_target_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "[unset]".to_string());
+        let integrity = self.integrity_status_label();
+        let save_state = self.save_status_label();
+        let (conflict_count, backup_count) = if let Some(vault) = &self.vault {
+            (
+                vault
+                    .list_conflicted_dates()
+                    .ok()
+                    .map(|dates| dates.len())
+                    .unwrap_or(0),
+                vault
+                    .list_backups()
+                    .ok()
+                    .map(|items| items.len())
+                    .unwrap_or(0),
+            )
+        } else {
+            (0, 0)
+        };
+
+        let output = [
+            "BlueScreen Journal Health".to_string(),
+            String::new(),
+            format!("Vault       : {vault_state}"),
+            format!("Date        : {}", self.selected_date.format("%Y-%m-%d")),
+            format!("Entry No.   : {}", self.entry_number_label()),
+            format!("Save state  : {save_state}"),
+            format!(
+                "Integrity   : {}",
+                if integrity.is_empty() {
+                    "n/a"
+                } else {
+                    &integrity
+                }
+            ),
+            format!("Backups     : {backup_count}"),
+            format!("Conflicts   : {conflict_count}"),
+            format!("Sync target : {sync_target}"),
+            String::new(),
+            "Use TOOLS -> Verify Integrity for chain checks and FILE -> Backup Snapshot for manual checkpoints."
+                .to_string(),
+        ]
+        .join("\n");
+
+        self.open_info_overlay("Journal Health", output);
+    }
+
     fn open_integrity_details_overlay(&mut self) {
         let Some(vault) = &self.vault else {
             self.flash_status("LOCKED.");
@@ -7289,6 +7361,7 @@ impl App {
             MenuAction::Backup => self.create_backup_now(),
             MenuAction::RestoreBackup => self.open_restore_prompt(),
             MenuAction::Dashboard => self.open_dashboard_overlay(),
+            MenuAction::JournalHealth => self.open_journal_health_overlay(),
             MenuAction::TodayBrief => self.open_today_brief_overlay(),
             MenuAction::WeekCompass => self.open_week_compass_overlay(),
             MenuAction::SyncCenter => self.open_sync_center_overlay(),
@@ -7537,6 +7610,7 @@ impl App {
             MenuAction::About => self.open_about_overlay(),
             MenuAction::HelpTopics => self.open_help_topics_overlay(),
             MenuAction::ToggleKeychainMemory => self.toggle_keychain_memory(),
+            MenuAction::FirstRunTour => self.open_first_run_guide_overlay(),
             MenuAction::QuickStart => self.open_quickstart_overlay(),
             MenuAction::EditSetting(field) => self.open_setting_prompt(field),
             MenuAction::Help => self.overlay = Some(Overlay::Help),
@@ -12283,9 +12357,29 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"Status Dashboard".to_string()));
+        assert!(labels.contains(&"Journal Health".to_string()));
         assert!(labels.contains(&"Today Brief".to_string()));
         assert!(labels.contains(&"Week Compass".to_string()));
         assert!(labels.contains(&"SYSOP Center".to_string()));
+    }
+
+    #[test]
+    fn journal_health_menu_action_opens_info_overlay() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::JournalHealth, 20);
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "Journal Health");
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("Vault       : LOCKED"));
+                assert!(rendered.contains("Save state"));
+                assert!(rendered.contains("Sync target"));
+            }
+            other => panic!("expected journal health overlay, got {other:?}"),
+        }
     }
 
     #[test]
@@ -13200,6 +13294,25 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"About BlueScreen Journal".to_string()));
+        assert!(labels.contains(&"First-Run Tour".to_string()));
+    }
+
+    #[test]
+    fn first_run_tour_menu_action_opens_info_overlay() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::FirstRunTour, 20);
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "First-Run Tour");
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("WELCOME TO BLUESCREEN JOURNAL"));
+                assert!(rendered.contains("Type **save**"));
+            }
+            other => panic!("expected first-run tour overlay, got {other:?}"),
+        }
     }
 
     #[test]

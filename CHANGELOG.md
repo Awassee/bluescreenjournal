@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.2.0
+
+- added `HELP -> First-Run Tour` so onboarding is reachable from menus at any time
+- added `TOOLS -> Journal Health` with lock/save/integrity/backup/conflict/sync visibility
+- added `scripts/stability-gate.sh` and integrated it into QA + release automation
+- updated stable docs/install references and release notes to `v1.2.0`
+
 ## v1.1.2
 
 - polished installer completion output with a clearer first-run flow and menu-first guidance

@@ -15,8 +15,8 @@ Use this page as the docs control panel for BlueScreen Journal.
 
 ## Latest release
 
-- current stable: [`v1.1.2`](https://github.com/Awassee/bluescreenjournal/releases/tag/v1.1.2)
-- current release notes: [docs/releases/v1.1.2.md](releases/v1.1.2.md)
+- current stable: [`v1.2.0`](https://github.com/Awassee/bluescreenjournal/releases/tag/v1.2.0)
+- current release notes: [docs/releases/v1.2.0.md](releases/v1.2.0.md)
 - full history: [docs/releases/](releases/)
 
 ## Visual tour
