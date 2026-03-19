@@ -1647,6 +1647,7 @@ pub struct App {
     pending_sync_request: Option<SyncRequest>,
     reveal_codes: bool,
     last_viewport_height: usize,
+    last_viewport_width: usize,
     last_autosave_check: Instant,
     session_started_at: Instant,
     recent_dates: Vec<NaiveDate>,
@@ -1723,6 +1724,7 @@ impl App {
             pending_sync_request: None,
             reveal_codes: false,
             last_viewport_height: 23,
+            last_viewport_width: 80,
             last_autosave_check: Instant::now(),
             session_started_at: Instant::now(),
             recent_dates: Vec::new(),
@@ -2640,12 +2642,24 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     pub fn handle_event(&mut self, event: Event, viewport_height: usize) {
+        self.handle_event_with_viewport(event, viewport_height, self.last_viewport_width);
+    }
+
+    pub fn handle_event_with_viewport(
+        &mut self,
+        event: Event,
+        viewport_height: usize,
+        viewport_width: usize,
+    ) {
         self.last_viewport_height = viewport_height.max(1);
+        self.last_viewport_width = viewport_width.max(1);
         match event {
             Event::Key(key) => self.handle_key(key, viewport_height),
             Event::Resize(width, height) => {
                 log::debug!("terminal resized to {}x{}", width, height);
+                self.last_viewport_width = width.max(1) as usize;
                 self.ensure_cursor_visible(viewport_height);
             }
             _ => {}
@@ -2788,6 +2802,7 @@ impl App {
         }
 
         if mutated {
+            self.buffer.wrap_current_line(self.last_viewport_width);
             self.dirty = true;
             self.refresh_document_stats();
             self.refresh_find_matches();
@@ -7251,6 +7266,57 @@ mod tests {
         let mut app = App::new();
         app.handle_event(Event::Resize(80, 25), 23);
         assert_eq!(app.scroll_row(), 0);
+    }
+
+    #[test]
+    fn typing_wraps_when_line_exceeds_viewport_width() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        for _ in 0..11 {
+            app.handle_event_with_viewport(
+                Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty())),
+                20,
+                10,
+            );
+        }
+
+        assert_eq!(app.buffer.to_text(), "aaaaaaaaaa\na");
+        assert_eq!(app.buffer.cursor(), (1, 1));
+    }
+
+    #[test]
+    fn typing_wraps_at_word_boundary_in_editor_flow() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        for ch in "hello world".chars() {
+            app.handle_event_with_viewport(
+                Event::Key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty())),
+                20,
+                10,
+            );
+        }
+
+        assert_eq!(app.buffer.to_text(), "hello \nworld");
+        assert_eq!(app.buffer.cursor(), (1, 5));
+    }
+
+    #[test]
+    fn wrapped_line_reflows_after_backspace_merge() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.buffer = TextBuffer::from_text("12345\n6789");
+        app.buffer.set_cursor(1, 0);
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty())),
+            20,
+            6,
+        );
+
+        assert_eq!(app.buffer.to_text(), "123456\n789");
+        assert_eq!(app.buffer.cursor(), (0, 5));
     }
 
     #[test]

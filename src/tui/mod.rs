@@ -69,10 +69,11 @@ fn run_loop(
         let area = terminal.size()?;
         let screen = workspace_rect(Rect::new(0, 0, area.width, area.height));
         let viewport_height = app.editor_viewport_height(screen.height.saturating_sub(3) as usize);
+        let viewport_width = screen.width.max(1) as usize;
 
         if event::poll(poll_timeout)? {
             let ev = event::read()?;
-            app.handle_event(ev, viewport_height);
+            app.handle_event_with_viewport(ev, viewport_height, viewport_width);
         } else {
             app.tick();
         }

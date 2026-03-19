@@ -102,6 +102,43 @@ impl TextBuffer {
         }
     }
 
+    pub fn wrap_current_line(&mut self, max_cols: usize) {
+        if max_cols == 0 || self.cursor_row >= self.lines.len() {
+            return;
+        }
+
+        let row = self.cursor_row;
+        let original_line = self.lines.remove(row);
+        let line_len = line_len_chars(&original_line);
+        if line_len <= max_cols {
+            self.lines.insert(row, original_line);
+            return;
+        }
+
+        let cursor_col = self.cursor_col.min(line_len);
+        let wrapped = wrap_line_to_width(original_line, max_cols);
+        let mut remaining_col = cursor_col;
+        let mut new_cursor_row = row;
+        let mut new_cursor_col = 0usize;
+
+        for (idx, segment) in wrapped.iter().enumerate() {
+            let segment_len = line_len_chars(segment);
+            if remaining_col <= segment_len {
+                new_cursor_row = row + idx;
+                new_cursor_col = remaining_col;
+                break;
+            }
+            remaining_col -= segment_len;
+        }
+
+        for (offset, segment) in wrapped.into_iter().enumerate() {
+            self.lines.insert(row + offset, segment);
+        }
+
+        self.cursor_row = new_cursor_row;
+        self.cursor_col = new_cursor_col;
+    }
+
     pub fn insert_newline(&mut self) {
         let line = &mut self.lines[self.cursor_row];
         let idx = char_to_byte_idx(line, self.cursor_col);
@@ -411,6 +448,38 @@ fn char_to_byte_idx(input: &str, col: usize) -> usize {
         .unwrap_or(input.len())
 }
 
+fn wrap_line_to_width(line: String, max_cols: usize) -> Vec<String> {
+    if max_cols == 0 {
+        return vec![line];
+    }
+
+    let mut wrapped = Vec::new();
+    let mut current = line;
+    while line_len_chars(&current) > max_cols {
+        let split_col = wrap_split_col(&current, max_cols).max(1);
+        let split_byte = char_to_byte_idx(&current, split_col);
+        let right = current.split_off(split_byte);
+        wrapped.push(current);
+        current = right;
+    }
+    wrapped.push(current);
+    wrapped
+}
+
+fn wrap_split_col(line: &str, max_cols: usize) -> usize {
+    let limit = max_cols.min(line_len_chars(line));
+    let mut last_whitespace = None;
+    for (idx, ch) in line.chars().take(limit).enumerate() {
+        if ch.is_whitespace() {
+            last_whitespace = Some(idx);
+        }
+    }
+    if let Some(idx) = last_whitespace {
+        return idx + 1;
+    }
+    limit
+}
+
 #[cfg(test)]
 mod tests {
     use super::{MatchPos, TextBuffer};
@@ -600,5 +669,32 @@ mod tests {
         assert_eq!(buf.cursor(), (2, 2));
         buf.move_to_top();
         assert_eq!(buf.cursor(), (0, 2));
+    }
+
+    #[test]
+    fn wrap_current_line_splits_long_word() {
+        let mut buf = TextBuffer::from_text("abcdefghij");
+        buf.set_cursor(0, 10);
+        buf.wrap_current_line(6);
+        assert_eq!(buf.to_text(), "abcdef\nghij");
+        assert_eq!(buf.cursor(), (1, 4));
+    }
+
+    #[test]
+    fn wrap_current_line_prefers_whitespace_boundary() {
+        let mut buf = TextBuffer::from_text("hello world");
+        buf.set_cursor(0, 11);
+        buf.wrap_current_line(10);
+        assert_eq!(buf.to_text(), "hello \nworld");
+        assert_eq!(buf.cursor(), (1, 5));
+    }
+
+    #[test]
+    fn wrap_current_line_keeps_cursor_within_wrapped_segment() {
+        let mut buf = TextBuffer::from_text("alpha beta gamma");
+        buf.set_cursor(0, 7);
+        buf.wrap_current_line(8);
+        assert_eq!(buf.to_text(), "alpha \nbeta \ngamma");
+        assert_eq!(buf.cursor(), (1, 1));
     }
 }
