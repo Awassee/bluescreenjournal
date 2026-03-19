@@ -74,7 +74,7 @@ Actual paths on this Mac\n\
 
 pub fn render_docs_hub() -> String {
     format!(
-        "BlueScreen Journal Docs Hub\n\n{}\n",
+        "BlueScreen Journal Docs Hub\n\n{}\n\nQuick links:\n- docs/QUICKSTART.md\n- bsj guide quickstart\n",
         DOCS_HUB_BODY.trim_end()
     )
 }

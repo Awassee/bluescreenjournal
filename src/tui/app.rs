@@ -21,6 +21,8 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     env,
+    fs::File,
+    io::Read,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
@@ -1635,6 +1637,12 @@ impl From<BufferStats> for DocumentStats {
     }
 }
 
+#[derive(Debug)]
+enum SoundtrackRuntime {
+    Afplay(Child),
+    QuickTimeMidi { document_id: i64 },
+}
+
 pub struct App {
     config: AppConfig,
     buffer: TextBuffer,
@@ -1674,7 +1682,7 @@ pub struct App {
     search_scope_to: String,
     document_stats: DocumentStats,
     menu_coach_shown: bool,
-    soundtrack_child: Option<Child>,
+    soundtrack_runtime: Option<SoundtrackRuntime>,
     soundtrack_loop_enabled: bool,
 }
 
@@ -1755,7 +1763,7 @@ impl App {
                 chars: 0,
             }),
             menu_coach_shown: false,
-            soundtrack_child: None,
+            soundtrack_runtime: None,
             soundtrack_loop_enabled: false,
         };
         app.try_keychain_auto_unlock();
@@ -2662,7 +2670,7 @@ impl App {
     pub fn tick(&mut self) {
         self.reap_soundtrack_process();
         if self.soundtrack_loop_enabled
-            && self.soundtrack_child.is_none()
+            && self.soundtrack_runtime.is_none()
             && let Err(error) = self.start_soundtrack_playback()
         {
             log::warn!("soundtrack restart failed: {error}");
@@ -5649,32 +5657,51 @@ impl App {
 
     fn start_soundtrack_playback(&mut self) -> Result<(), String> {
         self.reap_soundtrack_process();
-        if self.soundtrack_child.is_some() {
+        if self.soundtrack_runtime.is_some() {
             return Ok(());
         }
         let source = self.soundtrack_source_for_playback()?;
+        if soundtrack_source_is_midi(Path::new(&source)) {
+            let document_id = start_quicktime_midi(&source)?;
+            self.soundtrack_runtime = Some(SoundtrackRuntime::QuickTimeMidi { document_id });
+            return Ok(());
+        }
+
         let child = Command::new("afplay")
             .arg(&source)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .map_err(|error| format!("SOUNDTRACK START FAILED: {error}"))?;
-        self.soundtrack_child = Some(child);
+        self.soundtrack_runtime = Some(SoundtrackRuntime::Afplay(child));
         Ok(())
     }
 
     fn stop_soundtrack_playback(&mut self) {
-        if let Some(mut child) = self.soundtrack_child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(runtime) = self.soundtrack_runtime.take() {
+            match runtime {
+                SoundtrackRuntime::Afplay(mut child) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                SoundtrackRuntime::QuickTimeMidi { document_id } => {
+                    if let Err(error) = stop_quicktime_midi(document_id) {
+                        log::warn!("failed to stop QuickTime soundtrack: {error}");
+                    }
+                }
+            }
         }
     }
 
     fn reap_soundtrack_process(&mut self) {
-        if let Some(child) = &mut self.soundtrack_child
-            && let Ok(Some(_)) = child.try_wait()
+        let ended = if let Some(SoundtrackRuntime::Afplay(child)) = self.soundtrack_runtime.as_mut()
         {
-            self.soundtrack_child = None;
+            matches!(child.try_wait(), Ok(Some(_)))
+        } else {
+            false
+        };
+        if ended {
+            self.soundtrack_runtime = None;
         }
     }
 
@@ -7018,6 +7045,100 @@ fn soundtrack_cache_extension(url: &str) -> String {
     }
 }
 
+fn soundtrack_source_is_midi(path: &Path) -> bool {
+    if path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "mid" | "midi" | "kar" | "rmi"
+            )
+        })
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let mut header = [0_u8; 4];
+    File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .map(|_| header == *b"MThd")
+        .unwrap_or(false)
+}
+
+fn start_quicktime_midi(source: &str) -> Result<i64, String> {
+    let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg("tell application \"QuickTime Player\"")
+        .arg("-e")
+        .arg(format!(
+            "set soundtrackDoc to open POSIX file \"{escaped}\""
+        ))
+        .arg("-e")
+        .arg("try")
+        .arg("-e")
+        .arg("set looping of soundtrackDoc to true")
+        .arg("-e")
+        .arg("end try")
+        .arg("-e")
+        .arg("play soundtrackDoc")
+        .arg("-e")
+        .arg("return (id of soundtrackDoc) as text")
+        .arg("-e")
+        .arg("end tell")
+        .output()
+        .map_err(|error| format!("SOUNDTRACK START FAILED: {error}"))?;
+
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if detail.is_empty() {
+            return Err(
+                "SOUNDTRACK START FAILED: QuickTime could not play this MIDI file.".to_string(),
+            );
+        }
+        return Err(format!("SOUNDTRACK START FAILED: {detail}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| "SOUNDTRACK START FAILED: QuickTime did not return document id.".to_string())
+}
+
+fn stop_quicktime_midi(document_id: i64) -> Result<(), String> {
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg("tell application \"QuickTime Player\"")
+        .arg("-e")
+        .arg(format!("if exists (document id {document_id}) then"))
+        .arg("-e")
+        .arg(format!("set soundtrackDoc to document id {document_id}"))
+        .arg("-e")
+        .arg("stop soundtrackDoc")
+        .arg("-e")
+        .arg("close soundtrackDoc saving no")
+        .arg("-e")
+        .arg("end if")
+        .arg("-e")
+        .arg("end tell")
+        .output()
+        .map_err(|error| format!("SOUNDTRACK STOP FAILED: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if detail.is_empty() {
+        Err("SOUNDTRACK STOP FAILED.".to_string())
+    } else {
+        Err(format!("SOUNDTRACK STOP FAILED: {detail}"))
+    }
+}
+
 fn default_export_path(date: NaiveDate, format: ExportFormatUi) -> PathBuf {
     let base = dirs::desktop_dir()
         .or_else(dirs::document_dir)
@@ -7537,7 +7658,7 @@ mod tests {
         SearchJump, SearchOverlay, SettingField, SettingPrompt, SetupWizard, SyncPhase,
         SyncRequest, SyncStatusOverlay, default_export_path, format_reveal_codes,
         macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
-        soundtrack_cache_extension, soundtrack_cache_path,
+        soundtrack_cache_extension, soundtrack_cache_path, soundtrack_source_is_midi,
     };
     use crate::{
         config::RecentExportInfo,
@@ -8985,6 +9106,29 @@ mod tests {
         assert_eq!(first, second);
         assert_ne!(first, other);
         assert_eq!(first.parent(), Some(cache_dir));
+    }
+
+    #[test]
+    fn soundtrack_source_is_midi_by_extension() {
+        assert!(soundtrack_source_is_midi(Path::new("/tmp/theme.mid")));
+        assert!(soundtrack_source_is_midi(Path::new("/tmp/theme.MIDI")));
+        assert!(!soundtrack_source_is_midi(Path::new("/tmp/theme.mp3")));
+    }
+
+    #[test]
+    fn soundtrack_source_is_midi_by_magic_header() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("themeblob");
+        std::fs::write(&path, b"MThd\x00\x00\x00\x06").expect("write midi header");
+        assert!(soundtrack_source_is_midi(&path));
+    }
+
+    #[test]
+    fn soundtrack_source_non_midi_blob_returns_false() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("audioblob");
+        std::fs::write(&path, b"RIFF....WAVEfmt ").expect("write wave header");
+        assert!(!soundtrack_source_is_midi(&path));
     }
 
     #[test]
