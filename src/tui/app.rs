@@ -34,6 +34,8 @@ const AUTOSAVE_INTERVAL: Duration = Duration::from_millis(2500);
 const INDEX_PREVIEW_CHARS: usize = 54;
 const TAB_INSERT_TEXT: &str = "     ";
 const SOUNDTRACK_CACHE_DIR_NAME: &str = "bsj-soundtrack-cache";
+const QUICK_SAVE_LINE_COMMAND: &str = "**save**";
+const ENTRY_MARKER_PREFIX: &str = "[ENTRY ";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Overlay {
@@ -1360,6 +1362,7 @@ impl RestorePrompt {
 pub enum MenuAction {
     CommandPalette,
     Save,
+    QuickSaveNext,
     Export,
     QuickExportText,
     QuickExportMarkdown,
@@ -2075,10 +2078,11 @@ impl App {
         self.config.remember_passphrase_in_keychain
     }
 
-    pub fn empty_state_lines(&self) -> [&'static str; 7] {
+    pub fn empty_state_lines(&self) -> [&'static str; 8] {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
             "F2 saves a revision. Header changes to 'REVISION SAVED <time>'.",
+            "Type **save** on its own line, then Enter for quick save + next entry.",
             "Alt+Right next day  Alt+N next blank new entry",
             "Open older entries through F7 Index or F3 Calendar.",
             "Esc opens menus  Alt+F/E/S/G/T/U/H opens a menu directly",
@@ -2111,6 +2115,12 @@ impl App {
                     label: "Save Entry".to_string(),
                     detail: "F2".to_string(),
                     action: MenuAction::Save,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Quick Save + Next".to_string(),
+                    detail: "**SAVE**".to_string(),
+                    action: MenuAction::QuickSaveNext,
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
@@ -2850,6 +2860,10 @@ impl App {
                 mutated = true;
             }
             KeyCode::Enter => {
+                if self.try_quick_save_line_command(viewport_height) {
+                    self.ensure_cursor_visible(viewport_height);
+                    return;
+                }
                 self.buffer.insert_newline();
                 mutated = true;
             }
@@ -4513,11 +4527,13 @@ impl App {
             "First 2 minutes:".to_string(),
             "1. Type immediately into today's entry.".to_string(),
             "2. Save with F2 or FILE -> Save Entry.".to_string(),
-            "3. Press Esc to open menus if you don't remember keys.".to_string(),
-            "4. Press Alt+N to jump to the next blank new-entry date.".to_string(),
-            "5. Use GO -> Open Calendar or Index Timeline for older entries.".to_string(),
-            "6. Use SEARCH -> Search Vault to find older entries fast.".to_string(),
-            "7. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
+            "3. Type **save** on its own line, then Enter for quick save + next same-day entry."
+                .to_string(),
+            "4. Press Esc to open menus if you don't remember keys.".to_string(),
+            "5. Press Alt+N to jump to the next blank new-entry date.".to_string(),
+            "6. Use GO -> Open Calendar or Index Timeline for older entries.".to_string(),
+            "7. Use SEARCH -> Search Vault to find older entries fast.".to_string(),
+            "8. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
             String::new(),
             "The app autosaves encrypted drafts, but manual Save creates history.".to_string(),
             "F1 opens the key cheatsheet. HELP has first-run and operator guides.".to_string(),
@@ -5321,6 +5337,9 @@ impl App {
         match action {
             MenuAction::CommandPalette => self.open_command_palette(),
             MenuAction::Save => self.save_current_date(),
+            MenuAction::QuickSaveNext => {
+                self.quick_save_and_prepare_next_entry(viewport_height);
+            }
             MenuAction::Export => self.open_export_prompt(),
             MenuAction::QuickExportText => self.quick_export_current(ExportFormatUi::PlainText),
             MenuAction::QuickExportMarkdown => self.quick_export_current(ExportFormatUi::Markdown),
@@ -6352,9 +6371,13 @@ impl App {
     }
 
     fn save_current_date(&mut self) {
+        let _ = self.save_current_date_result();
+    }
+
+    fn save_current_date_result(&mut self) -> bool {
         let Some(vault) = &self.vault else {
             self.flash_status("LOCKED.");
-            return;
+            return false;
         };
         let body = self.buffer.to_text();
         let save_result = if let Some(merge_context) = &self.merge_context {
@@ -6389,12 +6412,89 @@ impl App {
                 self.last_save_kind = Some(SaveKind::Saved);
                 self.last_save_time = Some(saved_at);
                 self.flash_status(&format!("REVISION SAVED {}.", saved_at.format("%H:%M:%S")));
+                true
             }
             Err(_) => {
                 log::warn!("manual save failed");
-                self.flash_status("SAVE FAILED.")
+                self.flash_status("SAVE FAILED.");
+                false
             }
         }
+    }
+
+    fn try_quick_save_line_command(&mut self, viewport_height: usize) -> bool {
+        let row = self.buffer.cursor_row();
+        let Some(line) = self.buffer.line(row) else {
+            return false;
+        };
+        if !is_quick_save_command_line(line) {
+            return false;
+        }
+
+        self.buffer.delete_current_line();
+        self.refresh_document_stats();
+        self.refresh_find_matches();
+
+        if self.quick_save_and_prepare_next_entry(viewport_height) {
+            self.flash_status("QUICK SAVED. NEXT ENTRY READY.");
+        }
+        true
+    }
+
+    fn quick_save_and_prepare_next_entry(&mut self, viewport_height: usize) -> bool {
+        if !self.save_current_date_result() {
+            return false;
+        }
+        self.prepare_next_same_day_entry(viewport_height);
+        true
+    }
+
+    fn prepare_next_same_day_entry(&mut self, viewport_height: usize) {
+        let next_slot = self.next_same_day_entry_slot();
+        let marker = format!("[ENTRY {:02} {}]", next_slot, self.current_time_string());
+
+        self.buffer.move_to_bottom();
+        self.buffer.move_to_line_end();
+        if self
+            .buffer
+            .line(self.buffer.cursor_row())
+            .map(|line| !line.trim().is_empty())
+            .unwrap_or(false)
+        {
+            self.buffer.insert_newline();
+        }
+        if self.buffer.cursor_row() > 0
+            && self
+                .buffer
+                .line(self.buffer.cursor_row() - 1)
+                .map(|line| !line.trim().is_empty())
+                .unwrap_or(false)
+        {
+            self.buffer.insert_newline();
+        }
+
+        self.buffer.insert_text(&marker);
+        self.buffer.insert_newline();
+        self.wrap_cursor_line();
+        self.dirty = true;
+        self.refresh_document_stats();
+        self.refresh_find_matches();
+        self.ensure_cursor_visible(viewport_height);
+    }
+
+    fn next_same_day_entry_slot(&self) -> usize {
+        let mut slot = 1usize;
+        for row in 0..self.buffer.line_count() {
+            if self
+                .buffer
+                .line(row)
+                .map(|line| line.trim_start().starts_with(ENTRY_MARKER_PREFIX))
+                .unwrap_or(false)
+            {
+                slot += 1;
+            }
+        }
+        slot
     }
 
     fn autosave_current_date(&mut self) {
@@ -6964,6 +7064,10 @@ impl App {
 fn normalize_overlay_text(input: &str) -> Option<String> {
     let trimmed = input.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn is_quick_save_command_line(line: &str) -> bool {
+    line.trim().eq_ignore_ascii_case(QUICK_SAVE_LINE_COMMAND)
 }
 
 fn sync_target_label_s3() -> Result<String, String> {
@@ -8594,9 +8698,65 @@ mod tests {
             .map(|item| item.label)
             .collect::<Vec<_>>();
 
+        assert!(labels.contains(&"Quick Save + Next".to_string()));
         assert!(labels.contains(&"Export Current".to_string()));
         assert!(labels.contains(&"Backup History".to_string()));
         assert!(labels.contains(&"Backup Cleanup Preview".to_string()));
+    }
+
+    #[test]
+    fn quick_save_line_command_creates_revision_and_prepares_next_same_day_entry() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        let viewport_height = 20;
+        let viewport_width = 80;
+
+        type_editor_text(
+            &mut app,
+            "First entry of the day\n**save**",
+            viewport_height,
+            viewport_width,
+        );
+        send_editor_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
+
+        assert_eq!(app.status_text(), Some("QUICK SAVED. NEXT ENTRY READY."));
+        assert!(!app.buffer.to_text().contains("**save**"));
+        assert!(app.buffer.to_text().contains("[ENTRY 01 "));
+        assert!(app.dirty);
+
+        let saved = app
+            .vault
+            .as_ref()
+            .expect("vault")
+            .load_date_state(date)
+            .expect("load")
+            .revision_text
+            .expect("saved revision");
+        assert!(saved.contains("First entry of the day"));
+        assert!(!saved.contains("**save**"));
+        assert!(!saved.contains("[ENTRY "));
+    }
+
+    #[test]
+    fn plain_save_word_does_not_trigger_quick_save() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        app.buffer = TextBuffer::from_text("save");
+        app.buffer.set_cursor(0, 4);
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())),
+            20,
+        );
+
+        assert_eq!(app.buffer.to_text(), "save\n");
     }
 
     #[test]
@@ -9477,7 +9637,8 @@ mod tests {
         assert!(rendered.contains(env!("CARGO_PKG_VERSION")));
         assert!(rendered.contains("Awassee LLC and Sean Heiney"));
         assert!(rendered.contains("sean@sean.net"));
-        assert!(rendered.contains("Enter/Esc/F1 closes."));
+        assert!(rendered.contains("Enter/Esc/F1"));
+        assert!(rendered.contains("closes."));
         assert!(rendered.contains("Ctrl+O/E/W/Y/T/U/L menus."));
     }
 

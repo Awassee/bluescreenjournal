@@ -68,7 +68,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.0.0.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.0.1.md) |
 
 ## Turnkey install
 
@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.0.0
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.0.1
 ```
 
 Install from source instead of the prebuilt release:
@@ -352,7 +352,7 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v1.0.0.md)
+- [Release Notes](docs/releases/v1.0.1.md)
 - [Setup Guide](docs/SETUP_GUIDE.md)
 - [Settings Guide](docs/SETTINGS_GUIDE.md)
 - [Distribution Guide](docs/DISTRIBUTION.md)

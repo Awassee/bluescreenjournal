@@ -456,14 +456,14 @@ fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
     }
 
     let legend = if width >= 130 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H menu | Alt+Right next day | Alt+N next new entry | Alt+M theme | F2 Save | F10 Quit".to_string()
+        "Esc Menus | Alt+F/E/S/G/T/U/H menu | Alt+Right next day | Alt+N next new entry | **save** Enter quick-next | F2 Save | F10 Quit".to_string()
     } else if width >= 108 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H | Alt+Right next day | Alt+N new | Alt+M theme | F2 Save | F10 Quit"
+        "Esc Menus | Alt+F/E/S/G/T/U/H | Alt+Right next day | Alt+N new | **save** Enter quick-next | F2 Save | F10 Quit"
             .to_string()
     } else if width >= 90 {
-        "Esc Menus | Alt+F/E/S/G/T/U/H | F1 Help | F2 Save | F10 Quit".to_string()
+        "Esc Menus | Alt+F/E/S/G/T/U/H | **save** Enter quick-next | F2 Save | F10 Quit".to_string()
     } else {
-        "Esc Menus | Alt+Right day | Alt+N new | F2 Save | F10 Quit".to_string()
+        "Esc Menus | Alt+N new | **save** Enter quick-next | F2 Save".to_string()
     };
 
     if compact_mode && width >= 100 {
@@ -507,7 +507,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
     let rect = match overlay {
         Overlay::SetupWizard(_) => popup_rect(body_area, 76, 10),
         Overlay::UnlockPrompt { .. } => popup_rect(body_area, 68, 8),
-        Overlay::Help => popup_rect(body_area, 72, 21),
+        Overlay::Help => popup_rect(body_area, 72, 22),
         Overlay::DatePicker(_) => popup_rect(body_area, 38, 13),
         Overlay::FindPrompt { .. } => popup_rect(body_area, 54, 6),
         Overlay::ClosingPrompt { .. } => popup_rect(body_area, 58, 5),
@@ -718,11 +718,11 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(version_line),
         Line::from("Esc menus. Alt+F/E/S/G/T/U/H menu. Ctrl+O/E/W/Y/T/U/L menus."),
         Line::from("Alt+Right next day. Alt+N next blank new entry."),
+        Line::from("Type **save** + Enter for quick-save to the next same-day entry."),
         Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
         Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),
         Line::from("Ctrl+S Save  Ctrl+F Find"),
-        Line::from("Older entries: use F7 Index or F3 Calendar."),
         Line::from("FILE   Save, export, backup, restore, lock, quit"),
         Line::from("EDIT   Lines, stamps, metadata, favorite, reveal, typewriter"),
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.1
+
+- added quick-save flow for rapid same-day journaling: type `**save**` on its own line and press `Enter` to save and continue into the next entry block
+- added `FILE -> Quick Save + Next` menu action for the same workflow
+- added same-day entry scaffold markers (`[ENTRY nn hh:mm]`) so multiple entries per day remain readable in one day view
+- updated footer/help/first-run UI hints to make the quick-save workflow discoverable
+- expanded TUI tests to cover quick-save command behavior and menu visibility
+
 ## v1.0.0
 
 - declared the first stable `1.0.0` release across packaging, docs, and installer flows
