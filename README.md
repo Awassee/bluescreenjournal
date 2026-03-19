@@ -85,11 +85,13 @@ Uninstall options:
 
 What the installer does:
 
-- downloads the latest public release bundle automatically when needed
+- first install defaults to the latest public prebuilt release
+- rerun on a machine that already has `bsj` defaults to latest `main` source build (so updates include newest commits)
 - installs `bsj`
 - installs bundled docs and the man page
 - installs shell completions for Bash, Zsh, and Fish
 - prints the exact `PATH` fix if your install directory is not already on `PATH`
+- prints installed `bsj --version` and the active `bsj` path resolved from `PATH`
 - verifies the downloaded archive against its `.sha256` file when available
 
 Default prebuilt install path:

@@ -75,7 +75,9 @@ Usage:
 Modes:
   --prebuilt  Install a bundled prebuilt binary. If no local bundle exists, download one from GitHub Releases.
   --source    Build from source. If no local checkout exists, download the source archive first.
-  default     Use a local bundle if present, else a local checkout, else download the latest release bundle.
+  default     Use a local bundle if present, else a local checkout, else:
+              - if bsj is already installed: build latest main from source (update flow)
+              - otherwise: install latest prebuilt GitHub release
 
 Bootstrap options:
   --repo OWNER/REPO   GitHub repository to download from when bootstrapping
@@ -227,6 +229,9 @@ pick_mode() {
   if local_bundle_root; then
     printf "prebuilt"
   elif local_source_root; then
+    printf "source"
+  elif [[ -z "$ARCHIVE_SOURCE" && "$RELEASE_VERSION" == "latest" ]] && command -v bsj >/dev/null 2>&1; then
+    # Update flow: if bsj is already installed, prefer latest main source so reruns actually pick up new commits.
     printf "source"
   else
     printf "prebuilt"
@@ -662,6 +667,28 @@ ensure_path_hint() {
   printf "Open a new terminal window, or run this now:\n  export PATH=\"%s:\$PATH\"\n" "$path_entry"
 }
 
+print_install_version_summary() {
+  local installed_path="$1"
+  local reported_version="" active_path=""
+
+  if [[ -x "$installed_path" ]]; then
+    reported_version="$("$installed_path" --version 2>/dev/null || true)"
+    if [[ -n "$reported_version" ]]; then
+      printf "%sInstalled version:%s %s\n" "$GREEN$BOLD" "$RESET" "$reported_version"
+    fi
+  fi
+
+  if active_path="$(command -v bsj 2>/dev/null)"; then
+    printf "%sActive bsj path:%s %s\n" "$GREEN$BOLD" "$RESET" "$active_path"
+    if [[ "$active_path" != "$installed_path" ]]; then
+      warn "PATH resolves bsj to a different location than the newly installed binary."
+      warn "Open a new shell or run the installed path directly: $installed_path"
+    fi
+  else
+    warn "bsj is not currently discoverable on PATH in this shell."
+  fi
+}
+
 append_path_line_if_missing() {
   local target_file="$1"
   local marker="$2"
@@ -1022,6 +1049,7 @@ install_prebuilt() {
   printf "%sInstalled man page:%s %s\n" "$GREEN$BOLD" "$RESET" "$final_man_dir/bsj.1"
 
   ensure_path_hint "$final_bin_dir"
+  print_install_version_summary "$final_bin_dir/bsj"
 
   cat <<EOF
 
@@ -1084,6 +1112,7 @@ install_from_source() {
   install_completion_files "$ROOT_DIR" "$bsj_bin" "$cargo_root"
 
   ensure_path_hint "$cargo_bin_dir"
+  print_install_version_summary "$bsj_bin"
 
   cat <<EOF
 
