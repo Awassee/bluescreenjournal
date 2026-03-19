@@ -55,16 +55,20 @@ BOOTSTRAP_HOME="$TMP_DIR/bootstrap-home"
 BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
 BOOTSTRAP_BASH_HOME="$TMP_DIR/bootstrap-home-bash"
 SMOKE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+INSTALL_LOG="$TMP_DIR/install-prebuilt.log"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 [[ -d "$BUNDLE_DIR" ]] || { echo "Bundle directory not found after extraction" >&2; exit 1; }
 
-HOME="$INSTALL_HOME" SHELL=/bin/zsh "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$INSTALL_PREFIX"
+HOME="$INSTALL_HOME" SHELL=/bin/zsh "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$INSTALL_PREFIX" | tee "$INSTALL_LOG"
 "$INSTALL_PREFIX/bin/bsj" --help >/dev/null
 "$INSTALL_PREFIX/bin/bsj" guide setup >/dev/null
 "$INSTALL_PREFIX/bin/bsj" guide distribution >/dev/null
 "$INSTALL_PREFIX/bin/bsj" settings >/dev/null
+grep -Fq "First-run flow:" "$INSTALL_LOG"
+grep -Fq "Press F2 to save, or type **save** then Enter for quick-save + next entry" "$INSTALL_LOG"
+grep -Fq "Press Esc (or Ctrl+O) to open menus" "$INSTALL_LOG"
 test -f "$INSTALL_PREFIX/share/doc/bsj/README.md"
 test -f "$INSTALL_PREFIX/share/doc/bsj/LICENSE"
 test -f "$INSTALL_PREFIX/share/doc/bsj/CHANGELOG.md"

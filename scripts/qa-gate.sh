@@ -20,6 +20,9 @@ UX_TESTS=(
   "tui::app::tests::shortened_line_repaint_does_not_leave_tail_ghost_text"
   "tui::app::tests::keybinding_function_keys_route_to_expected_actions"
   "tui::app::tests::keybinding_ctrl_fallbacks_route_to_expected_actions"
+  "tui::app::tests::functional_help_menu_roundtrip_preserves_typing_flow"
+  "tui::app::tests::menu_discovery_hint_switches_after_first_menu_open"
+  "tui::app::tests::unlock_status_flash_gives_menu_and_save_guidance"
   "tui::app::tests::typing_wraps_when_line_exceeds_viewport_width"
   "tui::app::tests::tab_key_inserts_five_spaces"
 )

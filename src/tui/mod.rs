@@ -219,9 +219,9 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         "ARROWS MOVE  ENTER SELECT  ESC CLOSE  ALT+F/E/S/G/T/U/H JUMP"
     } else if app.should_show_menu_discovery_hint() {
         if area.width >= 130 {
-            "ESC MENUS  F1 HELP  F2 SAVE  F3 DATES  F5 SEARCH  F7 INDEX  ALT+N NEW"
+            "ESC MENUS  F1 HELP  F2 SAVE  F3 DATES  F5 SEARCH  F7 INDEX  CTRL+O FILE"
         } else if area.width >= 104 {
-            "ESC MENUS  F1 HELP  F2 SAVE  F3 DATES  F7 INDEX  ALT+N NEW"
+            "ESC MENUS  F1 HELP  F2 SAVE  F3 DATES  F7 INDEX  CTRL+O FILE"
         } else {
             "ESC MENUS  F1 HELP  F2 SAVE  ALT+N NEW"
         }

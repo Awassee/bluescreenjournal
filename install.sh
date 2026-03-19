@@ -1062,12 +1062,14 @@ print_post_install_summary() {
 
 Install complete.
 
-Start writing:
+Launch:
   $installed_bin
 
-First launch starts the setup wizard automatically.
-In the app, press Esc to open menus (FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP).
-Need key reminders? Press F1 for the keyboard cheat sheet.
+First-run flow:
+  1) Launch BlueScreen Journal (setup wizard opens automatically if needed)
+  2) Start typing your entry right away
+  3) Press F2 to save, or type **save** then Enter for quick-save + next entry
+  4) Press Esc (or Ctrl+O) to open menus: FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP
 
 Reference:
   $help_ref
@@ -1109,12 +1111,13 @@ maybe_prompt_post_install_menu() {
 
 Post-install menu
   1) Launch BlueScreen Journal now (recommended)
-  2) Print Quickstart guide
-  3) Show command help
-  4) Repair PATH integration now
-  5) Exit installer
+  2) Print Setup guide (menu-first flow)
+  3) Print keyboard/menu cheat sheet
+  4) Show command help
+  5) Run health check (doctor) + PATH repair
+  6) Exit installer
 EOF
-    read_line_interactive "Select [1-5]: " || return
+    read_line_interactive "Select [1-6]: " || return
     selection="$REPLY"
     normalized="$(printf "%s" "$selection" | tr '[:upper:]' '[:lower:]')"
     case "$normalized" in
@@ -1125,19 +1128,23 @@ EOF
         return
         ;;
       2)
-        "$installed_bin" guide quickstart || true
+        "$installed_bin" guide setup || "$installed_bin" guide quickstart || true
         ;;
       3)
-        "$installed_bin" --help | sed -n '1,80p'
+        "$installed_bin" guide quickstart | sed -n '1,120p'
         ;;
       4)
+        "$installed_bin" --help | sed -n '1,80p'
+        ;;
+      5)
+        "$installed_bin" doctor || true
         run_path_repair
         ;;
-      5|q|quit|exit)
+      6|q|quit|exit)
         return
         ;;
       *)
-        warn "Please choose 1-5."
+        warn "Please choose 1-6."
         ;;
     esac
   done

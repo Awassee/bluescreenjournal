@@ -2365,9 +2365,9 @@ impl App {
             return None;
         }
         if self.dirty {
-            Some("NEXT: F2 SAVE | ALT+N NEW DAY | ALT+Y/0 TODAY")
+            Some("NEXT: F2 SAVE | **save** QUICK | ALT+N NEW DAY | ALT+Y/0 TODAY")
         } else {
-            Some("NEXT: TYPE | ALT+N NEW DAY | ALT+[ ] SAVED | ALT+,/. DAY")
+            Some("NEXT: TYPE | **save** QUICK | ALT+N NEW DAY | ALT+[ ] SAVED")
         }
     }
 
@@ -2412,14 +2412,14 @@ impl App {
     pub fn empty_state_lines(&self) -> [&'static str; 12] {
         [
             "START TYPING TO WRITE TODAY'S ENTRY",
-            "1) WRITE  2) F2 SAVE  3) Alt+N NEW DAY",
+            "1) WRITE  2) F2 SAVE  3) **save** + Enter = quick next entry",
             "Quick next entry: type **save** on its own line, then press Enter.",
             "Saved revisions stay encrypted at rest and sync as encrypted blobs.",
             "F9 edits Closing Thought (blank + Enter clears).",
             "Alt+, / Alt+. moves day-by-day  Alt+Y or Alt+0 jumps to today.",
             "Alt+D opens calendar  Alt+I opens index timeline  Alt+K opens commands.",
             "Old entries are intentional: open archive dates through Calendar or Index.",
-            "Esc opens menus (once)  Alt+F/E/S/G/T/U/H jumps menu sections.",
+            "Esc or Ctrl+O opens menus  Alt+F/E/S/G/T/U/H jumps sections.",
             "Ctrl+O/E/W/Y/T/U/L also opens top menus when function keys are blocked.",
             "? or Ctrl+/ opens key help instantly.  F5 searches the unlocked vault.",
             "F10 quit  F12 lock  Ctrl+K command palette",
@@ -4612,7 +4612,7 @@ impl App {
                 }
                 self.search_index = None;
                 self.refresh_integrity_status();
-                self.flash_status("UNLOCKED.");
+                self.flash_status("UNLOCKED. ESC MENUS | F2 SAVE | ALT+N NEW DAY.");
                 self.load_selected_date();
                 true
             }
@@ -4753,9 +4753,7 @@ impl App {
         self.menu = Some(MenuState::new(menu, self));
         if !self.menu_coach_shown {
             self.menu_coach_shown = true;
-            self.flash_status(
-                "MENU OPEN. ARROWS NAVIGATE | ENTER SELECTS | ESC CLOSES | ALT+N NEW DAY",
-            );
+            self.flash_status("MENU OPEN. ARROWS/ENTER. ESC CLOSE. ALT+N NEW DAY. CTRL+O FILE.");
         }
     }
 
@@ -8261,7 +8259,7 @@ impl App {
             self.refresh_integrity_status();
             self.overlay = None;
             self.load_selected_date();
-            self.flash_status("UNLOCKED FROM KEYCHAIN.");
+            self.flash_status("UNLOCKED. ESC MENUS | F2 SAVE | ALT+N NEW DAY.");
         }
     }
 
@@ -10714,6 +10712,56 @@ mod tests {
         assert!(app.overlay().is_none());
         assert!(app.menu().is_none());
         assert_eq!(app.buffer.to_text(), "Hello world");
+    }
+
+    #[test]
+    fn functional_help_menu_roundtrip_preserves_typing_flow() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        let viewport_height = 20;
+        let viewport_width = 80;
+
+        type_editor_text(&mut app, "Draft", viewport_height, viewport_width);
+        send_editor_key(
+            &mut app,
+            KeyCode::Esc,
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
+        send_editor_key(
+            &mut app,
+            KeyCode::Char('h'),
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
+        assert!(matches!(
+            app.menu(),
+            Some(menu) if menu.selected_menu == MenuId::Help
+        ));
+
+        send_editor_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
+        assert!(matches!(app.overlay(), Some(Overlay::Info(_))));
+
+        send_editor_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
+        assert!(app.overlay().is_none());
+        assert!(app.menu().is_none());
+
+        type_editor_text(&mut app, " notes", viewport_height, viewport_width);
+        assert_eq!(app.buffer.to_text(), "Draft notes");
     }
 
     #[test]
@@ -13353,12 +13401,34 @@ mod tests {
         app.dirty = false;
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT: TYPE | ALT+N NEW DAY | ALT+[ ] SAVED | ALT+,/. DAY")
+            Some("NEXT: TYPE | **save** QUICK | ALT+N NEW DAY | ALT+[ ] SAVED")
         );
         app.dirty = true;
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT: F2 SAVE | ALT+N NEW DAY | ALT+Y/0 TODAY")
+            Some("NEXT: F2 SAVE | **save** QUICK | ALT+N NEW DAY | ALT+Y/0 TODAY")
+        );
+    }
+
+    #[test]
+    fn unlock_status_flash_gives_menu_and_save_guidance() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+        vault::create_vault(&root, &passphrase, Some(date), "Test Device").expect("create vault");
+
+        let mut app = App::with_initial_date(Some(date));
+        app.vault_path = root.clone();
+        app.config.vault_path = root;
+
+        let mut input = "correct horse battery staple".to_string();
+        let mut error = None;
+        assert!(app.try_unlock(&mut input, &mut error));
+        assert_eq!(
+            app.status_text(),
+            Some("UNLOCKED. ESC MENUS | F2 SAVE | ALT+N NEW DAY.")
         );
     }
 
@@ -13676,10 +13746,28 @@ mod tests {
         app.overlay = None;
         app.menu_coach_shown = false;
 
-        let rendered = render_app(&app, 120, 30);
+        let rendered = render_app(&app, 170, 30);
 
         assert!(rendered.contains("ESC MENUS"));
         assert!(rendered.contains("F1 HELP"));
+    }
+
+    #[test]
+    fn menu_discovery_hint_switches_after_first_menu_open() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.menu = None;
+        app.overlay = None;
+        app.menu_coach_shown = false;
+        assert!(app.should_show_menu_discovery_hint());
+
+        let initial = render_app(&app, 170, 30);
+        assert!(initial.contains("F1 HELP"));
+
+        send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 80);
+        send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 80);
+        assert!(!app.should_show_menu_discovery_hint());
     }
 
     #[test]
