@@ -29,6 +29,7 @@ use zeroize::Zeroize;
 const STATUS_DURATION: Duration = Duration::from_millis(1600);
 const AUTOSAVE_INTERVAL: Duration = Duration::from_millis(2500);
 const INDEX_PREVIEW_CHARS: usize = 54;
+const TAB_INSERT_TEXT: &str = "     ";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Overlay {
@@ -2791,7 +2792,7 @@ impl App {
                 mutated = true;
             }
             KeyCode::Tab => {
-                self.buffer.insert_char('\t');
+                self.buffer.insert_text(TAB_INSERT_TEXT);
                 mutated = true;
             }
             KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
@@ -7282,6 +7283,36 @@ mod tests {
         }
 
         assert_eq!(app.buffer.to_text(), "aaaaaaaaaa\na");
+        assert_eq!(app.buffer.cursor(), (1, 1));
+    }
+
+    #[test]
+    fn tab_key_inserts_five_spaces() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())),
+            20,
+            80,
+        );
+
+        assert_eq!(app.buffer.to_text(), "     ");
+        assert_eq!(app.buffer.cursor(), (0, 5));
+    }
+
+    #[test]
+    fn tab_key_respects_wrap_width() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.handle_event_with_viewport(
+            Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())),
+            20,
+            4,
+        );
+
+        assert_eq!(app.buffer.to_text(), "    \n ");
         assert_eq!(app.buffer.cursor(), (1, 1));
     }
 
