@@ -10819,6 +10819,10 @@ mod tests {
             viewport_height,
             viewport_width,
         );
+        let indexed_date = match app.overlay() {
+            Some(Overlay::Index(index)) => index.selected_date().expect("index selection"),
+            _ => panic!("index overlay expected"),
+        };
         send_editor_key(
             &mut app,
             KeyCode::Enter,
@@ -10827,7 +10831,7 @@ mod tests {
             viewport_width,
         );
 
-        assert_eq!(app.selected_date, start);
+        assert_eq!(app.selected_date, indexed_date);
         type_editor_text(
             &mut app,
             "\nedited via index flow",
@@ -10844,7 +10848,7 @@ mod tests {
 
         let vault = app.vault.as_ref().expect("vault");
         let exported = vault
-            .export_entry(start)
+            .export_entry(indexed_date)
             .expect("export")
             .expect("entry exists");
         assert!(exported.body.contains("edited via index flow"));
