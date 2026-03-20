@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Install a specific tagged release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.3.2
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.0
 ```
 
 Install from source instead:
@@ -42,7 +42,7 @@ The installer:
 - prints the exact `PATH` fix if needed
 - points new users back into the in-app `HELP`, `SETUP`, and `TOOLS` menus instead of requiring CLI follow-up
 
-The default public install path uses the prebuilt universal binary, so Rust and Cargo are not required.
+The default public install path uses the prebuilt macOS release bundle, so Rust and Cargo are not required.
 
 ## First Launch
 

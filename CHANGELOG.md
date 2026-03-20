@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## v2.1.0
+
+- promoted the current mature product line to the `2.1.0` release:
+  - encrypted local-first vaults
+  - append-only revisions and encrypted drafts
+  - real index, calendar, search, spellcheck, backups, verify, and sync
+  - menu-first DOS-style writing flow in Terminal.app and iTerm2
+- polished the nostalgia UI so the save flow is easier to read at a glance:
+  - clearer `NEXT ENTRY`, `NEXT DAY`, `OLD ENTRY`, and `SAVED PAGE` states
+  - action-first command palette labels and better first-run guidance
+  - clearer save receipts and footer hints
+- finalized revision-based `ENTRY NO.` behavior so same-day saves advance the serial and fresh pages show the next number
+- fixed the public bootstrap installer to choose the correct published macOS asset instead of hardcoding the old universal filename
+- removed contradictory PATH warning output from installer completion messaging
+- added a public GitHub installer smoke test script and wired it into release automation
+- refreshed release packaging/docs so `v2.1.0` is the current stable line
+
 ## v1.3.2
 
 - added config-backed sync defaults for `sync_backend_preference`, `gdrive_folder_id`, and `dropbox_root`

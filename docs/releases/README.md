@@ -2,10 +2,11 @@
 
 Latest stable:
 
-- [v1.3.2](v1.3.2.md)
+- [v2.1.0](v2.1.0.md)
 
 Recent releases:
 
+- [v1.3.2](v1.3.2.md)
 - [v1.3.1](v1.3.1.md)
 - [v1.3.0](v1.3.0.md)
 - [v1.2.1](v1.2.1.md)

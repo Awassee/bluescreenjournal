@@ -18,7 +18,7 @@ FRAME_W = 1160
 FRAME_H = 820
 SCREEN_COLS = 80
 SCREEN_ROWS = 25
-RELEASE_LABEL = "v1.3.2"
+RELEASE_LABEL = "v2.1.0"
 
 BG_OUTER = "#0b1021"
 BG_TERMINAL = "#111827"
@@ -199,7 +199,7 @@ def editor_frame() -> Image.Image:
     draw_text(
         draw,
         22,
-        "MODE EDIT | SAVE READY | Ln 8, Col 4 | Words 57 | VER v1.3.2",
+        "STATE WRITE | SAVE READY | LINE 8 COL 4 | WORDS 57 | VER v2.1.0",
         fill=FG_SUCCESS,
     )
     draw_footer(

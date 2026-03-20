@@ -34,7 +34,7 @@ That bootstrap installer:
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.3.2
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.0
 ```
 
 ## Release Bundle Layout
@@ -63,7 +63,7 @@ dist/
         bsj-search.png
         ...
       releases/
-        v1.3.2.md
+        v2.1.0.md
       SETUP_GUIDE.md
       PRODUCT_GUIDE.md
       DATASHEET.md
@@ -137,6 +137,12 @@ Smoke-test the bundle install:
 ./scripts/smoke-release-install.sh
 ```
 
+Smoke-test the public one-line installer against a pushed ref or tag:
+
+```bash
+./scripts/smoke-public-install.sh --ref v2.1.0 --version v2.1.0
+```
+
 Run the release privacy audit directly:
 
 ```bash
@@ -150,6 +156,14 @@ That script:
 3. runs the bundled installer in `--prebuilt` mode
 4. runs the top-level piped installer path with `--archive`
 5. verifies the installed binary, docs, man page, example config, shell completions, and binary privacy audit
+
+The public installer smoke verifies:
+
+1. the raw GitHub installer can be fetched from the chosen ref
+2. the installer selects a valid published release asset
+3. the install completes in a clean temp `HOME`
+4. the installed binary reports the expected version
+5. shell profile PATH integration is written and the misleading PATH warning does not appear
 
 ## Install From A Release Bundle
 
@@ -166,6 +180,8 @@ bsj-aarch64-apple-darwin.tar.gz
 bsj-aarch64-apple-darwin.tar.gz.sha256
 bsj-x86_64-apple-darwin.tar.gz
 bsj-x86_64-apple-darwin.tar.gz.sha256
+bsj-universal-apple-darwin.tar.gz
+bsj-universal-apple-darwin.tar.gz.sha256
 ```
 
 The turnkey installer chooses the matching stable asset for the current Mac and falls back to a universal archive if one is published.
@@ -266,7 +282,7 @@ Release workflow:
 Release automation flow:
 
 ```bash
-git tag v1.3.2
+git tag v2.1.0
 git push origin main --tags
 ```
 
@@ -277,6 +293,7 @@ git push origin main --tags
 3. Run `cargo test --all-targets`
 4. Run `./scripts/package-release.sh --universal`
 5. Run `./scripts/smoke-release-install.sh`
+6. Run `./scripts/smoke-public-install.sh --ref <tag> --version <tag>`
 6. Run `./scripts/manual-smoke-gui-terminals.sh <version>`
 7. Run `./scripts/audit-release.sh`
 8. Run `bsj guide distribution` from the built binary

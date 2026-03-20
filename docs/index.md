@@ -2,9 +2,9 @@
 
 BlueScreen Journal is a local-first encrypted terminal journal for macOS with a nostalgic blue-screen writing workflow.
 
-- Latest stable: [v1.3.2](https://github.com/Awassee/bluescreenjournal/releases/tag/v1.3.2)
-- Release notes: [v1.3.2](releases/v1.3.2.md)
-- Current patch scope: [v1.3.3 patch list](V1_3_3_PLAN.md)
+- Latest stable: [v2.1.0](https://github.com/Awassee/bluescreenjournal/releases/tag/v2.1.0)
+- Release notes: [v2.1.0](releases/v2.1.0.md)
+- Current patch scope: [v2.1.1 patch list](V2_1_1_PLAN.md)
 - Full changelog: [CHANGELOG.md](../CHANGELOG.md)
 
 ## Start Here
@@ -15,7 +15,7 @@ BlueScreen Journal is a local-first encrypted terminal journal for macOS with a 
 - [Product Guide](PRODUCT_GUIDE.md)
 - [Datasheet](DATASHEET.md)
 - [Nostalgia Guardrails](NOSTALGIA_GUARDRAILS.md)
-- [v1.3.3 Patch List](V1_3_3_PLAN.md)
+- [v2.1.1 Patch List](V2_1_1_PLAN.md)
 - [v1.3.2 Plan](V1_3_2_PLAN.md)
 - [v3.0 Planning](V3_0_PLAN.md)
 - [Troubleshooting](TROUBLESHOOTING.md)
@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin this release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.3.2
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.0
 ```
 
 ## Screenshots

@@ -63,3 +63,7 @@ jobs:
           else
             gh release create "$tag" "${assets[@]}" --generate-notes --title "$tag"
           fi
+
+      - name: Smoke test public installer
+        if: startsWith(github.ref, 'refs/tags/')
+        run: ./scripts/smoke-public-install.sh --repo Awassee/bluescreenjournal --ref "$GITHUB_REF_NAME" --version "$GITHUB_REF_NAME"
