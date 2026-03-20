@@ -219,18 +219,18 @@ fn draw_menu_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         "ARROWS MOVE  ENTER SELECT  ESC CLOSE  ALT+F/E/S/G/T/U/H JUMP"
     } else if app.should_show_menu_discovery_hint() {
         if area.width >= 130 {
-            "ESC MENUS  F1 HELP  F2 SAVE  F3 DATES  F5 SEARCH  F7 INDEX  CTRL+O FILE"
+            "ESC MENUS  F1 HELP  F2 SAVE  ALT+N NEXT  F3 CALENDAR  F7 INDEX"
         } else if area.width >= 104 {
-            "ESC MENUS  F1 HELP  F2 SAVE  F3 DATES  F7 INDEX  CTRL+O FILE"
+            "ESC MENUS  F1 HELP  F2 SAVE  ALT+N NEXT  F3 CAL"
         } else {
-            "ESC MENUS  F1 HELP  F2 SAVE  ALT+N NEW"
+            "ESC MENUS  F1 HELP  F2 SAVE"
         }
     } else if area.width >= 130 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H  CTRL+O/E/W/Y/T/U/L  F2 SAVE  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H JUMP  F2 SAVE  ALT+N NEXT  F3 CAL  F7 INDEX"
     } else if area.width >= 104 {
-        "ESC MENUS  ALT+F/E/S/G/T/U/H  F2 SAVE  ALT+N NEW  ALT+D DATES  ALT+I INDEX"
+        "ESC MENUS  ALT+F/E/S/G/T/U/H  F2 SAVE  ALT+N NEXT  F3 CAL"
     } else {
-        "ESC MENUS  F1 HELP  F2 SAVE  ALT+N NEW"
+        "ESC MENUS  F1 HELP  F2 SAVE"
     };
     let left_width = spans
         .iter()
@@ -393,7 +393,7 @@ fn draw_editor(frame: &mut Frame<'_>, app: &App, area: Rect) -> Option<(u16, u16
         let hints = app
             .empty_state_lines()
             .into_iter()
-            .map(|line| centered_line(editor_area.width as usize, line))
+            .map(|line| centered_line(editor_area.width as usize, line.as_str()))
             .collect::<Vec<_>>();
         let hint_height = hints.len() as u16;
         let hint_y = editor_area
@@ -443,7 +443,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let context = format!(
-        "MODE {} | SAVE {} | {} | {} | VER {}",
+        "STATE {} | SAVE {} | {} | {} | VER {}",
         app.footer_mode_label(),
         app.save_status_label(),
         app.footer_context_label(),
@@ -493,15 +493,14 @@ fn footer_legend(app: &App, width: usize, compact_mode: bool) -> String {
     }
 
     let legend = if width >= 130 {
-        "F1 HELP F2 SAVE F3 DATES F4 FIND F5 SEARCH F6 REPLACE F7 INDEX F8 SYNC F9 CLOSING F10 QUIT F11 REVEAL F12 LOCK"
+        "F1 HELP  F2 SAVE  ALT+N NEXT  F3 CALENDAR  F5 SEARCH  F7 INDEX  F8 SYNC  ESC MENUS"
             .to_string()
     } else if width >= 108 {
-        "F1 HELP F2 SAVE F3 DATES F4 FIND F5 SEARCH F6 REPLACE F7 INDEX F8 SYNC F10 QUIT"
-            .to_string()
+        "F1 HELP  F2 SAVE  ALT+N NEXT  F3 CAL  F5 SEARCH  ESC MENUS".to_string()
     } else if width >= 90 {
-        "F1 HELP F2 SAVE F3 DATES F4 FIND F7 INDEX F10 QUIT ESC MENUS".to_string()
+        "F1 HELP  F2 SAVE  ALT+N NEXT  ESC MENUS".to_string()
     } else {
-        "F2 SAVE  F10 QUIT  ESC MENUS".to_string()
+        "F2 SAVE  ESC MENUS".to_string()
     };
 
     if compact_mode && width >= 100 {
@@ -790,27 +789,27 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
     let lines = vec![
         Line::from(version_line),
         Line::from("(c) 2026 Awassee LLC and Sean Heiney  sean@sean.net"),
-        Line::from("Flow: TYPE -> F2 SAVE -> ALT+N NEW DAY."),
+        Line::from("Flow: TYPE -> F2 SAVE -> **save** NEXT ENTRY -> ALT+N NEXT DAY."),
         Line::from("ESC opens menus. Arrows move. ENTER selects."),
         Line::from("ALT+F/E/S/G/T/U/H jumps menu tabs."),
         Line::from("CTRL+O/E/W/Y/T/U/L also opens menus."),
         Line::from("ALT+,/. day  ALT+[ ] saved jump  ALT+Y/0 today"),
-        Line::from("ALT+D dates  ALT+I index  ALT+K command palette"),
+        Line::from("ALT+D calendar  ALT+I index  ALT+K command palette"),
         Line::from(
             "ALT+- yesterday  ALT+= tomorrow  CTRL+SHIFT+S save+next day  CTRL+SHIFT+L save+lock",
         ),
         Line::from("? or Ctrl+/ opens this card instantly."),
-        Line::from("F1 Help      F2 Save      F3 Dates      F4 Find"),
+        Line::from("F1 Help      F2 Save      F3 Calendar   F4 Find"),
         Line::from("F5 Search    F6 Replace   F7 Index      F8 Sync"),
         Line::from("F9 Closing   F10 Quit     F11 Reveal    F12 Lock"),
-        Line::from("Ctrl+Shift+F opens spellcheck picker for current entry."),
+        Line::from("Ctrl+Shift+F or TOOLS -> Spellcheck Entry checks current page."),
         Line::from("FILE   Save, export, backup, restore, lock, quit"),
-        Line::from("EDIT   Find/replace, spellcheck, lines, stamps, metadata, reveal"),
+        Line::from("EDIT   Find/replace, closing thought, lines, stamps, metadata, reveal"),
         Line::from("SEARCH Vault search, recent queries, presets, cache status"),
         Line::from("GO     Calendar, index, recents, favorites, random, today"),
-        Line::from("TOOLS  Sync, soundtrack, verify, review, dashboard, prompts, doctor"),
-        Line::from("TOOLS  Insights Center: 10 writing/safety reports in one picker"),
-        Line::from("TOOLS  Today Brief + Week Compass for daily/weekly planning"),
+        Line::from("TOOLS  Spellcheck, sync, soundtrack, verify, review, dashboard, prompts"),
+        Line::from("TOOLS  Insights Center, Today Brief, Week Compass, optional AI"),
+        Line::from("HELP   Quick start, menu guide, updates, doctor, about"),
         Line::from("TOOLS  Optional AI Summary + AI Coach (Ctrl+Shift+A)"),
         Line::from("Calendar: YYYY-MM-DD jump, [ ] saved jump, < > months, N/P blank, T/0 today"),
         Line::from(
@@ -818,7 +817,9 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         ),
         Line::from("Search: Tab fields, / query, T/W/M/Y/A ranges, Enter opens result"),
         Line::from("Search: Ctrl+G close, Ctrl+B pin, Ctrl+Shift+B preset, Ctrl+1..9 slot"),
-        Line::from("Old entries are deliberate: use Calendar/Index to browse archive dates."),
+        Line::from(
+            "Old entries are deliberate: use Calendar, Index, or Search to browse archive dates.",
+        ),
         Line::from("Footer keeps mode + status visible. Enter/Esc/F1 closes."),
     ];
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
@@ -1629,11 +1630,21 @@ fn draw_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &PickerOverlay
         return;
     }
 
+    let is_command_palette = picker.title == "Command Palette";
     let mut lines = vec![
         Line::from(format!(
-            "Filter: {}",
+            "{}: {}",
+            if is_command_palette {
+                "Action"
+            } else {
+                "Filter"
+            },
             if picker.filter_input.trim().is_empty() {
-                "[all]".to_string()
+                if is_command_palette {
+                    "[save | next | old | search | sync | help]".to_string()
+                } else {
+                    "[all]".to_string()
+                }
             } else {
                 picker.filter_input.clone()
             }
@@ -1665,8 +1676,17 @@ fn draw_picker_overlay(frame: &mut Frame<'_>, area: Rect, picker: &PickerOverlay
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from("Type to filter  Up/Down move  Enter open"));
-    lines.push(Line::from("PgUp/PgDn page  Backspace clear  Esc close"));
+    if is_command_palette {
+        lines.push(Line::from(
+            "Type what you want: save / next / old / search / backup / help",
+        ));
+        lines.push(Line::from(
+            "Up/Down move  Enter run  PgUp/PgDn page  Backspace clear  Esc close",
+        ));
+    } else {
+        lines.push(Line::from("Type to filter  Up/Down move  Enter open"));
+        lines.push(Line::from("PgUp/PgDn page  Backspace clear  Esc close"));
+    }
     frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
 }
 

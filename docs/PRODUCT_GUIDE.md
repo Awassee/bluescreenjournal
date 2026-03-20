@@ -63,7 +63,7 @@ You choose:
 1. vault path
 2. passphrase
 3. passphrase confirmation
-4. optional entry-number epoch date
+4. optional legacy epoch date kept in vault metadata
 
 After setup, the app creates an encrypted vault and opens directly into the selected day.
 
@@ -84,12 +84,14 @@ Default vault path:
 ### Save with intent
 
 - `F2` or `FILE -> Save Entry` writes a new append-only encrypted revision
+- `**save**` on its own line saves and opens the next same-day entry on a clean page
+- `Alt+N` opens the next blank day when you want to move forward to a new date
 - autosave writes an encrypted draft every few seconds without creating revision spam
 
 ### Move through time
 
-- `F3` or `GO -> Open Calendar` jumps by calendar date
-- `F7` or `GO -> Index Timeline` shows saved entry dates with previews
+- `F3` or `GO -> Open Calendar` opens older dates intentionally
+- `F7` or `GO -> Index Timeline` shows saved entry dates with previews for archive browsing
 - `GO -> Jump to Today` returns to the current date
 
 ### Find and search
@@ -138,8 +140,9 @@ Value:
 ### Entry numbers
 
 Value:
-- each day gets a stable serial number derived from the vault epoch date
-- numbering remains consistent across devices using the same vault
+- each saved revision advances `ENTRY NO.`
+- a fresh clean page shows the next serial before you save
+- revision ordering stays deterministic across devices using the same vault
 
 ### Index and calendar navigation
 

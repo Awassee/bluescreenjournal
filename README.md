@@ -147,7 +147,7 @@ Default prebuilt install path:
    - vault path
    - passphrase
    - passphrase confirmation
-   - optional epoch date for `ENTRY NO.`
+   - optional legacy epoch date (kept in vault metadata for older imports)
 3. Start typing immediately into today's entry
 4. Press `F2` to create your first encrypted saved revision
 5. Reopen with `bsj` or jump to another date with `bsj open YYYY-MM-DD`
@@ -188,7 +188,7 @@ The app is direct by design:
 | Append-only revisions | Every manual save creates a new revision file | Preserves history and supports safer recovery |
 | Encrypted autosave drafts | Autosaves per-date draft state without making revision spam | Protects unsaved work without plaintext leakage |
 | Crash recovery | Prompts to recover a newer draft | Prevents accidental loss after interruption |
-| Stable entry numbers | Computes `ENTRY NO.` from epoch date and entry date | Keeps numbering deterministic across machines |
+| Entry numbers | Advances `ENTRY NO.` with each saved revision and shows the next serial on a fresh page | Makes same-day saves and clean next-entry flow visible at a glance |
 | Real index and calendar | Browse saved dates as a journal, not just as files | Faster recall and better chronological navigation |
 | Favorite and random navigation | Jump by favorites, recents, and random saved entries | Makes larger journals easier to roam |
 | In-entry find and replace | Incremental find and retro `Y/N/A/Q` replace flow | Keeps editing fast inside the writing surface |
@@ -216,20 +216,22 @@ The app is direct by design:
 - `bsj` launches the TUI on the current date
 - type immediately into the editor
 - `F2` or `FILE -> Save Entry` creates a new encrypted revision
+- type `**save**` on its own line and press Enter to save and open the next same-day entry
+- `Alt+N` opens the next blank day when you want to move forward in time
 - autosave maintains an encrypted draft every few seconds
 
 ### Move through time
 
-- `F3` or `GO -> Open Calendar` opens the month grid
-- `F7` or `GO -> Index Timeline` lists existing saved entries
+- `F3` or `GO -> Open Calendar` opens the month grid for deliberate old-entry browsing
+- `F7` or `GO -> Index Timeline` lists existing saved entries when you want archive/history view
 - `bsj open YYYY-MM-DD` launches directly into a date from the CLI
 
 ### Find things
 
 - `F4` or `EDIT -> Find in Entry` searches inside the current entry
 - `F6` or `EDIT -> Replace in Entry` runs replace confirmation in a retro style
-- `Ctrl+Shift+F` or `EDIT -> Spellcheck Entry` opens correction picker
-- `EDIT -> Auto-Fix Common Typos` applies safe typo corrections
+- `Ctrl+Shift+F` or `TOOLS -> Spellcheck Entry` opens correction picker
+- `TOOLS -> Auto-Fix Common Typos` applies safe typo corrections
 - `bsj spellcheck --date YYYY-MM-DD` checks one saved entry from CLI
 - `bsj spellcheck --range last7 --count-only` gives fast typo-count signal
 - `F5` or `SEARCH -> Search Vault` searches across saved entries
@@ -291,10 +293,11 @@ The menu bar is the primary discoverability surface.
 - `EDIT` includes line tools, stamps, metadata, reveal, and writing-mode toggles
 - `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
-- `TOOLS` includes sync, soundtrack source + toggle, integrity details, review mode, prompts, dashboard, updates, doctor output, and a `SYSOP Center` menu for operator audits/runbooks
+- `TOOLS` includes dashboard, spellcheck, review, sync, soundtrack source + toggle, integrity details, optional AI, and a `SYSOP Center` menu for operator audits/runbooks
 - `SETUP` includes `Cloud Provider Setup`, saved sync backend defaults, direct cloud target fields, and other runtime settings
 - `TOOLS` also includes `AI Summary (Optional)` and `AI Coach Mode (Optional)` for guided reflection workflows
-- `TOOLS -> Check for Updates` now offers an in-app install action that runs the installer in the background
+- `HELP` includes quick start, first-run coaching, key/menu guides, update checks, doctor output, and About
+- `HELP -> Check for Updates` now offers an in-app install action that runs the installer in the background
 - `SETUP` includes a live settings summary plus editable vault/sync/device/opening-line/retention/clock/display values
 - `HELP` includes About (version/credits), the key sheet, quick-start guide, and searchable guide topics inside the TUI
 

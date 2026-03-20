@@ -203,7 +203,7 @@ impl SetupWizard {
             SetupStep::VaultPath => "Setup: Vault Path",
             SetupStep::Passphrase => "Setup: Passphrase",
             SetupStep::ConfirmPassphrase => "Setup: Confirm Passphrase",
-            SetupStep::EpochDate => "Setup: Entry Number Epoch",
+            SetupStep::EpochDate => "Setup: Legacy Epoch (Optional)",
         }
     }
 
@@ -212,7 +212,7 @@ impl SetupWizard {
             SetupStep::VaultPath => "Vault path:",
             SetupStep::Passphrase => "Set passphrase:",
             SetupStep::ConfirmPassphrase => "Confirm passphrase:",
-            SetupStep::EpochDate => "Epoch date (YYYY-MM-DD, blank = today):",
+            SetupStep::EpochDate => "Legacy epoch date (YYYY-MM-DD, blank = skip):",
         }
     }
 
@@ -2123,6 +2123,9 @@ pub struct App {
     closing_thought: Option<String>,
     entry_metadata: EntryMetadata,
     selected_date: NaiveDate,
+    current_entry_number: Option<String>,
+    next_entry_number: String,
+    fresh_entry_page: bool,
     scroll_row: usize,
     menu: Option<MenuState>,
     overlay: Option<Overlay>,
@@ -2214,6 +2217,9 @@ impl App {
             closing_thought: None,
             entry_metadata: EntryMetadata::default(),
             selected_date: initial_date.unwrap_or_else(|| Local::now().date_naive()),
+            current_entry_number: None,
+            next_entry_number: "000001".to_string(),
+            fresh_entry_page: true,
             scroll_row: 0,
             menu: None,
             overlay,
@@ -2370,10 +2376,7 @@ impl App {
         if self.dirty {
             return "IN PROGRESS";
         }
-        let blank_editor = self.buffer.line_count() == 1
-            && self.buffer.line(0).unwrap_or_default().is_empty()
-            && self.closing_thought.is_none();
-        if blank_editor {
+        if self.fresh_entry_page {
             "NEW PAGE"
         } else if matches!(self.last_save_kind, Some(SaveKind::Saved)) {
             "SAVED"
@@ -2385,13 +2388,15 @@ impl App {
     }
 
     pub fn entry_number_label(&self) -> String {
-        let Some(vault) = &self.vault else {
+        if self.vault.is_none() {
             return "------".to_string();
-        };
-        let Ok(epoch) = vault.metadata().epoch_date() else {
-            return "------".to_string();
-        };
-        vault::compute_entry_number(epoch, self.selected_date)
+        }
+        if self.fresh_entry_page {
+            return self.next_entry_number.clone();
+        }
+        self.current_entry_number
+            .clone()
+            .unwrap_or_else(|| self.next_entry_number.clone())
     }
 
     pub fn lock_status_label(&self) -> &'static str {
@@ -2521,18 +2526,18 @@ impl App {
                 Some(Overlay::SetupWizard(_)) => "SETUP",
                 Some(Overlay::UnlockPrompt { .. }) => "UNLOCK",
                 Some(Overlay::Help) => "HELP",
-                Some(Overlay::DatePicker(_)) => "DATES",
+                Some(Overlay::DatePicker(_)) => "CALENDAR",
                 Some(Overlay::FindPrompt { .. }) => "FIND",
                 Some(Overlay::ClosingPrompt { .. }) => "CLOSING",
                 Some(Overlay::ConflictChoice(_)) => "CONFLICT",
                 Some(Overlay::MergeDiff(_)) => "MERGE",
                 Some(Overlay::Search(_)) => "SEARCH",
-                Some(Overlay::AiCoach(_)) => "AI COACH",
+                Some(Overlay::AiCoach(_)) => "COACH",
                 Some(Overlay::ReplacePrompt(_)) | Some(Overlay::ReplaceConfirm(_)) => "REPLACE",
                 Some(Overlay::MetadataPrompt(_)) => "METADATA",
                 Some(Overlay::ExportPrompt(_)) => "EXPORT",
                 Some(Overlay::SettingPrompt(_)) => "SETUP",
-                Some(Overlay::CloudCredentialPrompt(_)) => "KEYCHAIN",
+                Some(Overlay::CloudCredentialPrompt(_)) => "CREDENTIALS",
                 Some(Overlay::Index(_)) => "INDEX",
                 Some(Overlay::SyncStatus(_)) => "SYNC",
                 Some(Overlay::RestorePrompt(_)) => "RESTORE",
@@ -2541,7 +2546,7 @@ impl App {
                 Some(Overlay::RecoverDraft { .. }) => "RECOVER",
                 Some(Overlay::PruneConfirm { .. }) => "PRUNE",
                 Some(Overlay::QuitConfirm) => "QUIT",
-                None if self.vault.is_some() => "EDITING",
+                None if self.vault.is_some() => "WRITE",
                 None => "LOCKED",
             }
         }
@@ -2549,15 +2554,15 @@ impl App {
 
     pub fn footer_stats_label(&self) -> String {
         if let Some(goal) = self.config.daily_word_goal {
-            format!("Words {}/{}", self.document_stats.words, goal)
+            format!("WORDS {}/{}", self.document_stats.words, goal)
         } else {
-            format!("Words {}", self.document_stats.words)
+            format!("WORDS {}", self.document_stats.words)
         }
     }
 
     pub fn cursor_status_label(&self) -> String {
         let (row, col) = self.buffer.cursor();
-        format!("Ln {}, Col {}", row + 1, col + 1)
+        format!("LINE {} COL {}", row + 1, col + 1)
     }
 
     pub fn footer_context_label(&self) -> String {
@@ -2571,11 +2576,11 @@ impl App {
                 .map(|item| item.label.as_str())
                 .unwrap_or("Item");
             return format!(
-                "{} menu {}/{}: {}",
+                "{} {}/{} {}",
                 menu.selected_menu.title(),
                 menu.selected_item + 1,
                 items.len(),
-                selected_label
+                selected_label.to_ascii_uppercase()
             );
         }
 
@@ -2656,14 +2661,14 @@ impl App {
         }
         if !self.config.first_run_coach_completed {
             if self.dirty {
-                return Some("FIRST RUN: F2 SAVE | **save** QUICK | ESC MENUS | ALT+N NEW DAY");
+                return Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY");
             }
-            return Some("FIRST RUN: TYPE | F2 SAVE | **save** QUICK | ESC MENUS");
+            return Some("START HERE: TYPE | F2 SAVE | F1 HELP | ESC MENUS");
         }
         if self.dirty {
-            Some("NEXT: F2 SAVE | **save** QUICK | ALT+N NEW DAY | ALT+Y/0 TODAY")
+            Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY")
         } else {
-            Some("NEXT: TYPE | **save** QUICK | ALT+N NEW DAY | ALT+[ ] SAVED")
+            Some("NEXT: TYPE | ALT+N NEXT DAY | ALT+[ ] OPEN SAVED")
         }
     }
 
@@ -2705,20 +2710,25 @@ impl App {
         self.config.remember_passphrase_in_keychain
     }
 
-    pub fn empty_state_lines(&self) -> [&'static str; 12] {
-        [
-            "START TYPING TO WRITE TODAY'S ENTRY",
-            "1) WRITE  2) F2 SAVE  3) **save** + Enter = quick next entry",
-            "Quick next entry: type **save** on its own line, then press Enter.",
-            "Saved revisions stay encrypted at rest and sync as encrypted blobs.",
-            "F9 edits Closing Thought (blank + Enter clears).",
-            "Alt+, / Alt+. moves day-by-day  Alt+Y or Alt+0 jumps to today.",
-            "Alt+D opens calendar  Alt+I opens index timeline  Alt+K opens commands.",
-            "Old entries are intentional: open archive dates through Calendar or Index.",
-            "Esc or Ctrl+O opens menus  Alt+F/E/S/G/T/U/H jumps sections.",
-            "Ctrl+O/E/W/Y/T/U/L also opens top menus when function keys are blocked.",
-            "? or Ctrl+/ opens help instantly.  Ctrl+Shift+F runs spellcheck.",
-            "F10 quit  F12 lock  Ctrl+K command palette",
+    pub fn empty_state_lines(&self) -> Vec<String> {
+        vec![
+            format!(
+                "TODAY {} IS READY. START TYPING.",
+                self.selected_date.format("%Y-%m-%d")
+            ),
+            "1) WRITE  2) F2 SAVE THIS PAGE  3) **save** + Enter = next same-day entry".to_string(),
+            "Use **save** when you want a clean next entry without leaving today.".to_string(),
+            "Use Alt+N when you want the next blank day, not just the next entry.".to_string(),
+            "Use F3 Calendar or F7 Index when you want to open an older entry on purpose."
+                .to_string(),
+            "F5 searches saved entries fast. Ctrl+Shift+F spellchecks the current page."
+                .to_string(),
+            "F9 edits Closing Thought. Blank + Enter clears it.".to_string(),
+            "Ctrl+K opens commands. Try: save, next, old, search, backup, help.".to_string(),
+            "Esc or Ctrl+O opens menus. Alt+F/E/S/G/T/U/H jumps sections.".to_string(),
+            "Ctrl+O/E/W/Y/T/U/L also opens top menus when function keys are blocked.".to_string(),
+            "Saved revisions stay encrypted at rest and sync only as encrypted blobs.".to_string(),
+            "F10 quit  F12 lock  ? opens help instantly".to_string(),
         ]
     }
 
@@ -2754,7 +2764,7 @@ impl App {
             Overlay::SetupWizard(_) => Some("SETUP: ENTER NEXT | CTRL+Q QUIT"),
             Overlay::UnlockPrompt { .. } => Some("UNLOCK: ENTER OPEN | CTRL+Q QUIT"),
             Overlay::Help => Some("HELP: ENTER/ESC/F1 CLOSE"),
-            Overlay::DatePicker(_) => Some("DATES: ARROWS MOVE | ENTER OPEN | N/P BLANK"),
+            Overlay::DatePicker(_) => Some("CALENDAR: ARROWS MOVE | ENTER OPEN | N/P BLANK"),
             Overlay::FindPrompt { .. } => Some("FIND: TYPE QUERY | ENTER CLOSE"),
             Overlay::ClosingPrompt { .. } => Some("CLOSING: ENTER SAVE | BLANK+ENTER CLEAR"),
             Overlay::ConflictChoice(_) => Some("CONFLICT: TAB OR 1-5 | ENTER APPLY"),
@@ -2772,6 +2782,9 @@ impl App {
             Overlay::SyncStatus(_) => Some("SYNC: ENTER/ESC CLOSE WHEN DONE"),
             Overlay::RestorePrompt(_) => Some("RESTORE: TAB STAGE | ENTER CONTINUE"),
             Overlay::Info(_) => Some("INFO: PGUP/PGDN SCROLL | ENTER/ESC CLOSE"),
+            Overlay::Picker(picker) if picker.title == "Command Palette" => {
+                Some("COMMANDS: TYPE save/next/old/search | ENTER RUN")
+            }
             Overlay::Picker(_) => Some("PICKER: TYPE FILTER | ENTER OPEN"),
             Overlay::RecoverDraft { .. } => Some("RECOVERY: Y LOAD DRAFT | N KEEP REVISION"),
             Overlay::PruneConfirm { .. } => Some("PRUNE: Y OR ENTER APPLY | N OR ESC CANCEL"),
@@ -2810,7 +2823,7 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
-                    label: "Quick Save + Next".to_string(),
+                    label: "Quick Save + Next Entry".to_string(),
                     detail: "**SAVE**".to_string(),
                     action: MenuAction::QuickSaveNext,
                     enabled: self.vault.is_some(),
@@ -2911,42 +2924,6 @@ impl App {
                     label: "Replace in Entry".to_string(),
                     detail: "F6".to_string(),
                     action: MenuAction::Replace,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "Spellcheck Entry".to_string(),
-                    detail: "CTRL+SHIFT+F".to_string(),
-                    action: MenuAction::SpellcheckEntry,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "Spellcheck Summary".to_string(),
-                    detail: "REPORT".to_string(),
-                    action: MenuAction::SpellcheckSummary,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "Next Misspelling".to_string(),
-                    detail: "JUMP".to_string(),
-                    action: MenuAction::SpellcheckNext,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "Previous Misspelling".to_string(),
-                    detail: "JUMP".to_string(),
-                    action: MenuAction::SpellcheckPrevious,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "Auto-Fix Common Typos".to_string(),
-                    detail: "SAFE".to_string(),
-                    action: MenuAction::SpellcheckAutoFixTypos,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "Add Word At Cursor".to_string(),
-                    detail: "SESSION".to_string(),
-                    action: MenuAction::SpellcheckIgnoreCursorWord,
                     enabled: true,
                 },
                 MenuItem {
@@ -3249,7 +3226,7 @@ impl App {
                     enabled: true,
                 },
                 MenuItem {
-                    label: "Next New Entry".to_string(),
+                    label: "Next Blank Day".to_string(),
                     detail: "ALT+N/CTRL+SHIFT+N".to_string(),
                     action: MenuAction::NewEntry,
                     enabled: true,
@@ -3311,18 +3288,6 @@ impl App {
             ],
             MenuId::Tools => vec![
                 MenuItem {
-                    label: "Command Palette".to_string(),
-                    detail: "CTRL+K/CTRL+SHIFT+K".to_string(),
-                    action: MenuAction::CommandPalette,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "SYSOP Center".to_string(),
-                    detail: "OPS".to_string(),
-                    action: MenuAction::SysopCenter,
-                    enabled: true,
-                },
-                MenuItem {
                     label: "Status Dashboard".to_string(),
                     detail: "LIVE".to_string(),
                     action: MenuAction::Dashboard,
@@ -3350,6 +3315,54 @@ impl App {
                     label: "Insights Center".to_string(),
                     detail: "10X".to_string(),
                     action: MenuAction::InsightsCenter,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Review Mode".to_string(),
+                    detail: "LOOK".to_string(),
+                    action: MenuAction::ReviewMode,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Writing Prompts".to_string(),
+                    detail: "INSERT".to_string(),
+                    action: MenuAction::ReviewPrompts,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Spellcheck Entry".to_string(),
+                    detail: "CTRL+SHIFT+F".to_string(),
+                    action: MenuAction::SpellcheckEntry,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Spellcheck Summary".to_string(),
+                    detail: "REPORT".to_string(),
+                    action: MenuAction::SpellcheckSummary,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Next Misspelling".to_string(),
+                    detail: "JUMP".to_string(),
+                    action: MenuAction::SpellcheckNext,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Previous Misspelling".to_string(),
+                    detail: "JUMP".to_string(),
+                    action: MenuAction::SpellcheckPrevious,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Auto-Fix Common Typos".to_string(),
+                    detail: "SAFE".to_string(),
+                    action: MenuAction::SpellcheckAutoFixTypos,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Add Word At Cursor".to_string(),
+                    detail: "SESSION".to_string(),
+                    action: MenuAction::SpellcheckIgnoreCursorWord,
                     enabled: true,
                 },
                 MenuItem {
@@ -3427,18 +3440,6 @@ impl App {
                     enabled: true,
                 },
                 MenuItem {
-                    label: "AI Summary (Optional)".to_string(),
-                    detail: "LOCAL/REMOTE".to_string(),
-                    action: MenuAction::AiSummary,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "AI Coach Mode (Optional)".to_string(),
-                    detail: "GUIDED".to_string(),
-                    action: MenuAction::AiCoach,
-                    enabled: true,
-                },
-                MenuItem {
                     label: "Verify Integrity".to_string(),
                     detail: self.integrity_status_label(),
                     action: MenuAction::Verify,
@@ -3451,33 +3452,33 @@ impl App {
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
-                    label: "Review Mode".to_string(),
-                    detail: "LOOK".to_string(),
-                    action: MenuAction::ReviewMode,
-                    enabled: self.vault.is_some(),
-                },
-                MenuItem {
-                    label: "Writing Prompts".to_string(),
-                    detail: "INSERT".to_string(),
-                    action: MenuAction::ReviewPrompts,
-                    enabled: true,
-                },
-                MenuItem {
                     label: "Sync History".to_string(),
                     detail: "LAST 10".to_string(),
                     action: MenuAction::SyncHistory,
                     enabled: !self.config.sync_history.is_empty(),
                 },
                 MenuItem {
-                    label: "Check for Updates".to_string(),
-                    detail: "GITHUB".to_string(),
-                    action: MenuAction::CheckUpdates,
+                    label: "AI Summary (Optional)".to_string(),
+                    detail: "LOCAL/REMOTE".to_string(),
+                    action: MenuAction::AiSummary,
                     enabled: true,
                 },
                 MenuItem {
-                    label: "Doctor Report".to_string(),
-                    detail: "CHECK".to_string(),
-                    action: MenuAction::DoctorReport,
+                    label: "AI Coach Mode (Optional)".to_string(),
+                    detail: "GUIDED".to_string(),
+                    action: MenuAction::AiCoach,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Command Palette".to_string(),
+                    detail: "CTRL+K/CTRL+SHIFT+K".to_string(),
+                    action: MenuAction::CommandPalette,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "SYSOP Center".to_string(),
+                    detail: "OPS".to_string(),
+                    action: MenuAction::SysopCenter,
                     enabled: true,
                 },
                 MenuItem {
@@ -3530,24 +3531,6 @@ impl App {
             ],
             MenuId::Help => vec![
                 MenuItem {
-                    label: "About BlueScreen Journal".to_string(),
-                    detail: self.app_version_label(),
-                    action: MenuAction::About,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "Key and Menu Guide".to_string(),
-                    detail: "F1".to_string(),
-                    action: MenuAction::Help,
-                    enabled: true,
-                },
-                MenuItem {
-                    label: "Guide Topics".to_string(),
-                    detail: "DOCS".to_string(),
-                    action: MenuAction::HelpTopics,
-                    enabled: true,
-                },
-                MenuItem {
                     label: "Quick Start".to_string(),
                     detail: "START".to_string(),
                     action: MenuAction::QuickStart,
@@ -3563,6 +3546,36 @@ impl App {
                     label: "First-Run Tour".to_string(),
                     detail: "2 MIN".to_string(),
                     action: MenuAction::FirstRunTour,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Key and Menu Guide".to_string(),
+                    detail: "F1".to_string(),
+                    action: MenuAction::Help,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Guide Topics".to_string(),
+                    detail: "DOCS".to_string(),
+                    action: MenuAction::HelpTopics,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Check for Updates".to_string(),
+                    detail: "GITHUB".to_string(),
+                    action: MenuAction::CheckUpdates,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Doctor Report".to_string(),
+                    detail: "CHECK".to_string(),
+                    action: MenuAction::DoctorReport,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "About BlueScreen Journal".to_string(),
+                    detail: self.app_version_label(),
+                    action: MenuAction::About,
                     enabled: true,
                 },
             ],
@@ -5306,7 +5319,7 @@ impl App {
                 }
                 self.search_index = None;
                 self.refresh_integrity_status();
-                self.flash_status("UNLOCKED. ESC MENUS | F2 SAVE | ALT+N NEW DAY.");
+                self.flash_status("UNLOCKED. F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY.");
                 self.load_selected_date();
                 true
             }
@@ -5332,6 +5345,9 @@ impl App {
 
         let Some(vault) = &self.vault else {
             self.buffer = TextBuffer::new();
+            self.current_entry_number = None;
+            self.next_entry_number = "000001".to_string();
+            self.fresh_entry_page = true;
             self.refresh_document_stats();
             self.clear_dirty_tracking();
             return;
@@ -5339,6 +5355,10 @@ impl App {
 
         match vault.load_date_state(self.selected_date) {
             Ok(state) => {
+                let fresh_entry_page = state.current_entry_number.is_none();
+                self.current_entry_number = state.current_entry_number;
+                self.next_entry_number = state.next_entry_number;
+                self.fresh_entry_page = fresh_entry_page;
                 self.buffer = TextBuffer::from_text(state.revision_text.as_deref().unwrap_or(""));
                 self.refresh_document_stats();
                 self.closing_thought = state.revision_closing_thought;
@@ -5363,6 +5383,8 @@ impl App {
             }
             Err(_) => {
                 self.buffer = TextBuffer::new();
+                self.current_entry_number = None;
+                self.fresh_entry_page = true;
                 self.refresh_document_stats();
                 self.closing_thought = None;
                 self.entry_metadata = EntryMetadata::default();
@@ -5411,7 +5433,7 @@ impl App {
         }
 
         self.pending_archive_confirm = Some((target, now + ARCHIVE_CONFIRM_WINDOW));
-        self.flash_status("ARCHIVE DATE: REPEAT COMMAND TO OPEN.");
+        self.flash_status("OLD ENTRY: REPEAT COMMAND TO OPEN ARCHIVE DATE.");
         true
     }
 
@@ -5479,7 +5501,9 @@ impl App {
         self.menu = Some(MenuState::new(menu, self));
         if !self.menu_coach_shown {
             self.menu_coach_shown = true;
-            self.flash_status("MENU OPEN. ARROWS/ENTER. ESC CLOSE. ALT+N NEW DAY. CTRL+O FILE.");
+            self.flash_status(
+                "MENU OPEN. ARROWS/ENTER. ESC CLOSE. CTRL+K COMMANDS. ALT+N NEXT DAY.",
+            );
         }
     }
 
@@ -5593,8 +5617,8 @@ impl App {
             lines.push(format!("  {word}: {count}"));
         }
         lines.push(String::new());
-        lines.push("Use Edit -> Spellcheck Entry to apply fixes.".to_string());
-        lines.push("Use Edit -> Add Word At Cursor for temporary session ignore.".to_string());
+        lines.push("Use Tools -> Spellcheck Entry to apply fixes.".to_string());
+        lines.push("Use Tools -> Add Word At Cursor for temporary session ignore.".to_string());
 
         self.open_info_overlay("Spellcheck Summary", lines.join("\n"));
     }
@@ -5706,9 +5730,9 @@ impl App {
 
     fn open_daily_flow_coach_overlay(&mut self) {
         let next_action = if self.dirty {
-            "Save this page (F2), then continue or open next day (Ctrl+Shift+S)."
+            "Save this page with F2, or type **save** to jump straight to the next same-day entry."
         } else {
-            "Start writing now, or type **save** on its own line for quick same-day next entry."
+            "Start writing now. Use **save** for the next same-day entry, or Alt+N for the next blank day."
         };
         let lines = vec![
             format!("Entry date   : {}", self.selected_date.format("%Y-%m-%d")),
@@ -5718,11 +5742,11 @@ impl App {
             format!("Lock state   : {}", self.lock_status_label()),
             String::new(),
             "Daily confidence loop:".to_string(),
-            "1. Write freely until you finish a thought.".to_string(),
-            "2. Save revision (F2) whenever you want history.".to_string(),
-            "3. Use **save** + Enter for clean next same-day page.".to_string(),
-            "4. Use Alt+N for a new blank day when you move forward.".to_string(),
-            "5. Use Calendar/Index for archive browsing (intentional friction).".to_string(),
+            "1. Write on today's page until the thought feels complete.".to_string(),
+            "2. Press F2 any time you want a saved revision in history.".to_string(),
+            "3. Type **save** on its own line for a clean next entry on the same day.".to_string(),
+            "4. Press Alt+N only when you want tomorrow's blank page.".to_string(),
+            "5. Use Calendar, Index, or Search when you mean to open an older entry.".to_string(),
             String::new(),
             format!("Next best action: {next_action}"),
         ];
@@ -6240,23 +6264,223 @@ impl App {
         self.flash_status("RANDOM ENTRY.");
     }
 
+    fn command_palette_title(&self, menu: MenuId, item: &MenuItem) -> String {
+        match item.action {
+            MenuAction::Save => "Save Current Entry".to_string(),
+            MenuAction::SaveAndNextDay => "Save and Open Next Day".to_string(),
+            MenuAction::SaveAndLock => "Save and Lock Vault".to_string(),
+            MenuAction::QuickSaveNext => "Quick Save and Open Next Entry".to_string(),
+            MenuAction::Export => "Export Current Entry".to_string(),
+            MenuAction::Backup => "Create Backup Snapshot".to_string(),
+            MenuAction::RestoreBackup => "Restore from Backup".to_string(),
+            MenuAction::Find => "Find in Current Entry".to_string(),
+            MenuAction::Replace => "Replace in Current Entry".to_string(),
+            MenuAction::SpellcheckEntry => "Spellcheck Current Entry".to_string(),
+            MenuAction::SpellcheckSummary => "Review Spelling Summary".to_string(),
+            MenuAction::SpellcheckAutoFixTypos => "Fix Common Typos".to_string(),
+            MenuAction::GlobalSearch => "Search Saved Entries".to_string(),
+            MenuAction::Dates => "Open Calendar".to_string(),
+            MenuAction::Index => "Browse Old Entries".to_string(),
+            MenuAction::RecentEntries => "Open Recent Dates".to_string(),
+            MenuAction::FavoriteEntries => "Open Favorite Dates".to_string(),
+            MenuAction::PreviousEntry => "Open Previous Saved Entry".to_string(),
+            MenuAction::NextEntry => "Open Next Saved Entry".to_string(),
+            MenuAction::NewEntry => "Open Next Blank Day".to_string(),
+            MenuAction::Today => "Jump Back to Today".to_string(),
+            MenuAction::Sync => "Run Encrypted Sync".to_string(),
+            MenuAction::CloudStatus => "Show Cloud Status".to_string(),
+            MenuAction::CloudRecover => "Recover from Cloud".to_string(),
+            MenuAction::Verify => "Verify Vault Integrity".to_string(),
+            MenuAction::IntegrityDetails => "Show Integrity Details".to_string(),
+            MenuAction::ReviewPrompts => "Open Writing Prompts".to_string(),
+            MenuAction::TodayBrief => "Open Today Brief".to_string(),
+            MenuAction::WeekCompass => "Open Week Compass".to_string(),
+            MenuAction::QuickStart => "Read Quick Start".to_string(),
+            MenuAction::FirstRunTour => "Take First-Run Tour".to_string(),
+            MenuAction::DailyFlowCoach => "Open Daily Flow Coach".to_string(),
+            MenuAction::CheckUpdates => "Check for App Updates".to_string(),
+            MenuAction::Help => "Open Key and Menu Guide".to_string(),
+            MenuAction::About => "About BlueScreen Journal".to_string(),
+            MenuAction::CommandPalette => "Browse All Commands".to_string(),
+            _ if matches!(menu, MenuId::Help) => format!("Open {}", item.label),
+            _ => item.label.clone(),
+        }
+    }
+
+    fn command_palette_context_label(&self, menu: MenuId, action: &MenuAction) -> &'static str {
+        match action {
+            MenuAction::Save
+            | MenuAction::SaveAndNextDay
+            | MenuAction::SaveAndLock
+            | MenuAction::QuickSaveNext => "WRITE FLOW",
+            MenuAction::Dates
+            | MenuAction::Index
+            | MenuAction::RecentEntries
+            | MenuAction::FavoriteEntries
+            | MenuAction::PreviousEntry
+            | MenuAction::NextEntry
+            | MenuAction::NewEntry
+            | MenuAction::Today
+            | MenuAction::RandomEntry
+            | MenuAction::PreviousDay
+            | MenuAction::NextDay
+            | MenuAction::Yesterday
+            | MenuAction::Tomorrow => "OPEN DATE",
+            MenuAction::GlobalSearch
+            | MenuAction::SearchPresets
+            | MenuAction::SearchPinnedQueries
+            | MenuAction::SearchHistory
+            | MenuAction::SearchScopeToday
+            | MenuAction::SearchScopeWeek
+            | MenuAction::SearchScopeMonth
+            | MenuAction::SearchScopeYear
+            | MenuAction::SearchScopeAll
+            | MenuAction::SearchCacheStatus
+            | MenuAction::RebuildSearchIndex => "SEARCH",
+            MenuAction::SpellcheckEntry
+            | MenuAction::SpellcheckSummary
+            | MenuAction::SpellcheckNext
+            | MenuAction::SpellcheckPrevious
+            | MenuAction::SpellcheckAutoFixTypos
+            | MenuAction::SpellcheckIgnoreCursorWord => "REVIEW",
+            MenuAction::Backup
+            | MenuAction::BackupHistory
+            | MenuAction::BackupCleanupPreview
+            | MenuAction::BackupPolicy
+            | MenuAction::BackupPruneNow
+            | MenuAction::RestoreBackup
+            | MenuAction::Sync
+            | MenuAction::SyncCenter
+            | MenuAction::CloudStatus
+            | MenuAction::CloudRecover
+            | MenuAction::Verify
+            | MenuAction::IntegrityDetails
+            | MenuAction::DoctorReport => "SAFETY",
+            MenuAction::QuickStart
+            | MenuAction::FirstRunTour
+            | MenuAction::DailyFlowCoach
+            | MenuAction::Help
+            | MenuAction::HelpTopics
+            | MenuAction::CheckUpdates
+            | MenuAction::About => "GUIDE",
+            _ => match menu {
+                MenuId::File => "FILE",
+                MenuId::Edit => "EDIT",
+                MenuId::Search => "SEARCH",
+                MenuId::Go => "GO",
+                MenuId::Tools => "TOOLS",
+                MenuId::Setup => "SETUP",
+                MenuId::Help => "HELP",
+            },
+        }
+    }
+
+    fn command_palette_keywords(&self, menu: MenuId, item: &MenuItem, title: &str) -> String {
+        let extra = match item.action {
+            MenuAction::Save => "save write revision current page now",
+            MenuAction::SaveAndNextDay => "save next day tomorrow blank page move forward",
+            MenuAction::SaveAndLock => "save lock secure close",
+            MenuAction::QuickSaveNext => "quick save next entry same day continue fresh clean page",
+            MenuAction::Dates => "calendar date picker open date old entry archive browse past",
+            MenuAction::Index => "index timeline browse old entries archive history past",
+            MenuAction::NewEntry => "next blank day tomorrow fresh page move forward",
+            MenuAction::PreviousEntry | MenuAction::NextEntry => {
+                "saved entry archive history older newer browse"
+            }
+            MenuAction::GlobalSearch => "search find old entry history archive results query",
+            MenuAction::SpellcheckEntry => "spellcheck spelling typo fix correct page",
+            MenuAction::SpellcheckSummary => "spellcheck summary report spelling typo review",
+            MenuAction::SpellcheckAutoFixTypos => "spellcheck autofix typo fix common spelling",
+            MenuAction::QuickStart | MenuAction::FirstRunTour | MenuAction::DailyFlowCoach => {
+                "help learn start onboarding how to use save next old entry"
+            }
+            MenuAction::Help => "help keys menus shortcuts guide learn",
+            MenuAction::CheckUpdates => "update upgrade install latest release version",
+            MenuAction::Backup => "backup snapshot safety restore recovery archive",
+            MenuAction::RestoreBackup => "restore recovery backup disaster safety",
+            MenuAction::Sync => "sync cloud upload download remote encrypted",
+            MenuAction::CloudStatus => "sync status cloud health remote verify",
+            MenuAction::CloudRecover => "recover cloud restore remote rebuild machine",
+            MenuAction::Verify => "verify integrity chain tamper safety",
+            MenuAction::Today => "today jump current date now",
+            MenuAction::RecentEntries => "recent dates history last opened",
+            MenuAction::FavoriteEntries => "favorite starred bookmarked dates",
+            MenuAction::CommandPalette => "commands palette command menu action shortcut",
+            _ => "",
+        };
+        format!(
+            "{} {} {} {} {} {}",
+            menu.title().to_ascii_lowercase(),
+            self.command_palette_context_label(menu, &item.action)
+                .to_ascii_lowercase(),
+            item.label.to_ascii_lowercase(),
+            title.to_ascii_lowercase(),
+            item.detail.to_ascii_lowercase(),
+            extra
+        )
+    }
+
+    fn command_palette_priority(&self, action: &MenuAction) -> usize {
+        let first_run = !self.config.first_run_coach_completed;
+        let dirty = self.dirty;
+
+        match action {
+            MenuAction::Save if dirty => 0,
+            MenuAction::QuickSaveNext if dirty => 1,
+            MenuAction::SaveAndNextDay if dirty => 2,
+            MenuAction::Find if dirty => 3,
+            MenuAction::SpellcheckEntry if dirty => 4,
+            MenuAction::QuickStart if first_run => 5,
+            MenuAction::FirstRunTour if first_run => 6,
+            MenuAction::DailyFlowCoach if first_run => 7,
+            MenuAction::Help if first_run => 8,
+            MenuAction::NewEntry => 10,
+            MenuAction::Dates => 11,
+            MenuAction::Index => 12,
+            MenuAction::GlobalSearch => 13,
+            MenuAction::Today => 14,
+            MenuAction::Backup => 20,
+            MenuAction::Verify => 21,
+            MenuAction::Sync => 22,
+            MenuAction::CloudStatus => 23,
+            MenuAction::CheckUpdates => 30,
+            MenuAction::About => 31,
+            _ => 50,
+        }
+    }
+
     fn build_command_palette_items(&self) -> Vec<PickerItem> {
-        let mut items = Vec::new();
+        let mut ranked_items = Vec::new();
         for menu in MenuId::all() {
             for item in self
                 .menu_items(*menu)
                 .into_iter()
                 .filter(|item| item.enabled)
             {
-                items.push(PickerItem {
-                    title: item.label,
-                    detail: format!("{} {}", menu.title(), item.detail),
-                    keywords: format!("{} {}", menu.title(), item.detail),
-                    action: PickerAction::Menu(item.action),
-                });
+                if matches!(item.action, MenuAction::CommandPalette) {
+                    continue;
+                }
+                let title = self.command_palette_title(*menu, &item);
+                let detail = format!(
+                    "{}  {}",
+                    self.command_palette_context_label(*menu, &item.action),
+                    item.detail
+                );
+                let keywords = self.command_palette_keywords(*menu, &item, &title);
+                ranked_items.push((
+                    self.command_palette_priority(&item.action),
+                    title.clone(),
+                    PickerItem {
+                        title,
+                        detail,
+                        keywords,
+                        action: PickerAction::Menu(item.action),
+                    },
+                ));
             }
         }
-        items
+        ranked_items.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        ranked_items.into_iter().map(|(_, _, item)| item).collect()
     }
 
     fn open_command_palette(&mut self) {
@@ -6264,7 +6488,7 @@ impl App {
         self.open_picker_overlay(PickerOverlay::new(
             "Command Palette",
             items,
-            "No commands match.",
+            "Try: save, next, old, search, sync, backup, help.",
         ));
     }
 
@@ -6762,15 +6986,19 @@ impl App {
             "First 2 minutes:".to_string(),
             "1. Type immediately into today's entry.".to_string(),
             "2. Save with F2 or FILE -> Save Entry.".to_string(),
-            "3. Type **save** on its own line, then Enter for quick save + clean next same-day page."
+            "3. Type **save** on its own line, then press Enter for the next same-day entry."
                 .to_string(),
-            "4. SETUP -> Opening Line Template controls the persistent header line.".to_string(),
-            "5. Press Esc to open menus, or press ? to open key help.".to_string(),
-            "6. Press Alt+, / Alt+. for day-by-day, Alt+Y/0 for today, Alt+N for next blank new-entry date.".to_string(),
-            "7. Press Alt+[ / Alt+] for saved-entry jumps, Alt+D for calendar, Alt+I for timeline index.".to_string(),
-            "8. Use SEARCH -> Search Vault to find older entries fast.".to_string(),
-            "9. In Search: Ctrl+B pins a query, Ctrl+Shift+B saves a preset, Ctrl+1..9 loads preset slots.".to_string(),
-            "10. Use FILE -> Backup Snapshot before major travel or changes.".to_string(),
+            "4. Press Alt+N when you want the next blank day instead of the next same-day entry."
+                .to_string(),
+            "5. Use F3 Calendar, F7 Index, or F5 Search when you want to open older entries."
+                .to_string(),
+            "6. Press Esc for menus, or press ? for key help.".to_string(),
+            "7. Alt+, / Alt+. moves day-by-day. Alt+Y/0 jumps back to today.".to_string(),
+            "8. Alt+[ / Alt+] jumps between saved entries when you are browsing history."
+                .to_string(),
+            "9. SETUP -> Opening Line Template controls the persistent header line.".to_string(),
+            "10. FILE -> Backup Snapshot creates an encrypted checkpoint before big changes."
+                .to_string(),
             String::new(),
             "The app autosaves encrypted drafts, but manual Save creates history.".to_string(),
             "F1 opens the key cheatsheet. HELP has first-run and operator guides.".to_string(),
@@ -9647,6 +9875,9 @@ impl App {
         self.spell_session_words.clear();
         self.pending_archive_confirm = None;
         self.last_save_receipt = None;
+        self.current_entry_number = None;
+        self.next_entry_number = "000001".to_string();
+        self.fresh_entry_page = true;
         self.clear_dirty_tracking();
         self.pending_sync_mode = None;
     }
@@ -10184,7 +10415,7 @@ impl App {
             self.refresh_integrity_status();
             self.overlay = None;
             self.load_selected_date();
-            self.flash_status("UNLOCKED. ESC MENUS | F2 SAVE | ALT+N NEW DAY.");
+            self.flash_status("UNLOCKED. F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY.");
         }
     }
 
@@ -10481,9 +10712,9 @@ impl App {
         }
         self.open_next_new_entry();
         if was_dirty {
-            self.flash_status("SAVED. NEW DAY READY.");
+            self.flash_status("SAVED. NEXT DAY READY.");
         } else {
-            self.flash_status("NEW DAY READY.");
+            self.flash_status("NEXT DAY READY.");
         }
     }
 
@@ -10530,7 +10761,7 @@ impl App {
             Ok(()) => {
                 log::info!("manual save completed");
                 let snapshot_stats = self.document_stats;
-                let snapshot_entry_no = self.entry_number_label();
+                let snapshot_entry_no = self.next_entry_number.clone();
                 let snapshot_date = self.selected_date;
                 self.dirty = false;
                 self.clear_dirty_tracking();
@@ -10586,13 +10817,14 @@ impl App {
             return false;
         }
         self.prepare_next_same_day_entry(viewport_height);
-        self.flash_status("QUICK SAVED. NEW ENTRY READY.");
+        self.flash_status("QUICK SAVED. NEXT ENTRY READY.");
         true
     }
 
     fn prepare_next_same_day_entry(&mut self, viewport_height: usize) {
         // Quick-save transitions to a fresh same-day page so prior text is not left on screen.
         self.buffer.wipe();
+        self.fresh_entry_page = true;
         self.dirty = false;
         self.clear_dirty_tracking();
         self.seed_opening_line_for_blank_editor();
@@ -10995,6 +11227,7 @@ impl App {
         entry_metadata: EntryMetadata,
     ) {
         self.wipe_entry_buffer();
+        self.fresh_entry_page = false;
         self.buffer = TextBuffer::from_text(text);
         self.refresh_document_stats();
         self.closing_thought = closing_thought;
@@ -12582,6 +12815,74 @@ mod tests {
         assert_editor_invariants(app);
     }
 
+    fn trigger_menu_item_by_label(
+        app: &mut App,
+        menu: MenuId,
+        label: &str,
+        viewport_height: usize,
+        viewport_width: usize,
+    ) {
+        let hotkey = match menu {
+            MenuId::File => 'f',
+            MenuId::Edit => 'e',
+            MenuId::Search => 's',
+            MenuId::Go => 'g',
+            MenuId::Tools => 't',
+            MenuId::Setup => 'u',
+            MenuId::Help => 'h',
+        };
+        let enabled_item_count = app
+            .menu_items(menu)
+            .iter()
+            .filter(|item| item.enabled)
+            .count();
+
+        app.menu = None;
+        send_editor_key(
+            app,
+            KeyCode::Char(hotkey),
+            KeyModifiers::ALT,
+            viewport_height,
+            viewport_width,
+        );
+        for _ in 0..enabled_item_count.max(1) {
+            let current_label = app
+                .menu()
+                .and_then(|state| {
+                    app.menu_items(state.selected_menu)
+                        .get(state.selected_item)
+                        .map(|item| item.label.clone())
+                })
+                .unwrap_or_default();
+            if current_label == label {
+                break;
+            }
+            send_editor_key(
+                app,
+                KeyCode::Down,
+                KeyModifiers::empty(),
+                viewport_height,
+                viewport_width,
+            );
+        }
+        let selected_label = app
+            .menu()
+            .and_then(|state| {
+                app.menu_items(state.selected_menu)
+                    .get(state.selected_item)
+                    .map(|item| item.label.clone())
+            })
+            .unwrap_or_default();
+        assert_eq!(selected_label, label, "missing menu item: {label}");
+        send_editor_key(
+            app,
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
+    }
+
     fn type_editor_text(app: &mut App, text: &str, viewport_height: usize, viewport_width: usize) {
         for ch in text.chars() {
             match ch {
@@ -13078,33 +13379,17 @@ mod tests {
         let viewport_width = 80;
 
         type_editor_text(&mut app, "Draft", viewport_height, viewport_width);
-        send_editor_key(
+        trigger_menu_item_by_label(
             &mut app,
-            KeyCode::Esc,
-            KeyModifiers::empty(),
-            viewport_height,
-            viewport_width,
-        );
-        send_editor_key(
-            &mut app,
-            KeyCode::Char('h'),
-            KeyModifiers::empty(),
+            MenuId::Help,
+            "Quick Start",
             viewport_height,
             viewport_width,
         );
         assert!(matches!(
-            app.menu(),
-            Some(menu) if menu.selected_menu == MenuId::Help
+            app.overlay(),
+            Some(Overlay::Info(info)) if info.title == "Quick Start"
         ));
-
-        send_editor_key(
-            &mut app,
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-            viewport_height,
-            viewport_width,
-        );
-        assert!(matches!(app.overlay(), Some(Overlay::Info(_))));
 
         send_editor_key(
             &mut app,
@@ -13730,7 +14015,7 @@ mod tests {
         );
 
         assert_eq!(app.selected_date, start + Duration::days(1));
-        assert_eq!(app.status_text(), Some("SAVED. NEW DAY READY."));
+        assert_eq!(app.status_text(), Some("SAVED. NEXT DAY READY."));
     }
 
     #[test]
@@ -14057,7 +14342,7 @@ mod tests {
         assert_eq!(app.selected_date, today);
         assert_eq!(
             app.status_text(),
-            Some("ARCHIVE DATE: REPEAT COMMAND TO OPEN.")
+            Some("OLD ENTRY: REPEAT COMMAND TO OPEN ARCHIVE DATE.")
         );
 
         app.open_adjacent_day(-(ARCHIVE_CONFIRM_OLDER_THAN_DAYS + 5));
@@ -14081,6 +14366,7 @@ mod tests {
                 let rendered = info.lines.join("\n");
                 assert!(rendered.contains("Saved at"));
                 assert!(rendered.contains("Entry number"));
+                assert!(rendered.contains("Entry number  : 000001"));
             }
             _ => panic!("expected save receipt info overlay"),
         }
@@ -14372,6 +14658,7 @@ mod tests {
         assert_eq!(app.header_page_state_label(), "IN PROGRESS");
 
         app.dirty = false;
+        app.fresh_entry_page = false;
         app.last_save_kind = Some(super::SaveKind::Saved);
         assert_eq!(app.header_page_state_label(), "SAVED");
     }
@@ -14421,7 +14708,7 @@ mod tests {
             .map(|item| item.label)
             .collect::<Vec<_>>();
 
-        assert!(labels.contains(&"Quick Save + Next".to_string()));
+        assert!(labels.contains(&"Quick Save + Next Entry".to_string()));
         assert!(labels.contains(&"Save Receipt".to_string()));
         assert!(labels.contains(&"Save + Next Day".to_string()));
         assert!(labels.contains(&"Save + Lock".to_string()));
@@ -14520,9 +14807,9 @@ mod tests {
         assert!(labels.contains(&"Extract #Tags to Metadata".to_string()));
         assert!(labels.contains(&"Mood Up".to_string()));
         assert!(labels.contains(&"Mood Down".to_string()));
-        assert!(labels.contains(&"Spellcheck Entry".to_string()));
-        assert!(labels.contains(&"Spellcheck Summary".to_string()));
-        assert!(labels.contains(&"Auto-Fix Common Typos".to_string()));
+        assert!(!labels.contains(&"Spellcheck Entry".to_string()));
+        assert!(!labels.contains(&"Spellcheck Summary".to_string()));
+        assert!(!labels.contains(&"Auto-Fix Common Typos".to_string()));
     }
 
     #[test]
@@ -14606,7 +14893,7 @@ mod tests {
             viewport_width,
         );
 
-        assert_eq!(app.status_text(), Some("QUICK SAVED. NEW ENTRY READY."));
+        assert_eq!(app.status_text(), Some("QUICK SAVED. NEXT ENTRY READY."));
         assert_eq!(
             app.buffer.to_text(),
             format!("JOURNAL ENTRY {}\n", date.format("%Y-%m-%d"))
@@ -14642,7 +14929,7 @@ mod tests {
 
         app.perform_menu_action(MenuAction::QuickSaveNext, 20);
 
-        assert_eq!(app.status_text(), Some("QUICK SAVED. NEW ENTRY READY."));
+        assert_eq!(app.status_text(), Some("QUICK SAVED. NEXT ENTRY READY."));
         assert_eq!(
             app.buffer.to_text(),
             format!("JOURNAL ENTRY {}\n", date.format("%Y-%m-%d"))
@@ -14660,6 +14947,52 @@ mod tests {
             .revision_text
             .expect("saved revision");
         assert_eq!(saved, "Menu quick save entry");
+    }
+
+    #[test]
+    fn manual_save_on_existing_entry_advances_entry_number() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 19).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.config.opening_line_template.clear();
+        app.buffer = TextBuffer::from_text("First entry");
+        app.buffer.set_cursor(0, "First entry".chars().count());
+        app.dirty = true;
+
+        assert!(app.save_current_date_result());
+        assert_eq!(app.entry_number_label(), "000001");
+
+        app.buffer.insert_text(" updated");
+        app.dirty = true;
+
+        assert!(app.save_current_date_result());
+        assert_eq!(app.entry_number_label(), "000002");
+        assert_eq!(
+            app.last_save_receipt
+                .as_ref()
+                .map(|receipt| receipt.entry_number.as_str()),
+            Some("000002")
+        );
+    }
+
+    #[test]
+    fn quick_save_new_page_shows_next_entry_number() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.config.opening_line_template = "ENTRY {ENTRY_NO}".to_string();
+
+        app.buffer = TextBuffer::from_text("First entry");
+        app.buffer.set_cursor(0, "First entry".chars().count());
+        app.dirty = true;
+        assert!(app.save_current_date_result());
+        assert_eq!(app.entry_number_label(), "000001");
+
+        app.prepare_next_same_day_entry(20);
+
+        assert_eq!(app.entry_number_label(), "000002");
+        assert_eq!(app.buffer.to_text(), "ENTRY 000002\n");
+        assert_eq!(app.header_page_state_label(), "NEW PAGE");
     }
 
     #[test]
@@ -14751,6 +15084,10 @@ mod tests {
         assert!(labels.contains(&"SYSOP Center".to_string()));
         assert!(labels.contains(&"Cloud Status".to_string()));
         assert!(labels.contains(&"Recover From Cloud".to_string()));
+        assert!(labels.contains(&"Spellcheck Entry".to_string()));
+        assert!(labels.contains(&"Spellcheck Summary".to_string()));
+        assert!(labels.contains(&"Auto-Fix Common Typos".to_string()));
+        assert!(!labels.contains(&"Check for Updates".to_string()));
     }
 
     #[test]
@@ -15764,6 +16101,108 @@ mod tests {
     }
 
     #[test]
+    fn command_palette_uses_action_first_titles_and_excludes_self_entry() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.dirty = true;
+        app.config.first_run_coach_completed = false;
+
+        let items = app.build_command_palette_items();
+        let titles = items
+            .iter()
+            .map(|item| item.title.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(titles.contains(&"Save Current Entry"));
+        assert!(titles.contains(&"Quick Save and Open Next Entry"));
+        assert!(titles.contains(&"Browse Old Entries"));
+        assert!(titles.contains(&"Read Quick Start"));
+        assert!(!titles.contains(&"Command Palette"));
+        assert!(!titles.contains(&"Browse All Commands"));
+    }
+
+    #[test]
+    fn command_palette_prioritizes_save_and_guidance_over_archive_actions() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.dirty = true;
+        app.config.first_run_coach_completed = false;
+
+        let items = app.build_command_palette_items();
+        let position = |title: &str| {
+            items
+                .iter()
+                .position(|item| item.title == title)
+                .unwrap_or_else(|| panic!("missing palette title: {title}"))
+        };
+
+        assert!(position("Save Current Entry") < position("Browse Old Entries"));
+        assert!(position("Read Quick Start") < position("Show Cloud Status"));
+    }
+
+    #[test]
+    fn command_palette_keywords_match_old_entry_search_terms() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
+        let app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        let items = app.build_command_palette_items();
+        let mut picker = PickerOverlay::new(
+            "Command Palette",
+            items,
+            "Try: save, next, old, search, sync, backup, help.",
+        );
+        for ch in "old".chars() {
+            picker.push_filter_char(ch);
+        }
+
+        let titles = picker
+            .filtered_indices()
+            .iter()
+            .filter_map(|idx| picker.items.get(*idx))
+            .map(|item| item.title.clone())
+            .collect::<Vec<_>>();
+
+        assert!(titles.iter().any(|title| title == "Browse Old Entries"));
+        assert!(titles.iter().any(|title| title == "Open Calendar"));
+    }
+
+    #[test]
+    fn command_palette_overlay_uses_action_prompt_and_examples() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        let picker = PickerOverlay::new(
+            "Command Palette",
+            app.build_command_palette_items(),
+            "Try: save, next, old, search, sync, backup, help.",
+        );
+        app.overlay = Some(Overlay::Picker(picker));
+
+        let rendered = render_app(&app, 120, 30);
+
+        assert!(rendered.contains("Action:"));
+        assert!(rendered.contains("save / next / old / search"));
+        assert!(rendered.contains("Enter run"));
+    }
+
+    #[test]
+    fn command_palette_overlay_footer_hint_is_action_specific() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = Some(Overlay::Picker(PickerOverlay::new(
+            "Command Palette",
+            Vec::new(),
+            "Try: save, next, old, search, sync, backup, help.",
+        )));
+
+        assert_eq!(
+            app.overlay_footer_hint(),
+            Some("COMMANDS: TYPE save/next/old/search | ENTER RUN")
+        );
+    }
+
+    #[test]
     fn insights_center_action_opens_ten_report_picker_items() {
         let mut app = App::with_initial_date(None);
         app.overlay = None;
@@ -15874,9 +16313,38 @@ mod tests {
             .map(|item| item.label)
             .collect::<Vec<_>>();
 
+        assert!(labels.contains(&"Quick Start".to_string()));
         assert!(labels.contains(&"About BlueScreen Journal".to_string()));
         assert!(labels.contains(&"First-Run Tour".to_string()));
         assert!(labels.contains(&"Daily Flow Coach".to_string()));
+        assert!(labels.contains(&"Check for Updates".to_string()));
+        assert!(labels.contains(&"Doctor Report".to_string()));
+    }
+
+    #[test]
+    fn help_menu_groups_learning_support_and_about_actions() {
+        let app = App::with_initial_date(None);
+        let labels = app
+            .menu_items(MenuId::Help)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+
+        let quick_start = labels
+            .iter()
+            .position(|label| label == "Quick Start")
+            .expect("quick start");
+        let check_updates = labels
+            .iter()
+            .position(|label| label == "Check for Updates")
+            .expect("check for updates");
+        let about = labels
+            .iter()
+            .position(|label| label == "About BlueScreen Journal")
+            .expect("about");
+
+        assert!(quick_start < check_updates);
+        assert!(check_updates < about);
     }
 
     #[test]
@@ -15892,6 +16360,8 @@ mod tests {
                 let rendered = info.lines.join("\n");
                 assert!(rendered.contains("WELCOME TO BLUESCREEN JOURNAL"));
                 assert!(rendered.contains("Type **save**"));
+                assert!(rendered.contains("next blank day"));
+                assert!(rendered.contains("older entries"));
             }
             other => panic!("expected first-run tour overlay, got {other:?}"),
         }
@@ -15921,10 +16391,30 @@ mod tests {
         match app.overlay() {
             Some(Overlay::Info(info)) => {
                 assert_eq!(info.title, "First-Run Tour");
-                assert!(info.lines.join("\n").contains("Type **save**"));
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("Type **save**"));
+                assert!(rendered.contains("older entries"));
             }
             other => panic!("expected first-run tour overlay, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn empty_state_guidance_distinguishes_next_entry_next_day_and_old_entries() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.config.opening_line_template.clear();
+        app.buffer.wipe();
+        app.refresh_document_stats();
+        app.overlay = None;
+
+        let rendered = render_app(&app, 120, 30);
+
+        assert!(rendered.contains("next same-day entry"));
+        assert!(rendered.contains("next blank day"));
+        assert!(rendered.contains("older entry"));
+        assert!(rendered.contains("save, next, old, search, backup, help"));
     }
 
     #[test]
@@ -15954,13 +16444,13 @@ mod tests {
         send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 80);
         assert_eq!(
             app.footer_next_hint(),
-            Some("FIRST RUN: TYPE | F2 SAVE | **save** QUICK | ESC MENUS")
+            Some("START HERE: TYPE | F2 SAVE | F1 HELP | ESC MENUS")
         );
 
         type_editor_text(&mut app, "first save proves the flow", 20, 80);
         assert_eq!(
             app.footer_next_hint(),
-            Some("FIRST RUN: F2 SAVE | **save** QUICK | ESC MENUS | ALT+N NEW DAY")
+            Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY")
         );
 
         send_editor_key(&mut app, KeyCode::F(2), KeyModifiers::empty(), 20, 80);
@@ -15968,7 +16458,7 @@ mod tests {
         assert!(app.config.first_run_coach_completed);
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT: TYPE | **save** QUICK | ALT+N NEW DAY | ALT+[ ] SAVED")
+            Some("NEXT: TYPE | ALT+N NEXT DAY | ALT+[ ] OPEN SAVED")
         );
     }
 
@@ -15984,7 +16474,9 @@ mod tests {
                 assert_eq!(info.title, "Daily Flow Coach");
                 let rendered = info.lines.join("\n");
                 assert!(rendered.contains("Daily confidence loop"));
-                assert!(rendered.contains("quick same-day next entry"));
+                assert!(rendered.contains("next same-day entry"));
+                assert!(rendered.contains("next blank day"));
+                assert!(rendered.contains("older entry"));
             }
             other => panic!("expected daily flow coach overlay, got {other:?}"),
         }
@@ -16182,12 +16674,12 @@ mod tests {
         app.dirty = false;
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT: TYPE | **save** QUICK | ALT+N NEW DAY | ALT+[ ] SAVED")
+            Some("NEXT: TYPE | ALT+N NEXT DAY | ALT+[ ] OPEN SAVED")
         );
         app.dirty = true;
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT: F2 SAVE | **save** QUICK | ALT+N NEW DAY | ALT+Y/0 TODAY")
+            Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY")
         );
     }
 
@@ -16202,12 +16694,12 @@ mod tests {
         app.dirty = false;
         assert_eq!(
             app.footer_next_hint(),
-            Some("FIRST RUN: TYPE | F2 SAVE | **save** QUICK | ESC MENUS")
+            Some("START HERE: TYPE | F2 SAVE | F1 HELP | ESC MENUS")
         );
         app.dirty = true;
         assert_eq!(
             app.footer_next_hint(),
-            Some("FIRST RUN: F2 SAVE | **save** QUICK | ESC MENUS | ALT+N NEW DAY")
+            Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY")
         );
     }
 
@@ -16229,7 +16721,27 @@ mod tests {
         assert!(app.try_unlock(&mut input, &mut error));
         assert_eq!(
             app.status_text(),
-            Some("UNLOCKED. ESC MENUS | F2 SAVE | ALT+N NEW DAY.")
+            Some("UNLOCKED. F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY.")
+        );
+    }
+
+    #[test]
+    fn menu_open_flash_mentions_commands_and_next_day() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.overlay = None;
+        app.menu = None;
+        app.menu_coach_shown = false;
+
+        app.handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())),
+            20,
+        );
+
+        assert_eq!(
+            app.status_text(),
+            Some("MENU OPEN. ARROWS/ENTER. ESC CLOSE. CTRL+K COMMANDS. ALT+N NEXT DAY.")
         );
     }
 
@@ -16527,14 +17039,16 @@ mod tests {
         let mut app = App::with_initial_date(None);
         app.overlay = Some(Overlay::Help);
 
-        let rendered = render_app(&app, 100, 30);
+        let rendered = render_app(&app, 140, 30);
 
         assert!(rendered.contains("BlueScreen Journal"));
         assert!(rendered.contains(env!("CARGO_PKG_VERSION")));
         assert!(rendered.contains("Classic 80x25 workspace."));
         assert!(rendered.contains("Awassee LLC and Sean Heiney"));
         assert!(rendered.contains("sean@sean.net"));
-        assert!(rendered.contains("Flow: TYPE -> F2 SAVE -> ALT+N NEW DAY."));
+        assert!(rendered.contains("TYPE -> F2 SAVE"));
+        assert!(rendered.contains("NEXT ENTRY"));
+        assert!(rendered.contains("NEXT DAY"));
         assert!(rendered.contains("ESC opens menus."));
         assert!(rendered.contains("? or Ctrl+/ opens this card instantly."));
         assert!(rendered.contains("CTRL+O/E/W/Y/T/U/L also opens menus."));
@@ -16601,6 +17115,27 @@ mod tests {
         assert!(rendered.contains("VER v"));
         assert!(rendered.contains("BLUESCREEN JOURNAL [COMPACT]"));
         assert!(rendered.contains("FILE"));
+    }
+
+    #[test]
+    fn rendered_footer_uses_clear_state_and_cursor_labels() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.overlay = None;
+        app.menu = None;
+        app.config.first_run_coach_completed = true;
+        app.config.show_footer_legend = false;
+        app.config.opening_line_template.clear();
+        app.buffer.wipe();
+        app.refresh_document_stats();
+
+        let rendered = render_app(&app, 120, 28);
+
+        assert_eq!(app.footer_mode_label(), "WRITE");
+        assert_eq!(app.cursor_status_label(), "LINE 1 COL 1");
+        assert!(rendered.contains("STATE WRITE"));
+        assert!(rendered.contains("WORDS 0"));
     }
 
     #[test]
@@ -16915,12 +17450,10 @@ mod tests {
         app.refresh_find_matches();
 
         type_editor_text(&mut app, "saved from file menu", 20, 80);
-        send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 80);
-        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 80);
-        send_editor_key(&mut app, KeyCode::Enter, KeyModifiers::empty(), 20, 80);
+        trigger_menu_item_by_label(&mut app, MenuId::File, "Save + Next Day", 20, 80);
 
         assert_eq!(app.selected_date, start + Duration::days(1));
-        assert_eq!(app.status_text(), Some("SAVED. NEW DAY READY."));
+        assert_eq!(app.status_text(), Some("SAVED. NEXT DAY READY."));
         assert_eq!(app.buffer.to_text(), "");
 
         send_editor_key(&mut app, KeyCode::F(7), KeyModifiers::empty(), 20, 80);
@@ -16942,14 +17475,10 @@ mod tests {
         app.refresh_find_matches();
 
         type_editor_text(&mut app, "same day clean page", 20, 80);
-        send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 80);
-        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 80);
-        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 80);
-        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 80);
-        send_editor_key(&mut app, KeyCode::Enter, KeyModifiers::empty(), 20, 80);
+        trigger_menu_item_by_label(&mut app, MenuId::File, "Quick Save + Next Entry", 20, 80);
 
         assert_eq!(app.selected_date, start);
-        assert_eq!(app.status_text(), Some("QUICK SAVED. NEW ENTRY READY."));
+        assert_eq!(app.status_text(), Some("QUICK SAVED. NEXT ENTRY READY."));
         assert_eq!(app.buffer.to_text(), "");
 
         let saved = app
@@ -16981,10 +17510,7 @@ mod tests {
             34,
         );
 
-        send_editor_key(&mut app, KeyCode::Char('t'), KeyModifiers::ALT, 20, 34);
-        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 34);
-        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 34);
-        send_editor_key(&mut app, KeyCode::Enter, KeyModifiers::empty(), 20, 34);
+        trigger_menu_item_by_label(&mut app, MenuId::Tools, "Status Dashboard", 20, 34);
         assert!(matches!(app.overlay(), Some(Overlay::Info(info)) if info.title == "Dashboard"));
 
         send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 34);
@@ -16994,6 +17520,48 @@ mod tests {
         assert_single_menu_bar(&rendered);
         assert!(rendered.contains("Still typing after trust check."));
         assert!(!rendered.contains("TRUST NOW"));
+    }
+
+    #[test]
+    fn functional_tools_menu_spellcheck_summary_roundtrip_preserves_typing_flow() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+        let viewport_height = 20;
+        let viewport_width = 80;
+
+        type_editor_text(
+            &mut app,
+            "Ths line needs spellcheck",
+            viewport_height,
+            viewport_width,
+        );
+
+        trigger_menu_item_by_label(
+            &mut app,
+            MenuId::Tools,
+            "Spellcheck Summary",
+            viewport_height,
+            viewport_width,
+        );
+        assert!(matches!(
+            app.overlay(),
+            Some(Overlay::Info(info)) if info.title == "Spellcheck Summary"
+        ));
+
+        send_editor_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+            viewport_height,
+            viewport_width,
+        );
+        assert!(app.overlay().is_none());
+
+        type_editor_text(&mut app, " still writing", viewport_height, viewport_width);
+        assert_eq!(
+            app.buffer.to_text(),
+            "Ths line needs spellcheck still writing"
+        );
     }
 
     #[test]
