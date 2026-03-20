@@ -2094,23 +2094,26 @@ struct SaveReceipt {
 }
 
 impl SaveReceipt {
-    fn to_lines(&self) -> Vec<String> {
+    fn to_lines(&self, page_state: &str, next_move: &str) -> Vec<String> {
         vec![
+            "REVISION SAVED".to_string(),
+            String::new(),
             format!(
                 "Saved at      : {}",
                 self.saved_at.format("%Y-%m-%d %H:%M:%S")
             ),
             format!("Entry date    : {}", self.date.format("%Y-%m-%d")),
             format!("Entry number  : {}", self.entry_number),
+            format!("Page ready    : {page_state}"),
             format!(
                 "Snapshot stats: {} line(s), {} word(s), {} char(s)",
                 self.lines, self.words, self.chars
             ),
             String::new(),
-            "Save confidence flow:".to_string(),
-            "1. REVISION SAVED appears in header/footer.".to_string(),
-            "2. Use File -> Save Receipt to confirm what was persisted.".to_string(),
-            "3. Type **save** + Enter for quick next same-day page.".to_string(),
+            "What to do next:".to_string(),
+            format!("1. {next_move}"),
+            "2. Alt+N opens the next blank day when you want to move forward.".to_string(),
+            "3. Calendar / Index / Search opens an older entry on purpose.".to_string(),
         ]
     }
 }
@@ -2351,10 +2354,13 @@ impl App {
         if self.selected_date == today {
             format!("TODAY {weekday} {}", self.selected_date.format("%Y-%m-%d"))
         } else if self.selected_date > today {
-            format!("NEXT {weekday} {}", self.selected_date.format("%Y-%m-%d"))
+            format!(
+                "NEXT DAY {weekday} {}",
+                self.selected_date.format("%Y-%m-%d")
+            )
         } else {
             format!(
-                "ARCHIVE {weekday} {}",
+                "OLD ENTRY {weekday} {}",
                 self.selected_date.format("%Y-%m-%d")
             )
         }
@@ -2370,20 +2376,27 @@ impl App {
     }
 
     pub fn header_page_state_label(&self) -> &'static str {
+        let today = Local::now().date_naive();
         if self.vault.is_none() {
             return "LOCKED";
         }
         if self.dirty {
-            return "IN PROGRESS";
+            return "WRITING";
         }
         if self.fresh_entry_page {
-            "NEW PAGE"
+            if self.selected_date == today {
+                "NEXT ENTRY"
+            } else if self.selected_date > today {
+                "BLANK DAY"
+            } else {
+                "BLANK PAGE"
+            }
         } else if matches!(self.last_save_kind, Some(SaveKind::Saved)) {
-            "SAVED"
+            "SAVED PAGE"
         } else if matches!(self.last_save_kind, Some(SaveKind::Autosaved)) {
-            "DRAFT"
+            "DRAFT PAGE"
         } else {
-            "READY"
+            "OPEN ENTRY"
         }
     }
 
@@ -2665,10 +2678,30 @@ impl App {
             }
             return Some("START HERE: TYPE | F2 SAVE | F1 HELP | ESC MENUS");
         }
+        let today = Local::now().date_naive();
         if self.dirty {
             Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY")
+        } else if self.selected_date < today {
+            Some("OLD ENTRY: TYPE TO EDIT | F2 SAVE | F7 INDEX | ALT+] NEWER")
+        } else if self.fresh_entry_page && self.selected_date == today {
+            Some("NEXT ENTRY: TYPE | F2 SAVE | ALT+N NEXT DAY | ALT+[ ] OPEN SAVED")
+        } else if self.fresh_entry_page && self.selected_date > today {
+            Some("NEXT DAY: TYPE | F2 SAVE | ALT+[ ] OPEN SAVED | ALT+Y TODAY")
         } else {
             Some("NEXT: TYPE | ALT+N NEXT DAY | ALT+[ ] OPEN SAVED")
+        }
+    }
+
+    fn save_receipt_next_move_line(&self) -> &'static str {
+        let today = Local::now().date_naive();
+        if self.selected_date < today {
+            "Keep writing here, then press F2 to append another saved old-entry revision."
+        } else if self.fresh_entry_page && self.selected_date == today {
+            "This fresh page is ready for the next same-day entry. Start typing now."
+        } else if self.fresh_entry_page && self.selected_date > today {
+            "This blank day is ready. Start typing when you want the next dated page."
+        } else {
+            "Keep writing here, or type **save** for the next same-day entry."
         }
     }
 
@@ -4994,7 +5027,7 @@ impl App {
                     let base = index.selected_date().unwrap_or(self.selected_date);
                     let target = next_missing_date(&entry_dates, base);
                     self.open_date(target);
-                    self.flash_status(&format!("NEW ENTRY {}.", target.format("%Y-%m-%d")));
+                    self.flash_status(&format!("NEXT DAY READY {}.", target.format("%Y-%m-%d")));
                     keep_overlay = false;
                 }
                 KeyCode::Char('P') => {
@@ -5006,7 +5039,7 @@ impl App {
                     let base = index.selected_date().unwrap_or(self.selected_date);
                     let target = previous_missing_date(&entry_dates, base);
                     self.open_date(target);
-                    self.flash_status(&format!("BLANK ENTRY {}.", target.format("%Y-%m-%d")));
+                    self.flash_status(&format!("BLANK DAY READY {}.", target.format("%Y-%m-%d")));
                     keep_overlay = false;
                 }
                 KeyCode::Char('[') => {
@@ -5725,7 +5758,15 @@ impl App {
             self.flash_status("SAVE RECEIPT UNAVAILABLE.");
             return;
         };
-        self.open_info_overlay("Save Receipt", receipt.to_lines().join("\n"));
+        self.open_info_overlay(
+            "Save Receipt",
+            receipt
+                .to_lines(
+                    self.header_page_state_label(),
+                    self.save_receipt_next_move_line(),
+                )
+                .join("\n"),
+        );
     }
 
     fn open_daily_flow_coach_overlay(&mut self) {
@@ -9218,7 +9259,7 @@ impl App {
             }
         }
         self.open_date(target);
-        self.flash_status(&format!("NEW ENTRY {}.", target.format("%Y-%m-%d")));
+        self.flash_status(&format!("NEXT DAY READY {}.", target.format("%Y-%m-%d")));
     }
 
     fn perform_menu_action(&mut self, action: MenuAction, viewport_height: usize) {
@@ -14352,7 +14393,7 @@ mod tests {
     #[test]
     fn save_receipt_overlay_shows_after_manual_save() {
         let temp = tempdir().expect("tempdir");
-        let start = NaiveDate::from_ymd_opt(2026, 3, 19).expect("date");
+        let start = Local::now().date_naive() - Duration::days(1);
         let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
         app.overlay = None;
         app.buffer = TextBuffer::from_text("receipt test entry");
@@ -14364,9 +14405,13 @@ mod tests {
         match app.overlay() {
             Some(Overlay::Info(info)) => {
                 let rendered = info.lines.join("\n");
+                assert!(rendered.contains("REVISION SAVED"));
                 assert!(rendered.contains("Saved at"));
                 assert!(rendered.contains("Entry number"));
                 assert!(rendered.contains("Entry number  : 000001"));
+                assert!(rendered.contains("Page ready    : SAVED PAGE"));
+                assert!(rendered.contains("What to do next:"));
+                assert!(rendered.contains("old-entry revision"));
             }
             _ => panic!("expected save receipt info overlay"),
         }
@@ -14473,7 +14518,7 @@ mod tests {
 
     #[test]
     fn alt_n_opens_next_new_entry_date() {
-        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let start = Local::now().date_naive();
         let mut app = App::with_initial_date(Some(start));
         app.overlay = None;
 
@@ -14483,7 +14528,11 @@ mod tests {
         );
 
         assert_eq!(app.selected_date, start + Duration::days(1));
-        assert_eq!(app.status_text(), Some("NEW ENTRY 2026-03-17."));
+        let expected = format!(
+            "NEXT DAY READY {}.",
+            (start + Duration::days(1)).format("%Y-%m-%d")
+        );
+        assert_eq!(app.status_text(), Some(expected.as_str()));
     }
 
     #[test]
@@ -14495,7 +14544,7 @@ mod tests {
         let metadata = vault::create_vault(&root, &passphrase, None, "Test").expect("create");
         let unlocked = vault::unlock_vault_with_device(&root, &passphrase, metadata.device_id)
             .expect("unlock");
-        let start = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let start = Local::now().date_naive();
         unlocked
             .save_revision(start + Duration::days(1), "next day")
             .expect("save next day");
@@ -14514,7 +14563,11 @@ mod tests {
         );
 
         assert_eq!(app.selected_date, start + Duration::days(3));
-        assert_eq!(app.status_text(), Some("NEW ENTRY 2026-03-19."));
+        let expected = format!(
+            "NEXT DAY READY {}.",
+            (start + Duration::days(3)).format("%Y-%m-%d")
+        );
+        assert_eq!(app.status_text(), Some(expected.as_str()));
     }
 
     #[test]
@@ -14631,10 +14684,10 @@ mod tests {
         assert!(app.header_entry_focus_label().starts_with("TODAY "));
 
         app.selected_date = today - Duration::days(1);
-        assert!(app.header_entry_focus_label().starts_with("ARCHIVE "));
+        assert!(app.header_entry_focus_label().starts_with("OLD ENTRY "));
 
         app.selected_date = today + Duration::days(1);
-        assert!(app.header_entry_focus_label().starts_with("NEXT "));
+        assert!(app.header_entry_focus_label().starts_with("NEXT DAY "));
     }
 
     #[test]
@@ -14647,20 +14700,20 @@ mod tests {
         let unlocked = vault::unlock_vault_with_device(&root, &passphrase, metadata.device_id)
             .expect("unlock");
 
-        let mut app = App::with_initial_date(None);
+        let mut app = App::with_initial_date(Some(Local::now().date_naive()));
         app.overlay = None;
         app.vault_path = root;
         app.vault = Some(unlocked);
-        assert_eq!(app.header_page_state_label(), "NEW PAGE");
+        assert_eq!(app.header_page_state_label(), "NEXT ENTRY");
 
         app.buffer.insert_char('x');
         app.dirty = true;
-        assert_eq!(app.header_page_state_label(), "IN PROGRESS");
+        assert_eq!(app.header_page_state_label(), "WRITING");
 
         app.dirty = false;
         app.fresh_entry_page = false;
         app.last_save_kind = Some(super::SaveKind::Saved);
-        assert_eq!(app.header_page_state_label(), "SAVED");
+        assert_eq!(app.header_page_state_label(), "SAVED PAGE");
     }
 
     #[test]
@@ -14978,7 +15031,7 @@ mod tests {
     #[test]
     fn quick_save_new_page_shows_next_entry_number() {
         let temp = tempdir().expect("tempdir");
-        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let date = Local::now().date_naive();
         let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
         app.config.opening_line_template = "ENTRY {ENTRY_NO}".to_string();
 
@@ -14992,7 +15045,7 @@ mod tests {
 
         assert_eq!(app.entry_number_label(), "000002");
         assert_eq!(app.buffer.to_text(), "ENTRY 000002\n");
-        assert_eq!(app.header_page_state_label(), "NEW PAGE");
+        assert_eq!(app.header_page_state_label(), "NEXT ENTRY");
     }
 
     #[test]
@@ -16667,19 +16720,34 @@ mod tests {
     #[test]
     fn footer_next_hint_changes_between_clean_and_dirty() {
         let temp = tempdir().expect("tempdir");
-        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let date = Local::now().date_naive();
         let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
         app.overlay = None;
         app.menu = None;
         app.dirty = false;
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT: TYPE | ALT+N NEXT DAY | ALT+[ ] OPEN SAVED")
+            Some("NEXT ENTRY: TYPE | F2 SAVE | ALT+N NEXT DAY | ALT+[ ] OPEN SAVED")
         );
         app.dirty = true;
         assert_eq!(
             app.footer_next_hint(),
             Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY")
+        );
+    }
+
+    #[test]
+    fn footer_next_hint_calls_out_old_entry_context() {
+        let temp = tempdir().expect("tempdir");
+        let date = Local::now().date_naive() - Duration::days(1);
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.overlay = None;
+        app.menu = None;
+        app.fresh_entry_page = false;
+
+        assert_eq!(
+            app.footer_next_hint(),
+            Some("OLD ENTRY: TYPE TO EDIT | F2 SAVE | F7 INDEX | ALT+] NEWER")
         );
     }
 
@@ -17141,7 +17209,7 @@ mod tests {
     #[test]
     fn unlocked_editor_frame_preserves_nostalgia_shell() {
         let temp = tempdir().expect("tempdir");
-        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let date = Local::now().date_naive();
         let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
         app.overlay = None;
         app.menu = None;
@@ -17150,9 +17218,11 @@ mod tests {
         let rendered = render_app(&app, 170, 30);
 
         assert!(rendered.contains("BLUESCREEN JOURNAL"));
-        assert!(rendered.contains("ENTRY DATE"));
-        assert!(rendered.contains("2026-03-20"));
+        assert!(rendered.contains("TODAY"));
+        assert!(rendered.contains(&date.format("%Y-%m-%d").to_string()));
         assert!(rendered.contains("ENTRY NO."));
+        assert!(rendered.contains("PAGE"));
+        assert!(rendered.contains("NEXT ENTRY"));
         assert!(rendered.contains("VER v"));
         assert!(rendered.contains("FILE"));
         assert!(rendered.contains("EDIT"));

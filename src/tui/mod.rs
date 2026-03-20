@@ -133,7 +133,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, compact_mode: bool)
         return;
     }
     let left = format!(
-        "BLUESCREEN JOURNAL{}{}  ENTRY DATE {} [{}]  ENTRY NO. {}  PAGE {}  TIME {}  VER {}",
+        "BLUESCREEN JOURNAL{}{}  {} [{}]  ENTRY NO. {}  PAGE {}  TIME {}  VER {}",
         if compact_mode { " [COMPACT]" } else { "" },
         if app.favorite_marker().is_empty() {
             ""
