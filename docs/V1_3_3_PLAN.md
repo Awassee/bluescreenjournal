@@ -14,6 +14,11 @@ This patch list comes directly from the live public install validation run again
    - Impact: users got a confusing false-negative signal at the end of install.
    - Status: fixed on `main` by removing the premature warning and reporting the session PATH repair directly.
 
+3. GitHub Raw `main` can lag briefly after a push.
+   - Symptom: `raw.githubusercontent.com/.../main/install.sh` still served the previous installer revision immediately after `main` was updated.
+   - Impact: a public validation run can fail even though the pushed commit and release assets are already correct.
+   - Status: observed during validation; process follow-up needed.
+
 ## Remaining v1.3.3 work
 
 1. Add an automated public-release smoke script to the repo.
@@ -43,3 +48,10 @@ This patch list comes directly from the live public install validation run again
    - Acceptance:
    - one more real clean-machine install test is recorded after the fix
    - any discrepancies go into the next patch list instead of being lost in chat
+
+6. Add a release runbook note for CDN propagation checks.
+   - Acceptance:
+   - release docs tell operators to verify both:
+     - the pushed commit URL
+     - the `main` raw URL after propagation
+   - publish is not considered fully healthy until both resolve to the expected installer revision
