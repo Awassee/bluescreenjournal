@@ -58,7 +58,7 @@ If no vault exists, the TUI setup wizard asks for:
 1. Vault path
 2. Passphrase
 3. Passphrase confirmation
-4. Optional epoch date for `ENTRY NO.`
+4. Optional legacy epoch date stored in vault metadata
 
 Default vault path:
 

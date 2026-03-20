@@ -23,7 +23,7 @@ bsj delivers a focused, keyboard-only daily journal that feels like an old word 
 | Append-only revisions | Manual saves create new revisions instead of overwriting | Preserves history and supports safer recovery |
 | Encrypted drafts | Autosave writes encrypted draft state | Protects unsaved work without plaintext leakage |
 | Crash recovery | Prompts to recover a newer draft | Reduces data loss after interruption |
-| Entry numbering | Stable `ENTRY NO.` from epoch date + entry date | Keeps numbering consistent across machines |
+| Entry numbering | `ENTRY NO.` advances with each saved revision and the next serial appears on fresh pages | Makes save progress obvious without losing deterministic ordering |
 | Date index and calendar | Browse existing entries by list or month grid | Supports journal-style navigation |
 | In-entry find/replace | Incremental find and retro replace flow | Speeds editing without leaving the keyboard |
 | Global search | Searches saved entries without plaintext disk index | Fast retrieval without plaintext index files |

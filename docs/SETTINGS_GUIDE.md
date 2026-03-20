@@ -174,8 +174,8 @@ Fields:
 - `kdf.saltHex`
   - per-vault random salt
 - `options.epochDate`
-  - user-chosen entry numbering epoch
-  - `ENTRY NO.` is derived as days between `epochDate` and the entry date, plus one
+  - optional legacy/import continuity date stored in vault metadata
+  - current `ENTRY NO.` values advance with each saved revision instead of using `epochDate`
 
 `vault.json` is plaintext metadata only. Journal bodies are never stored there.
 

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fs,
     io::Cursor,
     path::{Path, PathBuf},
@@ -135,6 +135,8 @@ pub struct LoadedDateState {
     pub recovery_draft_closing_thought: Option<String>,
     pub recovery_draft_entry_metadata: Option<EntryMetadata>,
     pub conflict: Option<ConflictState>,
+    pub current_entry_number: Option<String>,
+    pub next_entry_number: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,6 +246,16 @@ struct RevisionRecord {
     body: String,
     closing_thought: Option<String>,
     entry_metadata: EntryMetadata,
+}
+
+#[derive(Clone, Debug)]
+struct RevisionOrdinalRecord {
+    date: NaiveDate,
+    path: PathBuf,
+    revision_hash: String,
+    device_id: String,
+    seq: u64,
+    saved_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug)]
@@ -366,6 +378,12 @@ struct CacheFingerprintEntry {
     path: String,
     size: u64,
     modified_unix_secs: u64,
+}
+
+#[derive(Default)]
+struct EntryNumberSnapshot {
+    primary_numbers: HashMap<NaiveDate, String>,
+    next_entry_number: String,
 }
 
 pub struct UnlockedVault {
@@ -497,10 +515,17 @@ impl UnlockedVault {
         let Some(record) = primary else {
             return Ok(None);
         };
-        let epoch = self.metadata.epoch_date()?;
+        let entry_numbers = self.load_entry_number_snapshot()?;
+        let entry_number = entry_numbers
+            .primary_numbers
+            .get(&date)
+            .cloned()
+            .ok_or_else(|| {
+                VaultError::InvalidFormat("missing entry number for exported date".to_string())
+            })?;
         Ok(Some(ExportedEntry {
             date,
-            entry_number: compute_entry_number(epoch, date),
+            entry_number,
             body: record.body.clone(),
             closing_thought: record.closing_thought.clone(),
             metadata: record.entry_metadata.clone(),
@@ -549,6 +574,7 @@ impl UnlockedVault {
         let records = self.scan_date_revisions(date)?;
         let heads = head_records(&records);
         let primary = heads.first().or_else(|| records.first());
+        let entry_numbers = self.load_entry_number_snapshot()?;
         let revision_text = primary.map(|record| record.body.clone());
         let revision_closing_thought = primary.and_then(|record| record.closing_thought.clone());
         let revision_entry_metadata = primary
@@ -600,6 +626,8 @@ impl UnlockedVault {
             recovery_draft_closing_thought,
             recovery_draft_entry_metadata,
             conflict,
+            current_entry_number: entry_numbers.primary_numbers.get(&date).cloned(),
+            next_entry_number: entry_numbers.next_entry_number,
         })
     }
 
@@ -687,7 +715,7 @@ impl UnlockedVault {
             .and_then(|plaintext| {
                 serde_json::from_slice::<SearchCachePayload>(&plaintext).map_err(VaultError::from)
             }) {
-            Ok(payload) if payload.kind == "search-cache" => {
+            Ok(payload) if payload.kind == search_cache_kind() => {
                 (Some(payload.entries.len()), true, None)
             }
             Ok(payload) => (
@@ -727,7 +755,7 @@ impl UnlockedVault {
             return Ok(entries);
         }
 
-        let epoch = self.metadata.epoch_date()?;
+        let entry_numbers = self.load_entry_number_snapshot()?;
         let mut dates = self.list_entry_dates()?;
         dates.sort_unstable_by(|left, right| right.cmp(left));
 
@@ -740,7 +768,15 @@ impl UnlockedVault {
                 let metadata = sanitize_entry_metadata(&record.entry_metadata);
                 entries.push(CatalogEntry {
                     date,
-                    entry_number: compute_entry_number(epoch, date),
+                    entry_number: entry_numbers
+                        .primary_numbers
+                        .get(&date)
+                        .cloned()
+                        .ok_or_else(|| {
+                            VaultError::InvalidFormat(
+                                "missing entry number for catalog date".to_string(),
+                            )
+                        })?,
                     preview: entry_preview(
                         record.body.as_str(),
                         record.closing_thought.as_deref(),
@@ -761,6 +797,50 @@ impl UnlockedVault {
         Ok(entries)
     }
 
+    fn load_entry_number_snapshot(&self) -> VaultResult<EntryNumberSnapshot> {
+        let mut primary_hashes = HashMap::new();
+        let mut all_revisions = Vec::new();
+
+        for date in self.list_entry_dates()? {
+            let records = self.scan_date_revisions(date)?;
+            let heads = head_records(&records);
+            if let Some(primary) = heads.first().or_else(|| records.first()) {
+                primary_hashes.insert(date, primary.revision_hash.clone());
+            }
+            for record in records {
+                all_revisions.push(RevisionOrdinalRecord {
+                    date,
+                    path: record.path,
+                    revision_hash: record.revision_hash,
+                    device_id: record.device_id,
+                    seq: record.seq,
+                    saved_at: record.saved_at,
+                });
+            }
+        }
+
+        all_revisions.sort_by(compare_revision_ordinal_record);
+        let mut number_by_hash = HashMap::with_capacity(all_revisions.len());
+        for (index, record) in all_revisions.iter().enumerate() {
+            number_by_hash.insert(
+                record.revision_hash.clone(),
+                format_entry_number_value(index as u64 + 1),
+            );
+        }
+
+        let mut primary_numbers = HashMap::with_capacity(primary_hashes.len());
+        for (date, hash) in primary_hashes {
+            if let Some(number) = number_by_hash.get(&hash) {
+                primary_numbers.insert(date, number.clone());
+            }
+        }
+
+        Ok(EntryNumberSnapshot {
+            primary_numbers,
+            next_entry_number: format_entry_number_value(all_revisions.len() as u64 + 1),
+        })
+    }
+
     fn read_catalog_cache(
         &self,
         fingerprint: &[CacheFingerprintEntry],
@@ -772,7 +852,7 @@ impl UnlockedVault {
         let encrypted = RevisionFile::parse(&fs::read(&path)?)?;
         let plaintext = decrypt_payload(&self.key, &encrypted, cache_aad_string().as_bytes())?;
         let payload: SearchCachePayload = serde_json::from_slice(&plaintext)?;
-        if payload.kind != "search-cache" || payload.fingerprint != fingerprint {
+        if payload.kind != search_cache_kind() || payload.fingerprint != fingerprint {
             return Ok(None);
         }
 
@@ -803,7 +883,7 @@ impl UnlockedVault {
             .ok_or_else(|| VaultError::InvalidFormat("missing cache directory".to_string()))?;
         secure_fs::ensure_private_dir(cache_dir)?;
         let payload = SearchCachePayload {
-            kind: "search-cache".to_string(),
+            kind: search_cache_kind().to_string(),
             fingerprint: fingerprint.to_vec(),
             entries: entries
                 .iter()
@@ -1118,6 +1198,7 @@ pub fn random_device_id() -> String {
     hex::encode(bytes)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn compute_entry_number(epoch: NaiveDate, entry_date: NaiveDate) -> String {
     let days = (entry_date - epoch).num_days() + 1;
     let value = if days < 1 { 0 } else { days as u64 };
@@ -1177,6 +1258,15 @@ fn search_cache_path(root: &Path) -> PathBuf {
 
 fn cache_aad_string() -> &'static str {
     "bsj:v1:search-cache"
+}
+
+fn search_cache_kind() -> &'static str {
+    "search-cache-v2"
+}
+
+fn format_entry_number_value(value: u64) -> String {
+    let width = 6usize.max(value.to_string().len());
+    format!("{value:0width$}")
 }
 
 fn build_catalog_fingerprint(root: &Path) -> VaultResult<Vec<CacheFingerprintEntry>> {
@@ -1403,6 +1493,19 @@ fn compare_revision_record(left: &RevisionRecord, right: &RevisionRecord) -> Ord
         .then_with(|| left.seq.cmp(&right.seq))
         .then_with(|| left.revision_hash.cmp(&right.revision_hash))
         .then_with(|| left.path.cmp(&right.path))
+}
+
+fn compare_revision_ordinal_record(
+    left: &RevisionOrdinalRecord,
+    right: &RevisionOrdinalRecord,
+) -> Ordering {
+    left.saved_at
+        .cmp(&right.saved_at)
+        .then_with(|| left.device_id.cmp(&right.device_id))
+        .then_with(|| left.seq.cmp(&right.seq))
+        .then_with(|| left.revision_hash.cmp(&right.revision_hash))
+        .then_with(|| left.path.cmp(&right.path))
+        .then_with(|| left.date.cmp(&right.date))
 }
 
 fn next_revision_sequence_for_device(records: &[RevisionRecord], device_id: &str) -> u64 {
@@ -2063,7 +2166,7 @@ mod tests {
         let entries = vault.list_index_entries(12).expect("index entries");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].date, date);
-        assert_eq!(entries[0].entry_number, "000016");
+        assert_eq!(entries[0].entry_number, "000002");
         assert_eq!(entries[0].preview, "updated prev...");
         assert!(!entries[0].has_conflict);
     }
@@ -2550,9 +2653,167 @@ mod tests {
             .expect("save revision");
 
         let exported = vault.export_entry(date).expect("export").expect("entry");
-        assert_eq!(exported.entry_number, compute_entry_number(epoch, date));
+        assert_eq!(exported.entry_number, "000001");
         assert_eq!(exported.body, "body text");
         assert_eq!(exported.closing_thought.as_deref(), Some("Good night."));
+    }
+
+    #[test]
+    fn load_search_documents_uses_latest_revision_numbers_and_bodies() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+        let first_date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let second_date = NaiveDate::from_ymd_opt(2026, 3, 17).expect("date");
+
+        vault
+            .save_entry_revision(first_date, "first draft", None, &EntryMetadata::default())
+            .expect("save first");
+        vault
+            .save_entry_revision(
+                first_date,
+                "first revised body",
+                None,
+                &EntryMetadata::default(),
+            )
+            .expect("save first revised");
+        vault
+            .save_entry_revision(second_date, "second body", None, &EntryMetadata::default())
+            .expect("save second");
+
+        let mut docs = vault.load_search_documents().expect("search documents");
+        docs.sort_by_key(|doc| doc.date);
+
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].date, first_date);
+        assert_eq!(docs[0].entry_number, "000002");
+        assert!(docs[0].body.contains("first revised body"));
+        assert!(!docs[0].body.contains("first draft"));
+        assert_eq!(docs[1].date, second_date);
+        assert_eq!(docs[1].entry_number, "000003");
+        assert!(docs[1].body.contains("second body"));
+    }
+
+    #[test]
+    fn load_date_state_uses_saved_revision_sequence_for_entry_numbers() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        let epoch = NaiveDate::from_ymd_opt(2026, 3, 1).expect("epoch");
+        create_vault(&root, &passphrase, Some(epoch), "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+        let first_date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+        let second_date = NaiveDate::from_ymd_opt(2026, 3, 17).expect("date");
+
+        vault
+            .save_entry_revision(first_date, "first", None, &EntryMetadata::default())
+            .expect("save first");
+        vault
+            .save_entry_revision(first_date, "first revised", None, &EntryMetadata::default())
+            .expect("save first revised");
+        vault
+            .save_entry_revision(second_date, "second", None, &EntryMetadata::default())
+            .expect("save second");
+
+        let first_state = vault.load_date_state(first_date).expect("load first state");
+        assert_eq!(first_state.current_entry_number.as_deref(), Some("000002"));
+        assert_eq!(first_state.next_entry_number, "000004");
+
+        let second_state = vault
+            .load_date_state(second_date)
+            .expect("load second state");
+        assert_eq!(second_state.current_entry_number.as_deref(), Some("000003"));
+        assert_eq!(second_state.next_entry_number, "000004");
+    }
+
+    #[test]
+    fn review_summary_uses_latest_entry_number_for_on_this_day_hits() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+        let prior_year = NaiveDate::from_ymd_opt(2025, 3, 16).expect("date");
+        let today = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+
+        vault
+            .save_entry_revision(prior_year, "old memory", None, &EntryMetadata::default())
+            .expect("save old memory");
+        vault
+            .save_entry_revision(
+                prior_year,
+                "old memory revised",
+                None,
+                &EntryMetadata::default(),
+            )
+            .expect("save old memory revised");
+        vault
+            .save_entry_revision(today, "today entry", None, &EntryMetadata::default())
+            .expect("save today");
+
+        let summary = vault.review_summary(today).expect("review summary");
+        assert_eq!(summary.on_this_day.len(), 1);
+        assert_eq!(summary.on_this_day[0].date, prior_year);
+        assert_eq!(summary.on_this_day[0].entry_number, "000002");
+        assert!(
+            summary.on_this_day[0]
+                .preview
+                .contains("old memory revised")
+        );
+    }
+
+    #[test]
+    fn legacy_search_cache_kind_is_ignored_and_rebuilt() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("vault");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+        create_vault(&root, &passphrase, None, "Test").expect("create vault");
+        let vault = unlock_vault(&root, &passphrase).expect("unlock");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 16).expect("date");
+
+        vault
+            .save_entry_revision(date, "first body", None, &EntryMetadata::default())
+            .expect("save first");
+        vault
+            .save_entry_revision(date, "latest body", None, &EntryMetadata::default())
+            .expect("save second");
+
+        let fingerprint = build_catalog_fingerprint(&root).expect("fingerprint");
+        let legacy_payload = SearchCachePayload {
+            kind: "search-cache".to_string(),
+            fingerprint,
+            entries: vec![SearchCacheEntry {
+                date: date.format("%Y-%m-%d").to_string(),
+                entry_number: "999999".to_string(),
+                preview: "stale preview".to_string(),
+                has_conflict: false,
+                search_text: "stale body".to_string(),
+                metadata: EntryMetadata::default(),
+            }],
+        };
+        let plaintext = serde_json::to_vec(&legacy_payload).expect("legacy payload");
+        let encrypted = encrypt_payload(&vault.key, &plaintext, cache_aad_string().as_bytes())
+            .expect("encrypt legacy cache");
+        let cache_path = search_cache_path(&root);
+        fs::create_dir_all(cache_path.parent().expect("cache dir")).expect("cache dir");
+        fs::write(&cache_path, encrypted.to_bytes()).expect("write cache");
+
+        let entries = vault.list_index_entries(120).expect("rebuilt index");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].entry_number, "000002");
+        assert_eq!(entries[0].preview, "latest body");
+
+        let rebuilt = RevisionFile::parse(&fs::read(&cache_path).expect("cache bytes"))
+            .expect("parse rebuilt cache");
+        let rebuilt_plaintext =
+            decrypt_payload(&vault.key, &rebuilt, cache_aad_string().as_bytes())
+                .expect("decrypt rebuilt cache");
+        let rebuilt_payload: SearchCachePayload =
+            serde_json::from_slice(&rebuilt_plaintext).expect("rebuilt payload");
+        assert_eq!(rebuilt_payload.kind, search_cache_kind());
+        assert_eq!(rebuilt_payload.entries[0].entry_number, "000002");
     }
 
     fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {

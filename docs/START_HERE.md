@@ -31,7 +31,7 @@ See live product images in the root README screenshot gallery:
 
 1. Install with the one-line command in [README](../README.md#turnkey-install).
 2. Run `bsj`.
-3. Complete the setup wizard (vault path, passphrase, optional epoch date).
+3. Complete the setup wizard (vault path, passphrase, optional legacy epoch date).
 4. Type immediately and save with `F2`.
 5. Press `Esc` and open `HELP` for in-app guidance.
 

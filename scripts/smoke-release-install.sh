@@ -110,18 +110,20 @@ HOME="$MENU_LAUNCH_HOME" SHELL=/bin/zsh \
 "$MENU_LAUNCH_PREFIX/bin/bsj" --help >/dev/null
 grep -Fq "BlueScreen Journal installer menu" "$MENU_LAUNCH_LOG"
 grep -Fq "Installer auto-select: 1" "$MENU_LAUNCH_LOG"
+grep -Fq "Launch BlueScreen Journal here now (recommended)" "$MENU_LAUNCH_LOG"
 grep -Fq "Usage: bsj" "$MENU_LAUNCH_LOG"
 grep -Fq "$MENU_LAUNCH_PREFIX/bin" "$MENU_LAUNCH_HOME/.zprofile"
 
 HOME="$MENU_HOME" SHELL=/bin/zsh \
-  BSJ_INSTALLER_POST_INSTALL_SELECTION="5,4,6" \
+  BSJ_INSTALLER_POST_INSTALL_SELECTION="6,5,7" \
   BSJ_INSTALLER_LAUNCH_MODE="help" \
   script -q "$MENU_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_PREFIX" >/dev/null
 "$MENU_PREFIX/bin/bsj" --help >/dev/null
 grep -Fq "BlueScreen Journal installer menu" "$MENU_LOG"
-grep -Fq "Installer auto-select: 5" "$MENU_LOG"
-grep -Fq "Installer auto-select: 4" "$MENU_LOG"
 grep -Fq "Installer auto-select: 6" "$MENU_LOG"
+grep -Fq "Installer auto-select: 5" "$MENU_LOG"
+grep -Fq "Installer auto-select: 7" "$MENU_LOG"
+grep -Fq "Open BlueScreen Journal in a new Terminal window" "$MENU_LOG"
 grep -Fq "Usage: bsj" "$MENU_LOG"
 grep -Fq "BlueScreen Journal Doctor" "$MENU_LOG"
 grep -Fq "Summary: OK" "$MENU_LOG"

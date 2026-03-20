@@ -1071,7 +1071,7 @@ Install complete.
 Launch later:
   $launch_ref
 
-Or stay here and use the installer menu below to launch now, print the guide, or run a health check.
+Or stay here and use the installer menu below to launch now, open a fresh Terminal window, print the guide, or run a health check.
 
 What to expect:
   - bsj should now be available in new terminal windows/tabs
@@ -1107,8 +1107,25 @@ shell_join_args() {
 }
 
 launch_bsj_in_new_terminal() {
+  local launcher_script
+  launcher_script="$(mktemp "${TMPDIR:-/tmp}/bsj-launch.XXXXXX.command")" || return 1
   local command_text
   command_text="$(shell_join_args "$@")"
+  cat >"$launcher_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '\033]0;BlueScreen Journal\007'
+clear
+printf 'BlueScreen Journal\n'
+printf 'Starting in this window...\n\n'
+rm -f -- "\$0" || true
+exec $command_text
+EOF
+  chmod 755 "$launcher_script"
+  if command -v open >/dev/null 2>&1 && open -a Terminal "$launcher_script" >/dev/null 2>&1; then
+    return 0
+  fi
+  command_text="$(shell_join_args "/bin/bash" "$launcher_script")"
   command -v osascript >/dev/null 2>&1 || return 1
   osascript <<EOF >/dev/null
 tell application "Terminal"
@@ -1121,6 +1138,7 @@ EOF
 launch_bsj_from_installer() {
   local installed_bin="$1"
   local launch_mode="${BSJ_INSTALLER_LAUNCH_MODE:-app}"
+  local launch_style="${BSJ_INSTALLER_LAUNCH_STYLE:-auto}"
   local -a launch_cmd
   launch_cmd=("$installed_bin")
 
@@ -1146,17 +1164,37 @@ launch_bsj_from_installer() {
       ;;
   esac
 
-  if tty_input_available; then
-    if "${launch_cmd[@]}" < /dev/tty > /dev/tty 2>&1; then
-      return 0
-    fi
-    warn "Direct launch from this terminal failed."
-  fi
-
-  if launch_bsj_in_new_terminal "${launch_cmd[@]}"; then
-    info "Opened BlueScreen Journal in a new Terminal window."
-    return 0
-  fi
+  case "$launch_style" in
+    auto|"")
+      if tty_input_available; then
+        if [[ "$launch_mode" == "app" ]]; then
+          clear
+          printf "Launching BlueScreen Journal in this terminal...\n\n"
+        fi
+        exec "${launch_cmd[@]}"
+      fi
+      if launch_bsj_in_new_terminal "${launch_cmd[@]}"; then
+        info "Opened BlueScreen Journal in a new Terminal window."
+        return 0
+      fi
+      ;;
+    same-terminal|current)
+      if [[ "$launch_mode" == "app" ]]; then
+        clear
+        printf "Launching BlueScreen Journal in this terminal...\n\n"
+      fi
+      exec "${launch_cmd[@]}"
+      ;;
+    new-window|window)
+      if launch_bsj_in_new_terminal "${launch_cmd[@]}"; then
+        info "Opened BlueScreen Journal in a new Terminal window."
+        return 0
+      fi
+      ;;
+    *)
+      warn "Unknown BSJ_INSTALLER_LAUNCH_STYLE: $launch_style"
+      ;;
+  esac
 
   if [[ "$launch_mode" != "app" ]]; then
     "${launch_cmd[@]}"
@@ -1178,7 +1216,7 @@ read_post_install_selection() {
     info "Installer auto-select: $REPLY"
     return 0
   fi
-  read_line_interactive "Select [1-6]: "
+  read_line_interactive "Select [1-7]: "
 }
 
 maybe_prompt_post_install_menu() {
@@ -1197,12 +1235,13 @@ maybe_prompt_post_install_menu() {
     cat <<EOF
 
 BlueScreen Journal installer menu
-  1) Launch BlueScreen Journal now (recommended)
-  2) Print first-run guide (menu-first flow)
-  3) Print keyboard/menu cheat sheet
-  4) Run health check (doctor) + PATH repair
-  5) Show command help
-  6) Exit installer
+  1) Launch BlueScreen Journal here now (recommended)
+  2) Open BlueScreen Journal in a new Terminal window
+  3) Print first-run guide (menu-first flow)
+  4) Print keyboard/menu cheat sheet
+  5) Run health check (doctor) + PATH repair
+  6) Show command help
+  7) Exit installer
 EOF
     read_post_install_selection || return
     selection="$REPLY"
@@ -1212,28 +1251,35 @@ EOF
         if ! launch_bsj_from_installer "$installed_bin"; then
           warn "Launch failed from installer."
           warn "Try: $installed_bin"
-          warn "If that fails too, use option 4 for doctor + PATH repair."
+          warn "If that fails too, use option 5 for doctor + PATH repair."
         fi
         return
         ;;
       2)
-        "$installed_bin" guide setup || "$installed_bin" guide quickstart || true
+        if ! BSJ_INSTALLER_LAUNCH_STYLE="new-window" launch_bsj_from_installer "$installed_bin"; then
+          warn "Could not open a fresh Terminal window."
+          warn "Try: $installed_bin"
+        fi
+        return
         ;;
       3)
-        "$installed_bin" guide quickstart | sed -n '1,120p'
+        "$installed_bin" guide setup || "$installed_bin" guide quickstart || true
         ;;
       4)
+        "$installed_bin" guide quickstart | sed -n '1,120p'
+        ;;
+      5)
         "$installed_bin" doctor || true
         run_path_repair
         ;;
-      5)
+      6)
         "$installed_bin" --help | sed -n '1,80p'
         ;;
-      6|q|quit|exit)
+      7|q|quit|exit)
         return
         ;;
       *)
-        warn "Please choose 1-6."
+        warn "Please choose 1-7."
         ;;
     esac
   done

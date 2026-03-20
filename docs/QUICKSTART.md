@@ -21,7 +21,7 @@ If no vault exists yet, the setup wizard asks for:
 1. vault path
 2. passphrase
 3. passphrase confirmation
-4. optional epoch date for `ENTRY NO.`
+4. optional legacy epoch date stored in vault metadata
 
 Default vault path:
 
