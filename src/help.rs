@@ -34,6 +34,16 @@ pub struct EnvironmentSettings {
     pub webdav_url_set: bool,
     pub webdav_username_set: bool,
     pub webdav_password_set: bool,
+    pub gdrive_access_token_set: bool,
+    pub gdrive_refresh_token_set: bool,
+    pub gdrive_client_id_set: bool,
+    pub gdrive_client_secret_set: bool,
+    pub gdrive_folder_id_set: bool,
+    pub dropbox_access_token_set: bool,
+    pub dropbox_refresh_token_set: bool,
+    pub dropbox_app_key_set: bool,
+    pub dropbox_app_secret_set: bool,
+    pub dropbox_root_set: bool,
 }
 
 impl EnvironmentSettings {
@@ -47,6 +57,16 @@ impl EnvironmentSettings {
             webdav_url_set: std::env::var_os("BSJ_WEBDAV_URL").is_some(),
             webdav_username_set: std::env::var_os("BSJ_WEBDAV_USERNAME").is_some(),
             webdav_password_set: std::env::var_os("BSJ_WEBDAV_PASSWORD").is_some(),
+            gdrive_access_token_set: std::env::var_os("BSJ_GDRIVE_ACCESS_TOKEN").is_some(),
+            gdrive_refresh_token_set: std::env::var_os("BSJ_GDRIVE_REFRESH_TOKEN").is_some(),
+            gdrive_client_id_set: std::env::var_os("BSJ_GDRIVE_CLIENT_ID").is_some(),
+            gdrive_client_secret_set: std::env::var_os("BSJ_GDRIVE_CLIENT_SECRET").is_some(),
+            gdrive_folder_id_set: std::env::var_os("BSJ_GDRIVE_FOLDER_ID").is_some(),
+            dropbox_access_token_set: std::env::var_os("BSJ_DROPBOX_ACCESS_TOKEN").is_some(),
+            dropbox_refresh_token_set: std::env::var_os("BSJ_DROPBOX_REFRESH_TOKEN").is_some(),
+            dropbox_app_key_set: std::env::var_os("BSJ_DROPBOX_APP_KEY").is_some(),
+            dropbox_app_secret_set: std::env::var_os("BSJ_DROPBOX_APP_SECRET").is_some(),
+            dropbox_root_set: std::env::var_os("BSJ_DROPBOX_ROOT").is_some(),
         }
     }
 }
@@ -381,6 +401,56 @@ pub fn render_settings_report(
         "BSJ_WEBDAV_PASSWORD",
         set_status(env.webdav_password_set),
     );
+    push_row(
+        &mut output,
+        "BSJ_GDRIVE_ACCESS_TOKEN",
+        set_status(env.gdrive_access_token_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_GDRIVE_REFRESH_TOKEN",
+        set_status(env.gdrive_refresh_token_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_GDRIVE_CLIENT_ID",
+        set_status(env.gdrive_client_id_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_GDRIVE_CLIENT_SECRET",
+        set_status(env.gdrive_client_secret_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_GDRIVE_FOLDER_ID",
+        set_status(env.gdrive_folder_id_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_DROPBOX_ACCESS_TOKEN",
+        set_status(env.dropbox_access_token_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_DROPBOX_REFRESH_TOKEN",
+        set_status(env.dropbox_refresh_token_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_DROPBOX_APP_KEY",
+        set_status(env.dropbox_app_key_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_DROPBOX_APP_SECRET",
+        set_status(env.dropbox_app_secret_set),
+    );
+    push_row(
+        &mut output,
+        "BSJ_DROPBOX_ROOT",
+        set_status(env.dropbox_root_set),
+    );
     writeln!(&mut output).unwrap();
 
     writeln!(&mut output, "More help").unwrap();
@@ -481,6 +551,16 @@ pub fn render_settings_json(
             "BSJ_WEBDAV_URL": { "set": env.webdav_url_set },
             "BSJ_WEBDAV_USERNAME": { "set": env.webdav_username_set },
             "BSJ_WEBDAV_PASSWORD": { "set": env.webdav_password_set },
+            "BSJ_GDRIVE_ACCESS_TOKEN": { "set": env.gdrive_access_token_set },
+            "BSJ_GDRIVE_REFRESH_TOKEN": { "set": env.gdrive_refresh_token_set },
+            "BSJ_GDRIVE_CLIENT_ID": { "set": env.gdrive_client_id_set },
+            "BSJ_GDRIVE_CLIENT_SECRET": { "set": env.gdrive_client_secret_set },
+            "BSJ_GDRIVE_FOLDER_ID": { "set": env.gdrive_folder_id_set },
+            "BSJ_DROPBOX_ACCESS_TOKEN": { "set": env.dropbox_access_token_set },
+            "BSJ_DROPBOX_REFRESH_TOKEN": { "set": env.dropbox_refresh_token_set },
+            "BSJ_DROPBOX_APP_KEY": { "set": env.dropbox_app_key_set },
+            "BSJ_DROPBOX_APP_SECRET": { "set": env.dropbox_app_secret_set },
+            "BSJ_DROPBOX_ROOT": { "set": env.dropbox_root_set },
         }
     })
 }
@@ -711,6 +791,16 @@ mod tests {
             webdav_url_set: true,
             webdav_username_set: true,
             webdav_password_set: true,
+            gdrive_access_token_set: false,
+            gdrive_refresh_token_set: false,
+            gdrive_client_id_set: false,
+            gdrive_client_secret_set: false,
+            gdrive_folder_id_set: false,
+            dropbox_access_token_set: false,
+            dropbox_refresh_token_set: false,
+            dropbox_app_key_set: false,
+            dropbox_app_secret_set: false,
+            dropbox_root_set: false,
         };
 
         let report = render_settings_report(

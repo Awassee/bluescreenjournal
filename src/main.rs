@@ -246,7 +246,7 @@ enum Command {
         #[command(subcommand)]
         command: AiCommand,
     },
-    /// Sync encrypted revisions with a folder, S3, or WebDAV target
+    /// Sync encrypted revisions with a folder, S3, WebDAV, Google Drive API, or Dropbox API target
     Sync {
         #[arg(long, value_enum)]
         backend: Option<SyncBackendArg>,
@@ -546,6 +546,9 @@ enum SyncBackendArg {
     Folder,
     S3,
     Webdav,
+    #[value(name = "gdrive", alias = "google-drive")]
+    Gdrive,
+    Dropbox,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -2892,6 +2895,18 @@ fn run_cli_sync(
                 .sync_with_backend(&mut backend)
                 .map_err(|error| format!("sync failed: {error}"))?
         }
+        SyncBackendArg::Gdrive => {
+            let mut backend = sync::GoogleDriveBackend::from_remote(remote_arg)?;
+            vault
+                .sync_with_backend(&mut backend)
+                .map_err(|error| format!("sync failed: {error}"))?
+        }
+        SyncBackendArg::Dropbox => {
+            let mut backend = sync::DropboxBackend::from_remote(remote_arg)?;
+            vault
+                .sync_with_backend(&mut backend)
+                .map_err(|error| format!("sync failed: {error}"))?
+        }
     };
 
     println!("Pulled: {}", report.pulled);
@@ -3709,6 +3724,16 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
                 "BSJ_WEBDAV_URL": env.webdav_url_set,
                 "BSJ_WEBDAV_USERNAME": env.webdav_username_set,
                 "BSJ_WEBDAV_PASSWORD": env.webdav_password_set,
+                "BSJ_GDRIVE_ACCESS_TOKEN": env.gdrive_access_token_set,
+                "BSJ_GDRIVE_REFRESH_TOKEN": env.gdrive_refresh_token_set,
+                "BSJ_GDRIVE_CLIENT_ID": env.gdrive_client_id_set,
+                "BSJ_GDRIVE_CLIENT_SECRET": env.gdrive_client_secret_set,
+                "BSJ_GDRIVE_FOLDER_ID": env.gdrive_folder_id_set,
+                "BSJ_DROPBOX_ACCESS_TOKEN": env.dropbox_access_token_set,
+                "BSJ_DROPBOX_REFRESH_TOKEN": env.dropbox_refresh_token_set,
+                "BSJ_DROPBOX_APP_KEY": env.dropbox_app_key_set,
+                "BSJ_DROPBOX_APP_SECRET": env.dropbox_app_secret_set,
+                "BSJ_DROPBOX_ROOT": env.dropbox_root_set,
             });
             if json {
                 println!(
@@ -3729,6 +3754,34 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
                 println!("BSJ_WEBDAV_URL      {}", on_off(env.webdav_url_set));
                 println!("BSJ_WEBDAV_USERNAME {}", on_off(env.webdav_username_set));
                 println!("BSJ_WEBDAV_PASSWORD {}", on_off(env.webdav_password_set));
+                println!(
+                    "BSJ_GDRIVE_ACCESS_TOKEN {}",
+                    on_off(env.gdrive_access_token_set)
+                );
+                println!(
+                    "BSJ_GDRIVE_REFRESH_TOKEN {}",
+                    on_off(env.gdrive_refresh_token_set)
+                );
+                println!("BSJ_GDRIVE_CLIENT_ID {}", on_off(env.gdrive_client_id_set));
+                println!(
+                    "BSJ_GDRIVE_CLIENT_SECRET {}",
+                    on_off(env.gdrive_client_secret_set)
+                );
+                println!("BSJ_GDRIVE_FOLDER_ID {}", on_off(env.gdrive_folder_id_set));
+                println!(
+                    "BSJ_DROPBOX_ACCESS_TOKEN {}",
+                    on_off(env.dropbox_access_token_set)
+                );
+                println!(
+                    "BSJ_DROPBOX_REFRESH_TOKEN {}",
+                    on_off(env.dropbox_refresh_token_set)
+                );
+                println!("BSJ_DROPBOX_APP_KEY {}", on_off(env.dropbox_app_key_set));
+                println!(
+                    "BSJ_DROPBOX_APP_SECRET {}",
+                    on_off(env.dropbox_app_secret_set)
+                );
+                println!("BSJ_DROPBOX_ROOT {}", on_off(env.dropbox_root_set));
             }
         }
         SysopCommand::Paths { json } => {
@@ -4157,6 +4210,16 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
                     sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                         .map_err(|error| format!("sync preview failed: {error}"))?
                 }
+                SyncBackendArg::Gdrive => {
+                    let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
+                    sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
+                        .map_err(|error| format!("sync preview failed: {error}"))?
+                }
+                SyncBackendArg::Dropbox => {
+                    let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
+                    sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
+                        .map_err(|error| format!("sync preview failed: {error}"))?
+                }
             };
             if json {
                 let document = serde_json::json!({
@@ -4252,8 +4315,10 @@ fn resolve_sync_backend_kind(
             "folder" => Ok(SyncBackendArg::Folder),
             "s3" => Ok(SyncBackendArg::S3),
             "webdav" => Ok(SyncBackendArg::Webdav),
+            "gdrive" | "google-drive" => Ok(SyncBackendArg::Gdrive),
+            "dropbox" => Ok(SyncBackendArg::Dropbox),
             other => Err(format!(
-                "invalid BSJ_SYNC_BACKEND '{other}'; expected folder, s3, or webdav"
+                "invalid BSJ_SYNC_BACKEND '{other}'; expected folder, s3, webdav, gdrive, or dropbox"
             )),
         };
     }
@@ -4264,6 +4329,12 @@ fn resolve_sync_backend_kind(
         }
         if sync::looks_like_webdav_remote(remote_arg) {
             return Ok(SyncBackendArg::Webdav);
+        }
+        if sync::looks_like_google_drive_remote(remote_arg) {
+            return Ok(SyncBackendArg::Gdrive);
+        }
+        if sync::looks_like_dropbox_remote(remote_arg) {
+            return Ok(SyncBackendArg::Dropbox);
         }
     }
 
@@ -4304,6 +4375,8 @@ fn sync_backend_name(kind: SyncBackendArg) -> &'static str {
         SyncBackendArg::Folder => "FOLDER",
         SyncBackendArg::S3 => "S3",
         SyncBackendArg::Webdav => "WEBDAV",
+        SyncBackendArg::Gdrive => "GDRIVE",
+        SyncBackendArg::Dropbox => "DROPBOX",
     }
 }
 
@@ -4362,6 +4435,20 @@ fn preview_with_backend(
                 .map_err(|error| format!("cloud status preview failed: {error}"))?;
             Ok((target, preview))
         }
+        SyncBackendArg::Gdrive => {
+            let target = sync_target_label_gdrive(remote_arg);
+            let mut backend = sync::GoogleDriveBackend::from_remote(remote_arg)?;
+            let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud status preview failed: {error}"))?;
+            Ok((target, preview))
+        }
+        SyncBackendArg::Dropbox => {
+            let target = sync_target_label_dropbox(remote_arg);
+            let mut backend = sync::DropboxBackend::from_remote(remote_arg)?;
+            let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud status preview failed: {error}"))?;
+            Ok((target, preview))
+        }
     }
 }
 
@@ -4409,6 +4496,64 @@ fn recover_with_backend(
                 .map_err(|error| format!("cloud recovery failed: {error}"))?;
             Ok((target, report))
         }
+        SyncBackendArg::Gdrive => {
+            let target = sync_target_label_gdrive(remote_arg);
+            let mut backend = sync::GoogleDriveBackend::from_remote(remote_arg)?;
+            let report = sync::recover_root(&config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud recovery failed: {error}"))?;
+            Ok((target, report))
+        }
+        SyncBackendArg::Dropbox => {
+            let target = sync_target_label_dropbox(remote_arg);
+            let mut backend = sync::DropboxBackend::from_remote(remote_arg)?;
+            let report = sync::recover_root(&config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud recovery failed: {error}"))?;
+            Ok((target, report))
+        }
+    }
+}
+
+fn sync_target_label_gdrive(remote_arg: Option<&str>) -> String {
+    remote_arg
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            env::var("BSJ_GDRIVE_FOLDER_ID")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_else(|| "appDataFolder".to_string())
+}
+
+fn sync_target_label_dropbox(remote_arg: Option<&str>) -> String {
+    let raw = remote_arg
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            env::var("BSJ_DROPBOX_ROOT")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_else(|| "/BlueScreenJournal-Sync".to_string());
+    if raw == "/" {
+        return "/".to_string();
+    }
+    let without_scheme = raw.strip_prefix("dropbox://").unwrap_or(&raw).trim();
+    let normalized = if without_scheme.is_empty() {
+        "/BlueScreenJournal-Sync".to_string()
+    } else if without_scheme.starts_with('/') {
+        without_scheme.to_string()
+    } else {
+        format!("/{without_scheme}")
+    };
+    if normalized == "/" {
+        "/".to_string()
+    } else {
+        normalized.trim_end_matches('/').to_string()
     }
 }
 
@@ -5128,6 +5273,23 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_sync_gdrive_backend() {
+        let cli = Cli::parse_from(["bsj", "sync", "--backend", "gdrive"]);
+        match cli.command {
+            Some(Command::Sync {
+                backend,
+                provider,
+                remote,
+            }) => {
+                assert!(matches!(backend, Some(super::SyncBackendArg::Gdrive)));
+                assert!(provider.is_none());
+                assert!(remote.is_none());
+            }
+            _ => panic!("expected sync command"),
+        }
+    }
+
+    #[test]
     fn cli_parses_cloud_status_provider_preset() {
         let cli = Cli::parse_from(["bsj", "cloud", "status", "--provider", "dropbox"]);
         match cli.command {
@@ -5207,6 +5369,30 @@ mod tests {
                 assert!(provider.is_none());
                 assert_eq!(remote.as_deref(), Some("s3://journal/archive"));
                 assert!(no_verify);
+                assert!(!json);
+            }
+            _ => panic!("expected cloud recover command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_cloud_recover_dropbox_backend() {
+        let cli = Cli::parse_from(["bsj", "cloud", "recover", "--backend", "dropbox"]);
+        match cli.command {
+            Some(Command::Cloud {
+                command:
+                    super::CloudCommand::Recover {
+                        backend,
+                        provider,
+                        remote,
+                        no_verify,
+                        json,
+                    },
+            }) => {
+                assert!(matches!(backend, Some(super::SyncBackendArg::Dropbox)));
+                assert!(provider.is_none());
+                assert!(remote.is_none());
+                assert!(!no_verify);
                 assert!(!json);
             }
             _ => panic!("expected cloud recover command"),

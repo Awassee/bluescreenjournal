@@ -10,8 +10,10 @@ use reqwest::{
     blocking::{Client as HttpClient, RequestBuilder},
 };
 use roxmltree::Document;
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     env, fs,
     path::{Component, Path, PathBuf},
     thread,
@@ -54,6 +56,14 @@ struct SyncInventory {
 const REQUEST_MIN_INTERVAL: Duration = Duration::from_millis(150);
 const REQUEST_MAX_ATTEMPTS: usize = 4;
 const REQUEST_INITIAL_BACKOFF: Duration = Duration::from_millis(200);
+const GOOGLE_DRIVE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const GOOGLE_DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
+const GOOGLE_DRIVE_UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";
+const GOOGLE_DRIVE_DEFAULT_PARENT: &str = "appDataFolder";
+const DROPBOX_API_BASE: &str = "https://api.dropboxapi.com/2";
+const DROPBOX_CONTENT_BASE: &str = "https://content.dropboxapi.com/2";
+const DROPBOX_TOKEN_URL: &str = "https://api.dropboxapi.com/oauth2/token";
+const DROPBOX_DEFAULT_ROOT: &str = "/BlueScreenJournal-Sync";
 
 #[derive(Default)]
 struct RequestThrottle {
@@ -576,6 +586,777 @@ struct DavResource {
     is_collection: bool,
 }
 
+#[derive(Clone, Debug)]
+struct OAuthAccessState {
+    access_token: String,
+    refresh_token: Option<String>,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    provider_label: &'static str,
+}
+
+impl OAuthAccessState {
+    fn from_env(
+        provider_label: &'static str,
+        access_env: &'static str,
+        refresh_env: &'static str,
+        client_id_env: &'static str,
+        client_secret_env: &'static str,
+    ) -> Result<Self, String> {
+        let access_token = env::var(access_env).unwrap_or_default();
+        let refresh_token = env::var(refresh_env).ok();
+        let client_id = env::var(client_id_env).ok();
+        let client_secret = env::var(client_secret_env).ok();
+
+        if access_token.trim().is_empty() && refresh_token.is_none() {
+            return Err(format!(
+                "missing {access_env}; set {access_env} (or configure {refresh_env}, {client_id_env}, and {client_secret_env})"
+            ));
+        }
+
+        Ok(Self {
+            access_token,
+            refresh_token,
+            client_id,
+            client_secret,
+            provider_label,
+        })
+    }
+
+    fn token(&self) -> &str {
+        self.access_token.as_str()
+    }
+
+    fn can_refresh(&self) -> bool {
+        self.refresh_token.is_some() && self.client_id.is_some() && self.client_secret.is_some()
+    }
+
+    fn refresh(&mut self, client: &HttpClient, token_url: &str) -> VaultResult<()> {
+        let refresh_token = self.refresh_token.as_ref().ok_or_else(|| {
+            VaultError::Sync(format!(
+                "{} access token expired and refresh token was not configured",
+                self.provider_label
+            ))
+        })?;
+        let client_id = self.client_id.as_ref().ok_or_else(|| {
+            VaultError::Sync(format!(
+                "{} access token expired and OAuth client id was not configured",
+                self.provider_label
+            ))
+        })?;
+        let client_secret = self.client_secret.as_ref().ok_or_else(|| {
+            VaultError::Sync(format!(
+                "{} access token expired and OAuth client secret was not configured",
+                self.provider_label
+            ))
+        })?;
+
+        let response = client
+            .post(token_url)
+            .form(&[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token.as_str()),
+                ("client_id", client_id.as_str()),
+                ("client_secret", client_secret.as_str()),
+            ])
+            .send()
+            .map_err(|error| {
+                VaultError::Sync(format!(
+                    "{} token refresh request failed: {error}",
+                    self.provider_label
+                ))
+            })?;
+
+        if !response.status().is_success() {
+            return Err(response_to_sync_error(
+                self.provider_label,
+                "token refresh",
+                response,
+            ));
+        }
+
+        let payload: OAuthRefreshResponse = response.json().map_err(|error| {
+            VaultError::Sync(format!(
+                "{} token refresh response parse failed: {error}",
+                self.provider_label
+            ))
+        })?;
+        self.access_token = payload.access_token;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct OAuthRefreshResponse {
+    access_token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GoogleDriveRoot {
+    AppDataFolder,
+    FolderId(String),
+}
+
+impl GoogleDriveRoot {
+    fn parent_for_create(&self) -> String {
+        match self {
+            Self::AppDataFolder => GOOGLE_DRIVE_DEFAULT_PARENT.to_string(),
+            Self::FolderId(folder_id) => folder_id.clone(),
+        }
+    }
+
+    fn parent_clause(&self) -> String {
+        match self {
+            Self::AppDataFolder => {
+                format!("'{GOOGLE_DRIVE_DEFAULT_PARENT}' in parents")
+            }
+            Self::FolderId(folder_id) => format!("'{}' in parents", folder_id),
+        }
+    }
+
+    fn spaces_param(&self) -> Option<&'static str> {
+        match self {
+            Self::AppDataFolder => Some("appDataFolder"),
+            Self::FolderId(_) => None,
+        }
+    }
+}
+
+pub struct GoogleDriveBackend {
+    client: HttpClient,
+    auth: OAuthAccessState,
+    root: GoogleDriveRoot,
+    throttle: RequestThrottle,
+    file_ids: HashMap<String, String>,
+}
+
+impl GoogleDriveBackend {
+    pub fn from_remote(remote: Option<&str>) -> Result<Self, String> {
+        let client = HttpClient::builder()
+            .build()
+            .map_err(|error| format!("failed to create Google Drive client: {error}"))?;
+        let mut auth = OAuthAccessState::from_env(
+            "Google Drive",
+            "BSJ_GDRIVE_ACCESS_TOKEN",
+            "BSJ_GDRIVE_REFRESH_TOKEN",
+            "BSJ_GDRIVE_CLIENT_ID",
+            "BSJ_GDRIVE_CLIENT_SECRET",
+        )?;
+        let root = parse_google_drive_remote(remote)?;
+        if auth.token().trim().is_empty() {
+            auth.refresh(&client, GOOGLE_DRIVE_TOKEN_URL)
+                .map_err(|error| format!("Google Drive token refresh failed: {error}"))?;
+        }
+
+        Ok(Self {
+            client,
+            auth,
+            root,
+            throttle: RequestThrottle::default(),
+            file_ids: HashMap::new(),
+        })
+    }
+
+    fn with_auth<F>(
+        &mut self,
+        label: &str,
+        mut build: F,
+    ) -> VaultResult<reqwest::blocking::Response>
+    where
+        F: FnMut(&HttpClient, &str) -> RequestBuilder,
+    {
+        let mut refreshed = false;
+        loop {
+            self.throttle.wait_for_turn();
+            let response = build(&self.client, self.auth.token())
+                .send()
+                .map_err(|error| {
+                    VaultError::Sync(format!("Google Drive {label} request failed: {error}"))
+                })?;
+
+            if response.status() == StatusCode::UNAUTHORIZED
+                && !refreshed
+                && self.auth.can_refresh()
+            {
+                self.auth.refresh(&self.client, GOOGLE_DRIVE_TOKEN_URL)?;
+                refreshed = true;
+                continue;
+            }
+
+            return Ok(response);
+        }
+    }
+
+    fn list_query(&self) -> String {
+        format!(
+            "trashed = false and {} and appProperties has {{ key='bsj_key' and value != '' }}",
+            self.root.parent_clause()
+        )
+    }
+
+    fn key_query(&self, key: &str) -> String {
+        let escaped = key.replace('\'', "\\'");
+        format!(
+            "trashed = false and {} and appProperties has {{ key='bsj_key' and value='{}' }}",
+            self.root.parent_clause(),
+            escaped
+        )
+    }
+
+    fn list_files(
+        &mut self,
+        query: &str,
+        page_token: Option<&str>,
+        page_size: usize,
+    ) -> VaultResult<GoogleDriveListResponse> {
+        let mut params = vec![
+            ("q", query.to_string()),
+            (
+                "fields",
+                "nextPageToken,files(id,appProperties)".to_string(),
+            ),
+            ("pageSize", page_size.to_string()),
+        ];
+        if let Some(page_token) = page_token {
+            params.push(("pageToken", page_token.to_string()));
+        }
+        if let Some(spaces) = self.root.spaces_param() {
+            params.push(("spaces", spaces.to_string()));
+        }
+
+        let response = self.with_auth("list", |client, token| {
+            client
+                .get(format!("{GOOGLE_DRIVE_API_BASE}/files"))
+                .bearer_auth(token)
+                .query(&params)
+        })?;
+        if !response.status().is_success() {
+            return Err(response_to_sync_error("Google Drive", "list", response));
+        }
+        response
+            .json::<GoogleDriveListResponse>()
+            .map_err(|error| VaultError::Sync(format!("Google Drive list parse failed: {error}")))
+    }
+
+    fn find_file_id(&mut self, key: &str) -> VaultResult<Option<String>> {
+        if let Some(id) = self.file_ids.get(key) {
+            return Ok(Some(id.clone()));
+        }
+
+        let response = self.list_files(&self.key_query(key), None, 1)?;
+        let id = response.files.into_iter().next().map(|item| item.id);
+        if let Some(id) = &id {
+            self.file_ids.insert(key.to_string(), id.clone());
+        }
+        Ok(id)
+    }
+
+    fn list_keys_once(&mut self) -> VaultResult<BTreeSet<String>> {
+        let mut keys = BTreeSet::new();
+        let mut page_token = None::<String>;
+        loop {
+            let response = self.list_files(&self.list_query(), page_token.as_deref(), 1000)?;
+            for file in response.files {
+                let Some(key) = file
+                    .app_properties
+                    .as_ref()
+                    .and_then(|map| map.get("bsj_key"))
+                    .cloned()
+                else {
+                    continue;
+                };
+                if classify_sync_key(&key).is_some() {
+                    self.file_ids.insert(key.clone(), file.id);
+                    keys.insert(key);
+                }
+            }
+            page_token = response.next_page_token;
+            if page_token.is_none() {
+                break;
+            }
+        }
+        Ok(keys)
+    }
+
+    fn read_once(&mut self, key: &str) -> VaultResult<Vec<u8>> {
+        let id = self
+            .find_file_id(key)?
+            .ok_or_else(|| VaultError::Sync(format!("Google Drive object not found for {key}")))?;
+        let response = self.with_auth("read", |client, token| {
+            client
+                .get(format!("{GOOGLE_DRIVE_API_BASE}/files/{id}"))
+                .bearer_auth(token)
+                .query(&[("alt", "media")])
+        })?;
+        if !response.status().is_success() {
+            return Err(response_to_sync_error("Google Drive", "read", response));
+        }
+        response
+            .bytes()
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| VaultError::Sync(format!("Google Drive read failed: {error}")))
+    }
+
+    fn write_once(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
+        if let Some(id) = self.find_file_id(key)? {
+            let response = self.with_auth("update", |client, token| {
+                client
+                    .patch(format!("{GOOGLE_DRIVE_UPLOAD_BASE}/files/{id}"))
+                    .bearer_auth(token)
+                    .query(&[("uploadType", "media")])
+                    .header("Content-Type", "application/octet-stream")
+                    .body(bytes.to_vec())
+            })?;
+            if !response.status().is_success() {
+                return Err(response_to_sync_error("Google Drive", "update", response));
+            }
+            return Ok(());
+        }
+
+        let metadata = serde_json::json!({
+            "name": google_drive_object_name(key),
+            "parents": [self.root.parent_for_create()],
+            "appProperties": { "bsj_key": key },
+        });
+        let metadata_json = serde_json::to_string(&metadata)
+            .map_err(|error| VaultError::Sync(format!("Google Drive metadata failed: {error}")))?;
+        let boundary = format!("bsj-boundary-{}", hex::encode(rand::random::<[u8; 6]>()));
+        let payload = google_drive_multipart_payload(&boundary, &metadata_json, bytes);
+        let response = self.with_auth("create", |client, token| {
+            client
+                .post(format!("{GOOGLE_DRIVE_UPLOAD_BASE}/files"))
+                .bearer_auth(token)
+                .query(&[("uploadType", "multipart")])
+                .header(
+                    "Content-Type",
+                    format!("multipart/related; boundary={boundary}"),
+                )
+                .body(payload.clone())
+        })?;
+        if !response.status().is_success() {
+            return Err(response_to_sync_error("Google Drive", "create", response));
+        }
+        let created: GoogleDriveCreateResponse = response.json().map_err(|error| {
+            VaultError::Sync(format!("Google Drive create parse failed: {error}"))
+        })?;
+        self.file_ids.insert(key.to_string(), created.id);
+        Ok(())
+    }
+}
+
+impl SyncBackend for GoogleDriveBackend {
+    fn list_keys(&mut self) -> VaultResult<BTreeSet<String>> {
+        retry_sync_operation("Google Drive list", || self.list_keys_once())
+    }
+
+    fn read(&mut self, key: &str) -> VaultResult<Vec<u8>> {
+        retry_sync_operation(&format!("Google Drive read {key}"), || self.read_once(key))
+    }
+
+    fn write(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
+        retry_sync_operation(&format!("Google Drive write {key}"), || {
+            self.write_once(key, bytes)
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleDriveListResponse {
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
+    #[serde(default)]
+    files: Vec<GoogleDriveFile>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleDriveFile {
+    id: String,
+    #[serde(rename = "appProperties")]
+    app_properties: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleDriveCreateResponse {
+    id: String,
+}
+
+pub struct DropboxBackend {
+    client: HttpClient,
+    auth: OAuthAccessState,
+    root_path: String,
+    root_path_lower: String,
+    throttle: RequestThrottle,
+}
+
+impl DropboxBackend {
+    pub fn from_remote(remote: Option<&str>) -> Result<Self, String> {
+        let client = HttpClient::builder()
+            .build()
+            .map_err(|error| format!("failed to create Dropbox client: {error}"))?;
+        let mut auth = OAuthAccessState::from_env(
+            "Dropbox",
+            "BSJ_DROPBOX_ACCESS_TOKEN",
+            "BSJ_DROPBOX_REFRESH_TOKEN",
+            "BSJ_DROPBOX_APP_KEY",
+            "BSJ_DROPBOX_APP_SECRET",
+        )?;
+        if auth.token().trim().is_empty() {
+            auth.refresh(&client, DROPBOX_TOKEN_URL)
+                .map_err(|error| format!("Dropbox token refresh failed: {error}"))?;
+        }
+        let root_path = parse_dropbox_root(remote)?;
+        let root_path_lower = root_path.to_ascii_lowercase();
+        Ok(Self {
+            client,
+            auth,
+            root_path,
+            root_path_lower,
+            throttle: RequestThrottle::default(),
+        })
+    }
+
+    fn with_auth<F>(
+        &mut self,
+        label: &str,
+        mut build: F,
+    ) -> VaultResult<reqwest::blocking::Response>
+    where
+        F: FnMut(&HttpClient, &str) -> RequestBuilder,
+    {
+        let mut refreshed = false;
+        loop {
+            self.throttle.wait_for_turn();
+            let response = build(&self.client, self.auth.token())
+                .send()
+                .map_err(|error| {
+                    VaultError::Sync(format!("Dropbox {label} request failed: {error}"))
+                })?;
+
+            if response.status() == StatusCode::UNAUTHORIZED
+                && !refreshed
+                && self.auth.can_refresh()
+            {
+                self.auth.refresh(&self.client, DROPBOX_TOKEN_URL)?;
+                refreshed = true;
+                continue;
+            }
+
+            return Ok(response);
+        }
+    }
+
+    fn ensure_root_exists(&mut self) -> VaultResult<()> {
+        if self.root_path == "/" {
+            return Ok(());
+        }
+        let segments = self
+            .root_path
+            .trim_matches('/')
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let mut current = String::new();
+        for segment in segments {
+            current.push('/');
+            current.push_str(&segment);
+            let current_path = current.clone();
+            let response = self.with_auth("create-folder", |client, token| {
+                client
+                    .post(format!("{DROPBOX_API_BASE}/files/create_folder_v2"))
+                    .bearer_auth(token)
+                    .json(&serde_json::json!({
+                        "path": current_path,
+                        "autorename": false,
+                    }))
+            })?;
+            if response.status().is_success() {
+                continue;
+            }
+            if response.status() == StatusCode::CONFLICT {
+                continue;
+            }
+            let body = response.text().unwrap_or_default().to_ascii_lowercase();
+            if body.contains("conflict") {
+                continue;
+            }
+            return Err(VaultError::Sync(format!(
+                "Dropbox create folder failed for {}: {}",
+                current, body
+            )));
+        }
+        Ok(())
+    }
+
+    fn list_keys_once(&mut self) -> VaultResult<BTreeSet<String>> {
+        let mut keys = BTreeSet::new();
+        let root_path = self.root_path.clone();
+        let response = self.with_auth("list-folder", |client, token| {
+            client
+                .post(format!("{DROPBOX_API_BASE}/files/list_folder"))
+                .bearer_auth(token)
+                .json(&serde_json::json!({
+                    "path": root_path,
+                    "recursive": true,
+                    "include_deleted": false,
+                    "limit": 2000,
+                }))
+        })?;
+
+        if !response.status().is_success() {
+            if response.status() == StatusCode::CONFLICT {
+                return Ok(keys);
+            }
+            return Err(response_to_sync_error("Dropbox", "list folder", response));
+        }
+
+        let mut payload: DropboxListResponse = response
+            .json()
+            .map_err(|error| VaultError::Sync(format!("Dropbox list parse failed: {error}")))?;
+        collect_dropbox_keys(&payload.entries, &self.root_path_lower, &mut keys);
+
+        while payload.has_more {
+            let cursor = payload.cursor.clone();
+            let response = self.with_auth("list-folder-continue", |client, token| {
+                client
+                    .post(format!("{DROPBOX_API_BASE}/files/list_folder/continue"))
+                    .bearer_auth(token)
+                    .json(&serde_json::json!({ "cursor": cursor }))
+            })?;
+            if !response.status().is_success() {
+                return Err(response_to_sync_error("Dropbox", "list continue", response));
+            }
+            payload = response.json().map_err(|error| {
+                VaultError::Sync(format!("Dropbox list continue parse failed: {error}"))
+            })?;
+            collect_dropbox_keys(&payload.entries, &self.root_path_lower, &mut keys);
+        }
+
+        Ok(keys)
+    }
+
+    fn read_once(&mut self, key: &str) -> VaultResult<Vec<u8>> {
+        let path = dropbox_object_path(&self.root_path, key);
+        let response = self.with_auth("download", |client, token| {
+            client
+                .post(format!("{DROPBOX_CONTENT_BASE}/files/download"))
+                .bearer_auth(token)
+                .header(
+                    "Dropbox-API-Arg",
+                    serde_json::json!({ "path": path }).to_string(),
+                )
+        })?;
+        if !response.status().is_success() {
+            return Err(response_to_sync_error("Dropbox", "download", response));
+        }
+        response
+            .bytes()
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| VaultError::Sync(format!("Dropbox read failed: {error}")))
+    }
+
+    fn write_once(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
+        self.ensure_root_exists()?;
+        let path = dropbox_object_path(&self.root_path, key);
+        let response = self.with_auth("upload", |client, token| {
+            client
+                .post(format!("{DROPBOX_CONTENT_BASE}/files/upload"))
+                .bearer_auth(token)
+                .header(
+                    "Dropbox-API-Arg",
+                    serde_json::json!({
+                        "path": path,
+                        "mode": "overwrite",
+                        "autorename": false,
+                        "mute": true,
+                    })
+                    .to_string(),
+                )
+                .header("Content-Type", "application/octet-stream")
+                .body(bytes.to_vec())
+        })?;
+        if !response.status().is_success() {
+            return Err(response_to_sync_error("Dropbox", "upload", response));
+        }
+        Ok(())
+    }
+}
+
+impl SyncBackend for DropboxBackend {
+    fn list_keys(&mut self) -> VaultResult<BTreeSet<String>> {
+        retry_sync_operation("Dropbox list", || self.list_keys_once())
+    }
+
+    fn read(&mut self, key: &str) -> VaultResult<Vec<u8>> {
+        retry_sync_operation(&format!("Dropbox read {key}"), || self.read_once(key))
+    }
+
+    fn write(&mut self, key: &str, bytes: &[u8]) -> VaultResult<()> {
+        retry_sync_operation(&format!("Dropbox write {key}"), || {
+            self.write_once(key, bytes)
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct DropboxListResponse {
+    #[serde(default)]
+    entries: Vec<DropboxEntry>,
+    cursor: String,
+    #[serde(rename = "has_more")]
+    has_more: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct DropboxEntry {
+    #[serde(rename = ".tag")]
+    tag: String,
+    #[serde(default)]
+    path_lower: Option<String>,
+}
+
+fn collect_dropbox_keys(entries: &[DropboxEntry], root_lower: &str, keys: &mut BTreeSet<String>) {
+    for entry in entries {
+        if entry.tag != "file" {
+            continue;
+        }
+        let Some(path_lower) = entry.path_lower.as_deref() else {
+            continue;
+        };
+        let Some(relative) = dropbox_relative_key(path_lower, root_lower) else {
+            continue;
+        };
+        if classify_sync_key(&relative).is_some() {
+            keys.insert(relative);
+        }
+    }
+}
+
+fn dropbox_relative_key(path_lower: &str, root_lower: &str) -> Option<String> {
+    if root_lower == "/" {
+        return path_lower.strip_prefix('/').map(ToString::to_string);
+    }
+    path_lower
+        .strip_prefix(root_lower)
+        .and_then(|suffix| suffix.strip_prefix('/'))
+        .map(ToString::to_string)
+}
+
+fn response_to_sync_error(
+    provider: &str,
+    label: &str,
+    response: reqwest::blocking::Response,
+) -> VaultError {
+    let status = response.status();
+    let mut body = response.text().unwrap_or_default().trim().to_string();
+    if body.len() > 220 {
+        body.truncate(220);
+        body.push_str("...");
+    }
+    let message = if body.is_empty() {
+        format!("{provider} {label} failed: {status}")
+    } else {
+        format!("{provider} {label} failed: {status} {body}")
+    };
+    VaultError::Sync(message)
+}
+
+fn google_drive_object_name(key: &str) -> String {
+    let digest = Sha256::digest(key.as_bytes());
+    format!("bsj-{}.bin", hex::encode(digest))
+}
+
+fn google_drive_multipart_payload(boundary: &str, metadata_json: &str, bytes: &[u8]) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(metadata_json.len() + bytes.len() + 256);
+    payload.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata_json}\r\n"
+        )
+        .as_bytes(),
+    );
+    payload.extend_from_slice(
+        format!("--{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes(),
+    );
+    payload.extend_from_slice(bytes);
+    payload.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    payload
+}
+
+fn parse_google_drive_remote(remote: Option<&str>) -> Result<GoogleDriveRoot, String> {
+    let raw = match remote {
+        Some(remote) => remote.trim().to_string(),
+        None => env::var("BSJ_GDRIVE_FOLDER_ID").unwrap_or_default(),
+    };
+    if raw.is_empty() || raw.eq_ignore_ascii_case("appdata") {
+        return Ok(GoogleDriveRoot::AppDataFolder);
+    }
+
+    if let Some(rest) = raw.strip_prefix("gdrive://") {
+        return parse_google_drive_remote(Some(rest));
+    }
+    if let Some(rest) = raw.strip_prefix("googledrive://") {
+        return parse_google_drive_remote(Some(rest));
+    }
+    if let Some(folder_id) = parse_google_folder_id_from_url(&raw) {
+        return Ok(GoogleDriveRoot::FolderId(folder_id));
+    }
+    Ok(GoogleDriveRoot::FolderId(raw))
+}
+
+fn parse_google_folder_id_from_url(raw: &str) -> Option<String> {
+    let url = Url::parse(raw).ok()?;
+    let host = url.host_str()?.to_ascii_lowercase();
+    if !host.contains("drive.google.com") {
+        return None;
+    }
+    let path = url.path();
+    let marker = "/folders/";
+    let index = path.find(marker)?;
+    let id = &path[index + marker.len()..];
+    let folder_id = id.split('/').next().unwrap_or_default().trim();
+    (!folder_id.is_empty()).then(|| folder_id.to_string())
+}
+
+fn parse_dropbox_root(remote: Option<&str>) -> Result<String, String> {
+    let raw = match remote {
+        Some(remote) => remote.trim().to_string(),
+        None => env::var("BSJ_DROPBOX_ROOT").unwrap_or_else(|_| DROPBOX_DEFAULT_ROOT.to_string()),
+    };
+    let trimmed = if let Some(path) = raw.strip_prefix("dropbox://") {
+        path.trim()
+    } else {
+        raw.trim()
+    };
+    let normalized = if trimmed.is_empty() {
+        DROPBOX_DEFAULT_ROOT.to_string()
+    } else if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    };
+    if normalized.contains('\\') {
+        return Err("Dropbox root must use forward slashes".to_string());
+    }
+    if normalized == "/" {
+        Ok("/".to_string())
+    } else {
+        Ok(normalized.trim_end_matches('/').to_string())
+    }
+}
+
+fn dropbox_object_path(root: &str, key: &str) -> String {
+    let root = if root == "/" {
+        "".to_string()
+    } else {
+        root.trim_end_matches('/').to_string()
+    };
+    if root.is_empty() {
+        format!("/{key}")
+    } else {
+        format!("{root}/{key}")
+    }
+}
+
 pub fn sync_root<B: SyncBackend>(
     local_root: &Path,
     backend: &mut B,
@@ -699,6 +1480,16 @@ pub fn preview_root<B: SyncBackend>(
 
 pub fn looks_like_s3_remote(remote: &str) -> bool {
     remote.starts_with("s3://")
+}
+
+pub fn looks_like_google_drive_remote(remote: &str) -> bool {
+    remote.starts_with("gdrive://")
+        || remote.starts_with("googledrive://")
+        || remote.contains("drive.google.com/drive/folders/")
+}
+
+pub fn looks_like_dropbox_remote(remote: &str) -> bool {
+    remote.starts_with("dropbox://")
 }
 
 pub fn looks_like_webdav_remote(remote: &str) -> bool {
@@ -1164,6 +1955,34 @@ mod tests {
     }
 
     #[test]
+    fn gdrive_backend_smoke_lists_when_env_present() {
+        if env::var("BSJ_GDRIVE_ACCESS_TOKEN").is_err()
+            && env::var("BSJ_GDRIVE_REFRESH_TOKEN").is_err()
+        {
+            eprintln!(
+                "skipping Google Drive integration smoke test: BSJ_GDRIVE_ACCESS_TOKEN or BSJ_GDRIVE_REFRESH_TOKEN not set"
+            );
+            return;
+        }
+        let mut backend = GoogleDriveBackend::from_remote(None).expect("backend");
+        backend.list_keys().expect("list");
+    }
+
+    #[test]
+    fn dropbox_backend_smoke_lists_when_env_present() {
+        if env::var("BSJ_DROPBOX_ACCESS_TOKEN").is_err()
+            && env::var("BSJ_DROPBOX_REFRESH_TOKEN").is_err()
+        {
+            eprintln!(
+                "skipping Dropbox integration smoke test: BSJ_DROPBOX_ACCESS_TOKEN or BSJ_DROPBOX_REFRESH_TOKEN not set"
+            );
+            return;
+        }
+        let mut backend = DropboxBackend::from_remote(None).expect("backend");
+        backend.list_keys().expect("list");
+    }
+
+    #[test]
     fn webdav_url_detection_matches_http_schemes() {
         assert!(looks_like_webdav_remote("https://dav.example.com/bsj/"));
         assert!(looks_like_webdav_remote("http://dav.example.com/bsj/"));
@@ -1174,6 +1993,56 @@ mod tests {
     fn s3_url_detection_matches_s3_scheme() {
         assert!(looks_like_s3_remote("s3://bucket/prefix"));
         assert!(!looks_like_s3_remote("https://example.com/bucket"));
+    }
+
+    #[test]
+    fn gdrive_url_detection_matches_supported_forms() {
+        assert!(looks_like_google_drive_remote("gdrive://appdata"));
+        assert!(looks_like_google_drive_remote("googledrive://folder-id"));
+        assert!(looks_like_google_drive_remote(
+            "https://drive.google.com/drive/folders/abc123"
+        ));
+        assert!(!looks_like_google_drive_remote(
+            "https://example.com/drive/folders/abc123"
+        ));
+    }
+
+    #[test]
+    fn dropbox_url_detection_matches_dropbox_scheme() {
+        assert!(looks_like_dropbox_remote(
+            "dropbox:///BlueScreenJournal-Sync"
+        ));
+        assert!(!looks_like_dropbox_remote("https://www.dropbox.com/home"));
+    }
+
+    #[test]
+    fn parse_google_drive_remote_supports_appdata_and_urls() {
+        assert_eq!(
+            parse_google_drive_remote(Some("appdata")).expect("appdata"),
+            GoogleDriveRoot::AppDataFolder
+        );
+        assert_eq!(
+            parse_google_drive_remote(Some("gdrive://folder-123")).expect("scheme"),
+            GoogleDriveRoot::FolderId("folder-123".to_string())
+        );
+        assert_eq!(
+            parse_google_drive_remote(Some("https://drive.google.com/drive/folders/folder-abc"))
+                .expect("url"),
+            GoogleDriveRoot::FolderId("folder-abc".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_dropbox_root_normalizes_paths() {
+        assert_eq!(
+            parse_dropbox_root(Some("dropbox://journal-sync")).expect("scheme"),
+            "/journal-sync"
+        );
+        assert_eq!(
+            parse_dropbox_root(Some("/journal-sync/")).expect("trim"),
+            "/journal-sync"
+        );
+        assert_eq!(parse_dropbox_root(Some("/")).expect("root"), "/");
     }
 
     #[test]

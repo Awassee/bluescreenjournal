@@ -33,11 +33,11 @@ Print a filtered timeline of entries or an aggregate summary.
 Launch directly on the next date without a saved revision.
 .It Cm prompts Op Ar list|pick
 List or pick deterministic journaling prompts, optionally as JSON.
-.It Cm sync Op Fl -backend Ar folder|s3|webdav Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target
-Sync encrypted revisions to a folder, S3, or WebDAV target. Provider presets auto-detect common desktop sync folders.
-.It Cm cloud Ar status Op Fl -backend Ar folder|s3|webdav Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target Op Fl -json
+.It Cm sync Op Fl -backend Ar folder|s3|webdav|gdrive|dropbox Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target
+Sync encrypted revisions to a folder, S3, WebDAV, Google Drive API, or Dropbox API target. Provider presets auto-detect common desktop sync folders.
+.It Cm cloud Ar status Op Fl -backend Ar folder|s3|webdav|gdrive|dropbox Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target Op Fl -json
 Show cloud queue/integrity status for encrypted sync targets.
-.It Cm cloud Ar recover Op Fl -backend Ar folder|s3|webdav Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target Op Fl -no-verify Op Fl -json
+.It Cm cloud Ar recover Op Fl -backend Ar folder|s3|webdav|gdrive|dropbox Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target Op Fl -no-verify Op Fl -json
 Pull missing encrypted blobs from cloud and re-check integrity (or skip verify with
 .Fl -no-verify Ns ).
 .It Cm backup

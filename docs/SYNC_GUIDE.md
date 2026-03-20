@@ -60,6 +60,50 @@ export AWS_REGION=us-east-1
 bsj sync
 ```
 
+## Direct Google Drive API sync
+
+Use this backend when you want bsj to talk to Google Drive directly (instead of syncing through a local Google Drive folder).
+
+```bash
+export BSJ_SYNC_BACKEND=gdrive
+export BSJ_GDRIVE_ACCESS_TOKEN=ya29...
+# Optional refresh flow:
+export BSJ_GDRIVE_REFRESH_TOKEN=1//...
+export BSJ_GDRIVE_CLIENT_ID=...
+export BSJ_GDRIVE_CLIENT_SECRET=...
+# Optional: folder target (default is appDataFolder)
+export BSJ_GDRIVE_FOLDER_ID=appdata
+bsj sync
+```
+
+You can also pass a remote override:
+
+```bash
+bsj sync --backend gdrive --remote gdrive://<folder-id>
+```
+
+## Direct Dropbox API sync
+
+Use this backend when you want bsj to talk to Dropbox directly (instead of syncing through a local Dropbox folder).
+
+```bash
+export BSJ_SYNC_BACKEND=dropbox
+export BSJ_DROPBOX_ACCESS_TOKEN=sl....
+# Optional refresh flow:
+export BSJ_DROPBOX_REFRESH_TOKEN=...
+export BSJ_DROPBOX_APP_KEY=...
+export BSJ_DROPBOX_APP_SECRET=...
+# Optional root path (default /BlueScreenJournal-Sync)
+export BSJ_DROPBOX_ROOT=/BlueScreenJournal-Sync
+bsj sync
+```
+
+You can also pass a remote override:
+
+```bash
+bsj sync --backend dropbox --remote dropbox:///BlueScreenJournal-Sync
+```
+
 ## WebDAV sync
 
 Set environment variables:

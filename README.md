@@ -65,7 +65,7 @@ It gives you:
 - interface: full-screen Rust TUI in Terminal.app and iTerm2
 - visual direction: royal-blue background, white monospaced text, classic DOS-era workspace
 - storage model: local-first encrypted vault on disk
-- sync model: encrypted folder sync, plus S3 and WebDAV backends
+- sync model: encrypted folder sync, plus S3/WebDAV and direct Google Drive/Dropbox API backends
 - history model: append-only revisions plus encrypted per-date autosave drafts
 - search model: in-memory index after unlock, with no plaintext search index on disk
 
@@ -195,7 +195,7 @@ The app is direct by design:
 | In-entry spellcheck | Suggests corrections, typo auto-fix, and temporary session ignore words | Catches low-signal mistakes without breaking writing momentum |
 | Global search | Searches saved entries after unlock without disk plaintext index | Fast retrieval without leaving search residue on disk |
 | Search presets and cache status | Adds today/month/all scopes plus encrypted cache inspection | Makes search faster to aim and easier to trust |
-| Encrypted sync | Syncs encrypted revision blobs to folder, S3, or WebDAV targets | Lets you use cloud storage without uploading plaintext |
+| Encrypted sync | Syncs encrypted revision blobs to folder, S3, WebDAV, Google Drive API, or Dropbox API targets | Lets you use cloud storage without uploading plaintext |
 | Provider presets | Auto-detects Google Drive, Dropbox, OneDrive, iCloud Drive, and Box Drive folders | Makes mainstream cloud setup one command/menu step instead of manual path hunting |
 | Cloud recovery status | Shows upload/download queues plus verify status in `TOOLS -> Cloud Status` and `bsj cloud status` | Makes recovery readiness visible before something goes wrong |
 | Pull-only cloud recovery | Pulls missing encrypted blobs from remote without uploading local-only data (`TOOLS -> Recover From Cloud`, `bsj cloud recover`) | Safely rebuilds a machine after loss while preserving remote history |
@@ -404,10 +404,16 @@ bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDo
 bsj sync --provider google-drive
 bsj sync --provider dropbox
 bsj sync --provider onedrive
+bsj sync --backend gdrive
+bsj sync --backend dropbox
 bsj cloud status --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
 bsj cloud status --provider google-drive
+bsj cloud status --backend gdrive
+bsj cloud status --backend dropbox
 bsj cloud recover --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
 bsj cloud recover --provider google-drive
+bsj cloud recover --backend gdrive
+bsj cloud recover --backend dropbox
 bsj backup
 bsj backup list
 bsj backup prune
