@@ -65,6 +65,7 @@ INSTALL_LOG="$TMP_DIR/install-prebuilt.log"
 SMART_LOG="$TMP_DIR/install-smart.log"
 MENU_LOG="$TMP_DIR/install-prebuilt-menu.log"
 MENU_LAUNCH_LOG="$TMP_DIR/install-prebuilt-menu-launch.log"
+HANDOFF_LOG="$TMP_DIR/install-handoff.log"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -130,6 +131,17 @@ grep -Fq "Installer auto-select: 1" "$MENU_LAUNCH_LOG"
 grep -Fq "Launch BlueScreen Journal here now (recommended)" "$MENU_LAUNCH_LOG"
 grep -Fq "Usage: bsj" "$MENU_LAUNCH_LOG"
 grep -Fq "$MENU_LAUNCH_PREFIX/bin" "$MENU_LAUNCH_HOME/.zprofile"
+
+HOME="$MENU_LAUNCH_HOME" SHELL=/bin/zsh \
+  BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \
+  BSJ_INSTALLER_LAUNCH_MODE="smoke-app" \
+  BSJ_INSTALLER_LAUNCH_STYLE="same-terminal" \
+  script -q "$HANDOFF_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_LAUNCH_PREFIX" >/dev/null
+grep -Fq "Preparing this terminal for the full-screen journal" "$HANDOFF_LOG"
+grep -Fq "[1/3] Resetting terminal input state" "$HANDOFF_LOG"
+grep -Fq "[2/3] Handing off to bsj" "$HANDOFF_LOG"
+grep -Fq "[3/3] Opening the blue-screen workspace" "$HANDOFF_LOG"
+grep -Fq "bsj " "$HANDOFF_LOG"
 
 HOME="$MENU_HOME" SHELL=/bin/zsh \
   BSJ_INSTALLER_POST_INSTALL_SELECTION="4,6,5,7" \

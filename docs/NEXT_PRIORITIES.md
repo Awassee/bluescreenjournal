@@ -1,6 +1,6 @@
 # Next Priorities
 
-This is the current prioritized backlog after `v2.1.0`.
+This is the current prioritized backlog after `v2.1.1`.
 
 ## 20 major steps
 

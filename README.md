@@ -22,14 +22,12 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with encrypted folder sync plus S3/WebDAV and direct Google Drive/Dropbox API connectors
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v2.1.0
+## New in v2.1.1
 
-- the current BlueScreen Journal product line is now promoted as the clean `2.1.0` stable release
-- save flow is clearer across the UI with stronger `NEXT ENTRY`, `NEXT DAY`, `OLD ENTRY`, and `SAVED PAGE` states
-- `ENTRY NO.` now advances with each saved revision and shows the next serial on fresh pages
-- command palette and first-run guidance are more action-oriented and easier to learn
-- the public installer now chooses the correct published macOS asset and has a dedicated public smoke test
-- direct cloud setup, Keychain-backed credentials, and sync trust surfaces are part of the stable release line
+- smart installer mode now tells you what it chose and what it is about to do
+- launch-now from the installer shows clearer staged handoff status before entering the TUI
+- installer menu wording is tighter and more accurate
+- release smoke coverage now checks both smart installer option `1` and same-terminal launch handoff behavior
 
 ## Screenshots
 
@@ -79,7 +77,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v2.1.0.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v2.1.1.md) |
 
 ## Turnkey install
 
@@ -92,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.0
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.1
 ```
 
 Install from source instead of the prebuilt release:
@@ -447,7 +445,7 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v2.1.0.md)
+- [Release Notes](docs/releases/v2.1.1.md)
 - [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
 - [v1.3 UX Checklist](docs/V1_3_UX_CHECKLIST.md)
 - [v3.0 Planning](docs/V3_0_PLAN.md)

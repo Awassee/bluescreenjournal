@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v2.1.1
+
+- improved installer `smart mode` feedback so option `1` now clearly states which install path was chosen and what the installer will do next
+- improved post-install launch-now handoff so same-terminal launch shows explicit staged status before entering the TUI
+- added smoke coverage for the top-level smart installer menu and same-terminal launch handoff messaging
+- aligned installer menu wording so quickstart/cheat-sheet actions describe what they actually print
+- added `docs/NEXT_PRIORITIES.md` and refreshed roadmap/docs planning surfaces for the current post-release line
+
 ## v2.1.0
 
 - promoted the current mature product line to the `2.1.0` release:

@@ -155,7 +155,7 @@ Environment overrides:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
-  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.0
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.1
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --doctor
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --repair-path
@@ -973,7 +973,7 @@ run_doctor() {
   fi
 
   printf "\nTroubleshooting hints\n"
-  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v2.1.0\n"
+  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v2.1.1\n"
   printf "  - Latest main build: ./install.sh --source\n"
   printf "  - PATH repair:       ./install.sh --repair-path\n"
   printf "  - About:             ./install.sh --about\n"
@@ -1222,6 +1222,7 @@ launch_bsj_from_installer() {
   local installed_bin="$1"
   local launch_mode="${BSJ_INSTALLER_LAUNCH_MODE:-app}"
   local launch_style="${BSJ_INSTALLER_LAUNCH_STYLE:-auto}"
+  local render_app_handoff=0
   local -a launch_cmd
   launch_cmd=("$installed_bin")
 
@@ -1232,6 +1233,7 @@ launch_bsj_from_installer() {
 
   case "$launch_mode" in
     app|"")
+      render_app_handoff=1
       ;;
     help)
       launch_cmd+=(--help)
@@ -1242,6 +1244,10 @@ launch_bsj_from_installer() {
     quickstart)
       launch_cmd+=(guide quickstart)
       ;;
+    smoke-app)
+      render_app_handoff=1
+      launch_cmd+=(--version)
+      ;;
     *)
       warn "Unknown BSJ_INSTALLER_LAUNCH_MODE: $launch_mode"
       ;;
@@ -1250,7 +1256,7 @@ launch_bsj_from_installer() {
   case "$launch_style" in
     auto|"")
       if tty_input_available; then
-        if [[ "$launch_mode" == "app" ]]; then
+        if [[ "$render_app_handoff" -eq 1 ]]; then
           clear
           print_launch_handoff "$installed_bin"
           stty sane < /dev/tty >/dev/null 2>&1 || true
@@ -1264,7 +1270,7 @@ launch_bsj_from_installer() {
       fi
       ;;
     same-terminal|current)
-      if [[ "$launch_mode" == "app" ]]; then
+      if [[ "$render_app_handoff" -eq 1 ]]; then
         clear
         print_launch_handoff "$installed_bin"
         stty sane < /dev/tty >/dev/null 2>&1 || true
@@ -1283,7 +1289,7 @@ launch_bsj_from_installer() {
       ;;
   esac
 
-  if [[ "$launch_mode" != "app" ]]; then
+  if [[ "$render_app_handoff" -eq 0 ]]; then
     "${launch_cmd[@]}"
     return $?
   fi
