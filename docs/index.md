@@ -4,7 +4,8 @@ BlueScreen Journal is a local-first encrypted terminal journal for macOS with a 
 
 - Latest stable: [v2.1.0](https://github.com/Awassee/bluescreenjournal/releases/tag/v2.1.0)
 - Release notes: [v2.1.0](releases/v2.1.0.md)
-- Current patch scope: [v2.1.1 patch list](V2_1_1_PLAN.md)
+- Current patch scope: [v2.1.1 execution plan](V2_1_1_PLAN.md)
+- Prioritized backlog: [Next Priorities](NEXT_PRIORITIES.md)
 - Full changelog: [CHANGELOG.md](../CHANGELOG.md)
 
 ## Start Here
@@ -15,7 +16,8 @@ BlueScreen Journal is a local-first encrypted terminal journal for macOS with a 
 - [Product Guide](PRODUCT_GUIDE.md)
 - [Datasheet](DATASHEET.md)
 - [Nostalgia Guardrails](NOSTALGIA_GUARDRAILS.md)
-- [v2.1.1 Patch List](V2_1_1_PLAN.md)
+- [v2.1.1 Execution Plan](V2_1_1_PLAN.md)
+- [Next Priorities](NEXT_PRIORITIES.md)
 - [v1.3.2 Plan](V1_3_2_PLAN.md)
 - [v3.0 Planning](V3_0_PLAN.md)
 - [Troubleshooting](TROUBLESHOOTING.md)

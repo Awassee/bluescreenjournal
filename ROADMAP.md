@@ -8,7 +8,8 @@ This is a directional roadmap, not a contract.
 - strengthen product docs and support surfaces
 - keep the nostalgic TUI consistent across terminals, with docs and render tests acting as release gates
 - improve reliability of sync, merge, and verify workflows
-- finish the current sync parity/menu setup polish tracked in [docs/V1_3_2_PLAN.md](docs/V1_3_2_PLAN.md)
+- execute the current release follow-up work tracked in [docs/V2_1_1_PLAN.md](docs/V2_1_1_PLAN.md)
+- keep the prioritized backlog explicit in [docs/NEXT_PRIORITIES.md](docs/NEXT_PRIORITIES.md)
 
 ## Medium-term priorities
 
@@ -23,6 +24,12 @@ This is a directional roadmap, not a contract.
 - stay local-first
 - avoid turning bsj into a general-purpose note platform
 - deepen trust and durability rather than chasing feature sprawl
+
+## Current planning references
+
+- [docs/V2_1_1_PLAN.md](docs/V2_1_1_PLAN.md)
+- [docs/NEXT_PRIORITIES.md](docs/NEXT_PRIORITIES.md)
+- [docs/V3_0_PLAN.md](docs/V3_0_PLAN.md)
 
 ## v3.0 planning candidates
 

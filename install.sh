@@ -1238,7 +1238,7 @@ BlueScreen Journal installer menu
   1) Launch BlueScreen Journal here now (recommended)
   2) Open BlueScreen Journal in a new Terminal window
   3) Print first-run guide (menu-first flow)
-  4) Print keyboard/menu cheat sheet
+  4) Print quickstart + key cheat sheet
   5) Run health check (doctor) + PATH repair
   6) Show command help
   7) Exit installer
