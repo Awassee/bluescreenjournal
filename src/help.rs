@@ -130,7 +130,7 @@ Actual paths on this Mac\n\
 
 pub fn render_docs_hub() -> String {
     format!(
-        "BlueScreen Journal Docs Hub\n\n{}\n\nQuick links:\n- docs/QUICKSTART.md\n- bsj guide quickstart\n",
+        "BlueScreen Journal Docs Hub\n\n{}\n\nQuick links:\n- docs/QUICKSTART.md\n- docs/NOSTALGIA_GUARDRAILS.md\n- bsj guide quickstart\n",
         DOCS_HUB_BODY.trim_end()
     )
 }
@@ -721,6 +721,7 @@ mod tests {
     fn docs_hub_points_people_to_quickstart_and_guides() {
         let text = render_docs_hub();
         assert!(text.contains("docs/QUICKSTART.md"));
+        assert!(text.contains("docs/NOSTALGIA_GUARDRAILS.md"));
         assert!(text.contains("bsj guide quickstart"));
     }
 

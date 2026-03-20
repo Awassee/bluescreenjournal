@@ -1,0 +1,29 @@
+
+
+          BLUESCREEN JOURNAL  ENTRY DATE TODAY FRI <DATE> [D+0]  ENTRY NO. 000001  PAG
+           FILE   EDIT   SEARCH   GO   TOOLS   SETUP   HELP  ESC MENUS  F1 HELP  F2 SAVE
+          ....+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8
+          JOURNAL ENTRY <DATE>
+
+            ┌ Dashboard ───────────────────────────────────────────────────────────────┐
+            │ BlueScreen Journal Trust Dashboard                                       │
+            │                                                                          │
+            │ TRUST NOW                                                                │
+            │   Vault      : UNLOCKED                                                  │
+            │   Verify     : n/a                                                       │
+            │   Save state : READY                                                     │
+            │   Backups    : 0 (none yet)                                              │
+            │   Backup age : create first backup                                       │
+            │   Conflicts  : 0                                                         │
+            │   Search     : missing                                                   │
+            │                                                                          │
+            │ SYNC                                                                     │
+            │                                                                          │
+            │ Up/Down/PgUp/PgDn scroll  Enter/Esc close                                │
+            └──────────────────────────────────────────────────────────────────────────┘
+
+
+          CLOSING THOUGHT: [none - press F9 to add] (closing thought)               F9 ADD
+          MODE INFO | SAVE READY | LINES 1-1 | Words 3 | VER v1.3.2 INFO: PGUP/PGDN SCROLL
+
+

@@ -28,6 +28,7 @@ declare -a UNINSTALL_TARGETS
 declare -a DATA_TARGETS
 declare -a KEYCHAIN_VAULT_PATHS
 declare -a CONFIG_TARGETS
+POST_INSTALL_SELECTIONS="${BSJ_INSTALLER_POST_INSTALL_SELECTION:-}"
 
 PRODUCT_NAME="BlueScreen Journal"
 PRODUCT_COPYRIGHT="(c) 2026 Awassee LLC and Sean Heiney"
@@ -1057,13 +1058,20 @@ persist_path_update() {
 print_post_install_summary() {
   local installed_bin="$1"
   local help_ref="$2"
+  local launch_ref
+  launch_ref="$installed_bin"
+  if command -v bsj >/dev/null 2>&1 && [[ "$(command -v bsj)" == "$installed_bin" ]]; then
+    launch_ref="bsj"
+  fi
 
   cat <<EOF
 
 Install complete.
 
-Launch:
-  $installed_bin
+Launch later:
+  $launch_ref
+
+Or stay here and use the installer menu below to launch now, print the guide, or run a health check.
 
 What to expect:
   - bsj should now be available in new terminal windows/tabs
@@ -1086,27 +1094,91 @@ Troubleshooting:
 EOF
 }
 
+shell_join_args() {
+  local joined=""
+  local arg
+  for arg in "$@"; do
+    if [[ -n "$joined" ]]; then
+      joined+=" "
+    fi
+    joined+="$(printf '%q' "$arg")"
+  done
+  printf "%s" "$joined"
+}
+
+launch_bsj_in_new_terminal() {
+  local command_text
+  command_text="$(shell_join_args "$@")"
+  command -v osascript >/dev/null 2>&1 || return 1
+  osascript <<EOF >/dev/null
+tell application "Terminal"
+  activate
+  do script "$command_text"
+end tell
+EOF
+}
+
 launch_bsj_from_installer() {
   local installed_bin="$1"
+  local launch_mode="${BSJ_INSTALLER_LAUNCH_MODE:-app}"
+  local -a launch_cmd
+  launch_cmd=("$installed_bin")
 
   if [[ ! -x "$installed_bin" ]]; then
     warn "Installed binary is not executable: $installed_bin"
     return 1
   fi
 
-  if tty_input_available && command -v script >/dev/null 2>&1; then
-    if script -q /dev/null "$installed_bin"; then
-      return 0
-    fi
-    warn "PTY launch via script failed; retrying direct terminal launch."
-  fi
+  case "$launch_mode" in
+    app|"")
+      ;;
+    help)
+      launch_cmd+=(--help)
+      ;;
+    version)
+      launch_cmd+=(--version)
+      ;;
+    quickstart)
+      launch_cmd+=(guide quickstart)
+      ;;
+    *)
+      warn "Unknown BSJ_INSTALLER_LAUNCH_MODE: $launch_mode"
+      ;;
+  esac
 
   if tty_input_available; then
-    "$installed_bin" < /dev/tty > /dev/tty 2>&1
+    if "${launch_cmd[@]}" < /dev/tty > /dev/tty 2>&1; then
+      return 0
+    fi
+    warn "Direct launch from this terminal failed."
+  fi
+
+  if launch_bsj_in_new_terminal "${launch_cmd[@]}"; then
+    info "Opened BlueScreen Journal in a new Terminal window."
+    return 0
+  fi
+
+  if [[ "$launch_mode" != "app" ]]; then
+    "${launch_cmd[@]}"
     return $?
   fi
 
-  "$installed_bin"
+  return 1
+}
+
+read_post_install_selection() {
+  if [[ -n "$POST_INSTALL_SELECTIONS" ]]; then
+    if [[ "$POST_INSTALL_SELECTIONS" == *","* ]]; then
+      REPLY="${POST_INSTALL_SELECTIONS%%,*}"
+      POST_INSTALL_SELECTIONS="${POST_INSTALL_SELECTIONS#*,}"
+    else
+      REPLY="$POST_INSTALL_SELECTIONS"
+      POST_INSTALL_SELECTIONS=""
+    fi
+    info "Installer auto-select: $REPLY"
+    return 0
+  fi
+  read_line_interactive "Select [1-6]: "
 }
 
 maybe_prompt_post_install_menu() {
@@ -1119,6 +1191,8 @@ maybe_prompt_post_install_menu() {
     return
   fi
 
+  print_post_install_summary "$installed_bin" "$help_ref"
+
   while true; do
     cat <<EOF
 
@@ -1130,7 +1204,7 @@ BlueScreen Journal installer menu
   5) Show command help
   6) Exit installer
 EOF
-    read_line_interactive "Select [1-6]: " || return
+    read_post_install_selection || return
     selection="$REPLY"
     normalized="$(printf "%s" "$selection" | tr '[:upper:]' '[:lower:]')"
     case "$normalized" in

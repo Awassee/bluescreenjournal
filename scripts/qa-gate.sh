@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+export CARGO_INCREMENTAL=0
 
 echo "==> QA gate: format check"
 cargo fmt --all --check
@@ -21,8 +22,13 @@ UX_TESTS=(
   "tui::app::tests::keybinding_function_keys_route_to_expected_actions"
   "tui::app::tests::keybinding_ctrl_fallbacks_route_to_expected_actions"
   "tui::app::tests::functional_help_menu_roundtrip_preserves_typing_flow"
+  "tui::app::tests::functional_file_menu_save_next_day_roundtrip_preserves_saved_entry"
+  "tui::app::tests::functional_file_menu_quick_save_next_roundtrip_clears_same_day_page"
+  "tui::app::tests::functional_dashboard_roundtrip_keeps_wrapped_editor_clean"
+  "tui::app::tests::first_run_guidance_persists_until_first_real_save"
   "tui::app::tests::menu_discovery_hint_switches_after_first_menu_open"
   "tui::app::tests::unlock_status_flash_gives_menu_and_save_guidance"
+  "tui::app::tests::dashboard_menu_action_opens_trust_summary"
   "tui::app::tests::typing_wraps_when_line_exceeds_viewport_width"
   "tui::app::tests::tab_key_inserts_five_spaces"
 )
@@ -31,6 +37,9 @@ for test_name in "${UX_TESTS[@]}"; do
   echo "   -> $test_name"
   cargo test --all-targets "$test_name"
 done
+
+echo "==> QA gate: TUI snapshots"
+./scripts/check-tui-snapshots.sh
 
 echo "==> QA gate: critical UX stability loop"
 ./scripts/stability-gate.sh

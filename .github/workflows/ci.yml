@@ -24,3 +24,11 @@ jobs:
 
       - name: QA gate
         run: ./scripts/qa-gate.sh
+
+      - name: Upload QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bsj-qa-artifacts
+          path: artifacts/
+          if-no-files-found: warn

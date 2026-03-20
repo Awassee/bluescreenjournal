@@ -49,13 +49,19 @@ TMP_ROOT="${TMPDIR:-/tmp}"
 mkdir -p "$TMP_ROOT"
 TMP_DIR="$(mktemp -d "$TMP_ROOT/bsj-dist-smoke.XXXXXX")"
 INSTALL_PREFIX="$TMP_DIR/install-root"
+MENU_PREFIX="$TMP_DIR/install-menu-root"
+MENU_LAUNCH_PREFIX="$TMP_DIR/install-menu-launch-root"
 BOOTSTRAP_PREFIX="$TMP_DIR/bootstrap-root"
 INSTALL_HOME="$TMP_DIR/install-home"
+MENU_HOME="$TMP_DIR/install-home-menu"
+MENU_LAUNCH_HOME="$TMP_DIR/install-home-menu-launch"
 BOOTSTRAP_HOME="$TMP_DIR/bootstrap-home"
 BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
 BOOTSTRAP_BASH_HOME="$TMP_DIR/bootstrap-home-bash"
 SMOKE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 INSTALL_LOG="$TMP_DIR/install-prebuilt.log"
+MENU_LOG="$TMP_DIR/install-prebuilt-menu.log"
+MENU_LAUNCH_LOG="$TMP_DIR/install-prebuilt-menu-launch.log"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -96,6 +102,30 @@ grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.zshrc"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.bash_profile"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.bashrc"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.config/fish/config.fish"
+
+HOME="$MENU_LAUNCH_HOME" SHELL=/bin/zsh \
+  BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \
+  BSJ_INSTALLER_LAUNCH_MODE="help" \
+  script -q "$MENU_LAUNCH_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_LAUNCH_PREFIX" >/dev/null
+"$MENU_LAUNCH_PREFIX/bin/bsj" --help >/dev/null
+grep -Fq "BlueScreen Journal installer menu" "$MENU_LAUNCH_LOG"
+grep -Fq "Installer auto-select: 1" "$MENU_LAUNCH_LOG"
+grep -Fq "Usage: bsj" "$MENU_LAUNCH_LOG"
+grep -Fq "$MENU_LAUNCH_PREFIX/bin" "$MENU_LAUNCH_HOME/.zprofile"
+
+HOME="$MENU_HOME" SHELL=/bin/zsh \
+  BSJ_INSTALLER_POST_INSTALL_SELECTION="5,4,6" \
+  BSJ_INSTALLER_LAUNCH_MODE="help" \
+  script -q "$MENU_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_PREFIX" >/dev/null
+"$MENU_PREFIX/bin/bsj" --help >/dev/null
+grep -Fq "BlueScreen Journal installer menu" "$MENU_LOG"
+grep -Fq "Installer auto-select: 5" "$MENU_LOG"
+grep -Fq "Installer auto-select: 4" "$MENU_LOG"
+grep -Fq "Installer auto-select: 6" "$MENU_LOG"
+grep -Fq "Usage: bsj" "$MENU_LOG"
+grep -Fq "BlueScreen Journal Doctor" "$MENU_LOG"
+grep -Fq "Summary: OK" "$MENU_LOG"
+grep -Fq "$MENU_PREFIX/bin" "$MENU_HOME/.zprofile"
 
 HOME="$BOOTSTRAP_HOME" SHELL=/bin/zsh bash -s -- --prebuilt --archive "$ARCHIVE" --prefix "$BOOTSTRAP_PREFIX" < "$ROOT_DIR/install.sh"
 "$BOOTSTRAP_PREFIX/bin/bsj" --help >/dev/null

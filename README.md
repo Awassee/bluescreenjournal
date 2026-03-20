@@ -74,6 +74,7 @@ It gives you:
 | --- | --- |
 | Install and get writing quickly | [README install section](#turnkey-install), [Quickstart](docs/QUICKSTART.md), [Setup Guide](docs/SETUP_GUIDE.md) |
 | Understand product capabilities | [Product Guide](docs/PRODUCT_GUIDE.md), [Datasheet](docs/DATASHEET.md), [Compare](docs/COMPARE.md) |
+| Understand the nostalgia UX contract | [Nostalgia Guardrails](docs/NOSTALGIA_GUARDRAILS.md), [Terminal Guide](docs/TERMINAL_GUIDE.md) |
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |

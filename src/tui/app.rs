@@ -2165,6 +2165,7 @@ pub struct App {
     next_save_nudge_at: Option<Instant>,
     document_stats: DocumentStats,
     menu_coach_shown: bool,
+    first_run_guide_shown_this_session: bool,
     soundtrack_child: Option<Child>,
     soundtrack_loop_enabled: bool,
     last_save_receipt: Option<SaveReceipt>,
@@ -2264,6 +2265,7 @@ impl App {
                 chars: 0,
             }),
             menu_coach_shown: false,
+            first_run_guide_shown_this_session: false,
             soundtrack_child: None,
             soundtrack_loop_enabled: false,
             last_save_receipt: None,
@@ -2651,6 +2653,12 @@ impl App {
     pub fn footer_next_hint(&self) -> Option<&'static str> {
         if self.menu.is_some() || self.overlay.is_some() || self.vault.is_none() {
             return None;
+        }
+        if !self.config.first_run_coach_completed {
+            if self.dirty {
+                return Some("FIRST RUN: F2 SAVE | **save** QUICK | ESC MENUS | ALT+N NEW DAY");
+            }
+            return Some("FIRST RUN: TYPE | F2 SAVE | **save** QUICK | ESC MENUS");
         }
         if self.dirty {
             Some("NEXT: F2 SAVE | **save** QUICK | ALT+N NEW DAY | ALT+Y/0 TODAY")
@@ -5339,6 +5347,7 @@ impl App {
                 self.dirty = false;
                 self.clear_dirty_tracking();
                 self.refresh_find_matches();
+                let should_show_first_run_guide = self.should_show_first_run_guide();
                 self.seed_opening_line_for_blank_editor();
                 self.pending_conflict = state.conflict.clone();
                 if let Some(draft_text) = state.recovery_draft_text {
@@ -5347,7 +5356,7 @@ impl App {
                     self.overlay = Some(Overlay::RecoverDraft { draft_text });
                 } else if let Some(conflict) = state.conflict {
                     self.overlay = Some(Overlay::ConflictChoice(ConflictOverlay::new(conflict)));
-                } else if self.should_show_first_run_guide() {
+                } else if should_show_first_run_guide {
                     self.mark_first_run_guide_shown();
                     self.open_first_run_guide_overlay();
                 }
@@ -5361,7 +5370,12 @@ impl App {
                 self.dirty = false;
                 self.clear_dirty_tracking();
                 self.refresh_find_matches();
+                let should_show_first_run_guide = self.should_show_first_run_guide();
                 self.seed_opening_line_for_blank_editor();
+                if should_show_first_run_guide {
+                    self.mark_first_run_guide_shown();
+                    self.open_first_run_guide_overlay();
+                }
                 self.flash_status("LOAD FAILED.");
             }
         }
@@ -8628,7 +8642,29 @@ impl App {
             .map(|entry| format!("{} {}", entry.date, entry.format.to_ascii_uppercase()))
             .unwrap_or_else(|| "none".to_string());
 
-        let (entry_count, conflict_count, backup_count) = if let Some(vault) = &self.vault {
+        let (
+            entry_count,
+            conflict_count,
+            backup_count,
+            latest_backup_summary,
+            latest_backup_countdown,
+        ) = if let Some(vault) = &self.vault {
+            let backups = vault.list_backups().ok().unwrap_or_default();
+            let latest_backup = backups
+                .iter()
+                .max_by_key(|entry| entry.created_at)
+                .map(|entry| {
+                    let local_time = entry.created_at.with_timezone(&Local);
+                    let age = Local::now()
+                        .signed_duration_since(local_time)
+                        .num_hours()
+                        .max(0);
+                    (
+                        local_time.format("%Y-%m-%d %H:%M").to_string(),
+                        format!("{age}h ago"),
+                    )
+                })
+                .unwrap_or_else(|| ("none yet".to_string(), "create first backup".to_string()));
             (
                 vault
                     .list_entry_dates()
@@ -8640,74 +8676,109 @@ impl App {
                     .ok()
                     .map(|dates| dates.len())
                     .unwrap_or(0),
-                vault
-                    .list_backups()
-                    .ok()
-                    .map(|items| items.len())
-                    .unwrap_or(0),
+                backups.len(),
+                latest_backup.0,
+                latest_backup.1,
             )
         } else {
-            (0, 0, 0)
+            (
+                0,
+                0,
+                0,
+                "unlock to inspect".to_string(),
+                "locked".to_string(),
+            )
+        };
+
+        let latest_sync_summary = self
+            .config
+            .last_sync
+            .as_ref()
+            .map(|entry| {
+                DateTime::parse_from_rfc3339(&entry.timestamp)
+                    .map(|value| {
+                        value
+                            .with_timezone(&Local)
+                            .format("%Y-%m-%d %H:%M")
+                            .to_string()
+                    })
+                    .unwrap_or_else(|_| entry.timestamp.clone())
+            })
+            .unwrap_or_else(|| "never".to_string());
+        let latest_sync_health = self
+            .config
+            .last_sync
+            .as_ref()
+            .map(|entry| {
+                if entry.error.is_some() {
+                    "needs attention".to_string()
+                } else if entry.integrity_ok {
+                    "healthy".to_string()
+                } else {
+                    "verify warning".to_string()
+                }
+            })
+            .unwrap_or_else(|| "not run".to_string());
+
+        let goal_summary = if self.word_goal_status_label().is_empty() {
+            "OFF".to_string()
+        } else {
+            self.word_goal_status_label()
         };
 
         let output = [
-            "BlueScreen Journal Dashboard".to_string(),
+            "BlueScreen Journal Trust Dashboard".to_string(),
             String::new(),
-            format!("Version     : {}", self.app_version_label()),
-            format!("Vault       : {vault_state}"),
-            format!("Date        : {}", self.selected_date.format("%Y-%m-%d")),
-            format!("Entry No.   : {}", self.entry_number_label()),
+            "TRUST NOW".to_string(),
+            format!("  Vault      : {vault_state}"),
             format!(
-                "Favorite    : {}",
-                if self.is_favorite_date(self.selected_date) {
-                    "STARRED"
-                } else {
-                    "NO"
-                }
-            ),
-            format!("Editor      : {dirty} | {save_state}"),
-            format!("Document    : {}", self.document_stats_label()),
-            format!("Goal        : {}", self.word_goal_status_label()),
-            format!("Session     : {}", self.session_status_label()),
-            format!(
-                "Cursor      : {}",
-                self.cursor_status_label()
-                    .replace("LN ", "line ")
-                    .replace(" COL ", ", col ")
-            ),
-            format!(
-                "Integrity   : {}",
+                "  Verify     : {}",
                 if integrity.is_empty() {
                     "n/a"
                 } else {
                     &integrity
                 }
             ),
-            format!("Entries     : {entry_count}"),
-            format!("Conflicts   : {conflict_count}"),
-            format!("Backups     : {backup_count}"),
-            format!("Recents     : {}", self.recent_dates.len()),
-            format!("Favorites   : {}", self.favorite_dates().len()),
-            format!("Sync mode   : {sync_mode} ({sync_control})"),
-            format!("Sync target : {sync_target}"),
-            format!("Connector   : {connector_status}"),
+            format!("  Save state : {save_state}"),
+            format!("  Backups    : {backup_count} ({latest_backup_summary})"),
+            format!("  Backup age : {latest_backup_countdown}"),
+            format!("  Conflicts  : {conflict_count}"),
+            format!("  Search     : {search_cache_summary}"),
+            String::new(),
+            "SYNC".to_string(),
+            format!("  Mode       : {sync_mode} ({sync_control})"),
+            format!("  Target     : {sync_target}"),
+            format!("  Connector  : {connector_status}"),
+            format!("  Last sync  : {latest_sync_summary}"),
+            format!("  Cloud      : {latest_sync_health}"),
+            String::new(),
+            "TODAY".to_string(),
+            format!("  Date       : {}", self.selected_date.format("%Y-%m-%d")),
+            format!("  Entry no   : {}", self.entry_number_label()),
+            format!("  Editor     : {dirty}"),
+            format!("  Document   : {}", self.document_stats_label()),
+            format!("  Goal       : {goal_summary}"),
+            format!("  Session    : {}", self.session_status_label()),
+            format!("  Entries    : {entry_count} total"),
             format!(
-                "Soundtrack  : {} ({soundtrack_source})",
+                "  Favorite   : {}",
+                if self.is_favorite_date(self.selected_date) {
+                    "STARRED"
+                } else {
+                    "NO"
+                }
+            ),
+            format!(
+                "  Soundtrack : {} ({soundtrack_source})",
                 self.soundtrack_status_label()
             ),
-            format!("Sync runs   : {}", self.config.sync_history.len()),
-            format!("Search cache: {search_cache_summary}"),
-            format!("Last export : {export_summary}"),
-            format!(
-                "Backup keep : d{} w{} m{}",
-                self.config.backup_retention.daily,
-                self.config.backup_retention.weekly,
-                self.config.backup_retention.monthly
-            ),
-            format!("Logs        : {}", logging::log_file_path().display()),
+            format!("  Last export: {export_summary}"),
             String::new(),
-            "Use FILE for export/backups, GO for dates/index, TOOLS for sync/verify/admin."
-                .to_string(),
+            "NEXT CHECKS".to_string(),
+            "  FILE  -> Backup Snapshot".to_string(),
+            "  TOOLS -> Verify Integrity".to_string(),
+            "  TOOLS -> Sync Center".to_string(),
+            "  GO    -> Index/Calendar for archive dates".to_string(),
         ]
         .join("\n");
 
@@ -9834,11 +9905,19 @@ impl App {
     fn should_show_first_run_guide(&self) -> bool {
         self.vault.is_some()
             && !self.config.first_run_coach_completed
+            && !self.first_run_guide_shown_this_session
             && self.buffer.line_count() == 1
             && self.buffer.line(0).unwrap_or_default().is_empty()
     }
 
     fn mark_first_run_guide_shown(&mut self) {
+        self.first_run_guide_shown_this_session = true;
+    }
+
+    fn complete_first_run_coach_after_save(&mut self) {
+        if self.config.first_run_coach_completed {
+            return;
+        }
         self.config.first_run_coach_completed = true;
         let _ = self.config.save();
     }
@@ -10470,6 +10549,7 @@ impl App {
                 });
                 self.last_save_kind = Some(SaveKind::Saved);
                 self.last_save_time = Some(saved_at);
+                self.complete_first_run_coach_after_save();
                 self.load_selected_date();
                 self.last_save_kind = Some(SaveKind::Saved);
                 self.last_save_time = Some(saved_at);
@@ -12401,7 +12481,10 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
     use secrecy::SecretString;
-    use std::path::{Path, PathBuf};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
     use tempfile::tempdir;
 
     fn render_into_terminal(terminal: &mut Terminal<TestBackend>, app: &App) -> String {
@@ -12426,6 +12509,16 @@ mod tests {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
         render_into_terminal(&mut terminal, app)
+    }
+
+    fn assert_single_menu_bar(rendered: &str) {
+        assert_eq!(
+            rendered
+                .matches("FILE   EDIT   SEARCH   GO   TOOLS   SETUP   HELP")
+                .count(),
+            1,
+            "expected a single menu bar in rendered output:\n{rendered}"
+        );
     }
 
     fn simple_test_midi_bytes() -> Vec<u8> {
@@ -12532,10 +12625,72 @@ mod tests {
         app.config.vault_path = vault_root.to_path_buf();
         app.config.local_device_id = Some(device_id);
         app.config.device_nickname = "Test Device".to_string();
+        app.config.first_run_coach_completed = true;
         app.vault = Some(unlocked);
         app.load_selected_date();
         assert_editor_invariants(&app);
         app
+    }
+
+    fn sanitize_snapshot(mut rendered: String, app: &App) -> String {
+        let short_date = app.selected_date.format("%Y-%m-%d").to_string();
+        let long_date = app.selected_date.format("%A, %B %d, %Y").to_string();
+        rendered = rendered.replace(&long_date, "<DATE_LONG>");
+        rendered = rendered.replace(&short_date, "<DATE>");
+        rendered = rendered.replace(&app.header_time_label(), "<TIME>");
+        rendered
+    }
+
+    fn write_snapshot(path: &Path, rendered: String, app: &App) {
+        let sanitized = sanitize_snapshot(rendered, app);
+        fs::write(path, sanitized).expect("write snapshot");
+    }
+
+    fn write_named_ui_snapshots_to(output_dir: &Path) {
+        fs::create_dir_all(output_dir).expect("create snapshot dir");
+        let today = Local::now().date_naive();
+        let temp = tempdir().expect("tempdir");
+
+        let mut editor = build_unlocked_test_app(&temp.path().join("snapshot-vault"), today);
+        editor.overlay = None;
+        editor.menu = None;
+        editor.menu_coach_shown = false;
+        write_snapshot(
+            &output_dir.join("editor-shell.txt"),
+            render_app(&editor, 170, 30),
+            &editor,
+        );
+
+        let mut help = App::with_initial_date(Some(today));
+        help.overlay = Some(Overlay::Help);
+        write_snapshot(
+            &output_dir.join("help-overlay.txt"),
+            render_app(&help, 100, 30),
+            &help,
+        );
+
+        let mut dashboard = build_unlocked_test_app(&temp.path().join("dashboard-vault"), today);
+        dashboard.open_dashboard_overlay();
+        write_snapshot(
+            &output_dir.join("dashboard-overlay.txt"),
+            render_app(&dashboard, 100, 30),
+            &dashboard,
+        );
+
+        let mut first_run = App::with_initial_date(Some(today));
+        first_run.open_first_run_guide_overlay();
+        write_snapshot(
+            &output_dir.join("first-run-tour.txt"),
+            render_app(&first_run, 100, 30),
+            &first_run,
+        );
+
+        let small_terminal = App::with_initial_date(Some(today));
+        write_snapshot(
+            &output_dir.join("small-terminal.txt"),
+            render_app(&small_terminal, 50, 16),
+            &small_terminal,
+        );
     }
 
     #[test]
@@ -14618,6 +14773,28 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_menu_action_opens_trust_summary() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::Dashboard, 20);
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "Dashboard");
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("BlueScreen Journal Trust Dashboard"));
+                assert!(rendered.contains("TRUST NOW"));
+                assert!(rendered.contains("SYNC"));
+                assert!(rendered.contains("NEXT CHECKS"));
+            }
+            other => panic!("expected dashboard overlay, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn today_brief_menu_action_opens_info_overlay() {
         let mut app = App::with_initial_date(None);
         app.overlay = None;
@@ -15721,6 +15898,81 @@ mod tests {
     }
 
     #[test]
+    fn first_run_tour_opens_even_when_opening_line_template_seeds_blank_page() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("vault");
+        let today = Local::now().date_naive();
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+        let metadata =
+            vault::create_vault(&root, &passphrase, Some(today), "Test Device").expect("create");
+        let unlocked = vault::unlock_vault_with_device(&root, &passphrase, metadata.device_id)
+            .expect("unlock");
+
+        let mut app = App::with_initial_date(Some(today));
+        app.vault_path = root.clone();
+        app.config.vault_path = root;
+        app.vault = Some(unlocked);
+        app.config.first_run_coach_completed = false;
+
+        app.load_selected_date();
+
+        assert!(app.buffer.to_text().contains("JOURNAL ENTRY"));
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "First-Run Tour");
+                assert!(info.lines.join("\n").contains("Type **save**"));
+            }
+            other => panic!("expected first-run tour overlay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn first_run_guidance_persists_until_first_real_save() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("vault");
+        let today = Local::now().date_naive();
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+        let metadata =
+            vault::create_vault(&root, &passphrase, Some(today), "Test Device").expect("create");
+        let unlocked = vault::unlock_vault_with_device(&root, &passphrase, metadata.device_id)
+            .expect("unlock");
+
+        let mut app = App::with_initial_date(Some(today));
+        app.vault_path = root.clone();
+        app.config.vault_path = root;
+        app.vault = Some(unlocked);
+        app.config.first_run_coach_completed = false;
+
+        app.load_selected_date();
+        assert!(matches!(
+            app.overlay(),
+            Some(Overlay::Info(info)) if info.title == "First-Run Tour"
+        ));
+
+        send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 80);
+        assert_eq!(
+            app.footer_next_hint(),
+            Some("FIRST RUN: TYPE | F2 SAVE | **save** QUICK | ESC MENUS")
+        );
+
+        type_editor_text(&mut app, "first save proves the flow", 20, 80);
+        assert_eq!(
+            app.footer_next_hint(),
+            Some("FIRST RUN: F2 SAVE | **save** QUICK | ESC MENUS | ALT+N NEW DAY")
+        );
+
+        send_editor_key(&mut app, KeyCode::F(2), KeyModifiers::empty(), 20, 80);
+
+        assert!(app.config.first_run_coach_completed);
+        assert_eq!(
+            app.footer_next_hint(),
+            Some("NEXT: TYPE | **save** QUICK | ALT+N NEW DAY | ALT+[ ] SAVED")
+        );
+    }
+
+    #[test]
     fn daily_flow_coach_opens_info_overlay() {
         let mut app = App::with_initial_date(None);
         app.overlay = None;
@@ -15936,6 +16188,26 @@ mod tests {
         assert_eq!(
             app.footer_next_hint(),
             Some("NEXT: F2 SAVE | **save** QUICK | ALT+N NEW DAY | ALT+Y/0 TODAY")
+        );
+    }
+
+    #[test]
+    fn footer_next_hint_prefers_first_run_guidance_until_coach_completed() {
+        let temp = tempdir().expect("tempdir");
+        let date = Local::now().date_naive();
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.overlay = None;
+        app.menu = None;
+        app.config.first_run_coach_completed = false;
+        app.dirty = false;
+        assert_eq!(
+            app.footer_next_hint(),
+            Some("FIRST RUN: TYPE | F2 SAVE | **save** QUICK | ESC MENUS")
+        );
+        app.dirty = true;
+        assert_eq!(
+            app.footer_next_hint(),
+            Some("FIRST RUN: F2 SAVE | **save** QUICK | ESC MENUS | ALT+N NEW DAY")
         );
     }
 
@@ -16259,8 +16531,11 @@ mod tests {
 
         assert!(rendered.contains("BlueScreen Journal"));
         assert!(rendered.contains(env!("CARGO_PKG_VERSION")));
+        assert!(rendered.contains("Classic 80x25 workspace."));
         assert!(rendered.contains("Awassee LLC and Sean Heiney"));
         assert!(rendered.contains("sean@sean.net"));
+        assert!(rendered.contains("Flow: TYPE -> F2 SAVE -> ALT+N NEW DAY."));
+        assert!(rendered.contains("ESC opens menus."));
         assert!(rendered.contains("? or Ctrl+/ opens this card instantly."));
         assert!(rendered.contains("CTRL+O/E/W/Y/T/U/L also opens menus."));
     }
@@ -16312,6 +16587,8 @@ mod tests {
         assert!(rendered.contains("TERMINAL TOO SMALL"));
         assert!(rendered.contains("CURRENT 50x16"));
         assert!(rendered.contains("Need at least"));
+        assert!(rendered.contains("Tip: maximize terminal"));
+        assert!(rendered.contains("press ? for help or Esc for menus"));
     }
 
     #[test]
@@ -16324,6 +16601,42 @@ mod tests {
         assert!(rendered.contains("VER v"));
         assert!(rendered.contains("BLUESCREEN JOURNAL [COMPACT]"));
         assert!(rendered.contains("FILE"));
+    }
+
+    #[test]
+    fn unlocked_editor_frame_preserves_nostalgia_shell() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.overlay = None;
+        app.menu = None;
+        app.menu_coach_shown = false;
+
+        let rendered = render_app(&app, 170, 30);
+
+        assert!(rendered.contains("BLUESCREEN JOURNAL"));
+        assert!(rendered.contains("ENTRY DATE"));
+        assert!(rendered.contains("2026-03-20"));
+        assert!(rendered.contains("ENTRY NO."));
+        assert!(rendered.contains("VER v"));
+        assert!(rendered.contains("FILE"));
+        assert!(rendered.contains("EDIT"));
+        assert!(rendered.contains("SEARCH"));
+        assert!(rendered.contains("GO"));
+        assert!(rendered.contains("TOOLS"));
+        assert!(rendered.contains("SETUP"));
+        assert!(rendered.contains("HELP"));
+        assert!(rendered.contains("ESC MENUS"));
+        assert!(rendered.contains("F2 SAVE"));
+    }
+
+    #[test]
+    #[ignore]
+    fn write_named_ui_snapshots() {
+        let output_dir = std::env::var_os("BSJ_TUI_SNAPSHOT_DIR")
+            .map(PathBuf::from)
+            .expect("BSJ_TUI_SNAPSHOT_DIR must be set");
+        write_named_ui_snapshots_to(&output_dir);
     }
 
     #[test]
@@ -16589,6 +16902,98 @@ mod tests {
         assert!(!app.buffer.to_text().contains(ghost_marker));
         assert!(!final_frame.contains(ghost_marker));
         assert!(!final_frame.contains("Typewriter Mode"));
+    }
+
+    #[test]
+    fn functional_file_menu_save_next_day_roundtrip_preserves_saved_entry() {
+        let temp = tempdir().expect("tempdir");
+        let start = NaiveDate::from_ymd_opt(2026, 8, 3).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
+        app.config.opening_line_template.clear();
+        app.buffer.wipe();
+        app.refresh_document_stats();
+        app.refresh_find_matches();
+
+        type_editor_text(&mut app, "saved from file menu", 20, 80);
+        send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 80);
+        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 80);
+        send_editor_key(&mut app, KeyCode::Enter, KeyModifiers::empty(), 20, 80);
+
+        assert_eq!(app.selected_date, start + Duration::days(1));
+        assert_eq!(app.status_text(), Some("SAVED. NEW DAY READY."));
+        assert_eq!(app.buffer.to_text(), "");
+
+        send_editor_key(&mut app, KeyCode::F(7), KeyModifiers::empty(), 20, 80);
+        send_editor_key(&mut app, KeyCode::Enter, KeyModifiers::empty(), 20, 80);
+
+        assert_eq!(app.selected_date, start);
+        assert!(app.buffer.to_text().contains("saved from file menu"));
+    }
+
+    #[test]
+    fn functional_file_menu_quick_save_next_roundtrip_clears_same_day_page() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("vault");
+        let start = NaiveDate::from_ymd_opt(2026, 8, 4).expect("date");
+        let mut app = build_unlocked_test_app(&root, start);
+        app.config.opening_line_template.clear();
+        app.buffer.wipe();
+        app.refresh_document_stats();
+        app.refresh_find_matches();
+
+        type_editor_text(&mut app, "same day clean page", 20, 80);
+        send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 80);
+        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 80);
+        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 80);
+        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 80);
+        send_editor_key(&mut app, KeyCode::Enter, KeyModifiers::empty(), 20, 80);
+
+        assert_eq!(app.selected_date, start);
+        assert_eq!(app.status_text(), Some("QUICK SAVED. NEW ENTRY READY."));
+        assert_eq!(app.buffer.to_text(), "");
+
+        let saved = app
+            .vault
+            .as_ref()
+            .expect("vault")
+            .export_entry(start)
+            .expect("export")
+            .expect("entry exists");
+        assert_eq!(saved.body, "same day clean page");
+
+        let rendered = render_app(&app, 120, 28);
+        assert_single_menu_bar(&rendered);
+        assert!(!rendered.contains("same day clean page"));
+    }
+
+    #[test]
+    fn functional_dashboard_roundtrip_keeps_wrapped_editor_clean() {
+        let temp = tempdir().expect("tempdir");
+        let start = NaiveDate::from_ymd_opt(2026, 8, 5).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), start);
+        app.overlay = None;
+        app.menu = None;
+
+        type_editor_text(
+            &mut app,
+            "This line should wrap across the vintage viewport and survive the dashboard trip without ghosts.",
+            20,
+            34,
+        );
+
+        send_editor_key(&mut app, KeyCode::Char('t'), KeyModifiers::ALT, 20, 34);
+        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 34);
+        send_editor_key(&mut app, KeyCode::Down, KeyModifiers::empty(), 20, 34);
+        send_editor_key(&mut app, KeyCode::Enter, KeyModifiers::empty(), 20, 34);
+        assert!(matches!(app.overlay(), Some(Overlay::Info(info)) if info.title == "Dashboard"));
+
+        send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 34);
+        type_editor_text(&mut app, " Still typing after trust check.", 20, 34);
+
+        let rendered = render_app(&app, 100, 28);
+        assert_single_menu_bar(&rendered);
+        assert!(rendered.contains("Still typing after trust check."));
+        assert!(!rendered.contains("TRUST NOW"));
     }
 
     #[test]

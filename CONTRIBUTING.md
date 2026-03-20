@@ -9,6 +9,19 @@ Changes should preserve the product direction:
 - keyboard-first interaction
 - no silent plaintext persistence in the vault
 
+See [docs/NOSTALGIA_GUARDRAILS.md](docs/NOSTALGIA_GUARDRAILS.md) for the explicit release gate.
+
+## Nostalgia release gate
+
+Before merging a visible product change, confirm:
+
+- the main screen still reads as BlueScreen Journal, not a general note app
+- header, menus, and footer command strip stay visible and useful
+- primary features remain menu-first and keyboard-complete
+- CLI or env setup remains optional fallback, not the main path
+- small-terminal behavior stays actionable instead of glitchy
+- changed screens have regression coverage
+
 ## Before opening a pull request
 
 Run:
@@ -22,10 +35,15 @@ This includes:
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
+./scripts/check-tui-snapshots.sh
 cargo test --all-targets
 ./scripts/package-release.sh
 ./scripts/smoke-release-install.sh
 ```
+
+`./scripts/check-tui-snapshots.sh` also writes a browsable nostalgia preview at
+`artifacts/tui-snapshots/index.html` so UI regressions can be reviewed without
+replaying the TUI locally.
 
 Shortcut via `just`:
 

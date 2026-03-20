@@ -8,6 +8,7 @@ Use this page as the docs control panel for BlueScreen Journal.
 | --- | --- | --- |
 | Install and write in under 10 minutes | [README](../README.md) | [QUICKSTART.md](QUICKSTART.md), [SETUP_GUIDE.md](SETUP_GUIDE.md) |
 | Evaluate the product before installing | [PRODUCT_GUIDE.md](PRODUCT_GUIDE.md) | [DATASHEET.md](DATASHEET.md), [COMPARE.md](COMPARE.md) |
+| Understand the blue-screen UX contract | [NOSTALGIA_GUARDRAILS.md](NOSTALGIA_GUARDRAILS.md) | [TERMINAL_GUIDE.md](TERMINAL_GUIDE.md), [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Troubleshoot installer or runtime issues | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | [TERMINAL_GUIDE.md](TERMINAL_GUIDE.md), [SUPPORT.md](../SUPPORT.md) |
 | Configure settings and behavior | [SETTINGS_GUIDE.md](SETTINGS_GUIDE.md) | [config.example.json](config.example.json) |
 | Operate sync/backup safely | [SYNC_GUIDE.md](SYNC_GUIDE.md) | [BACKUP_RESTORE.md](BACKUP_RESTORE.md), [PRIVACY.md](PRIVACY.md) |
@@ -60,6 +61,7 @@ These are the primary public repo entry points to keep current:
 
 - [README](../README.md)
 - [Start Here](START_HERE.md)
+- [Nostalgia Guardrails](NOSTALGIA_GUARDRAILS.md)
 - [v1.3.2 Plan](V1_3_2_PLAN.md)
 - [v1.3 Plan](V1_3_PLAN.md)
 - [Support](../SUPPORT.md)

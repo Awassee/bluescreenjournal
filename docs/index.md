@@ -14,6 +14,7 @@ BlueScreen Journal is a local-first encrypted terminal journal for macOS with a 
 - [Setup Guide](SETUP_GUIDE.md)
 - [Product Guide](PRODUCT_GUIDE.md)
 - [Datasheet](DATASHEET.md)
+- [Nostalgia Guardrails](NOSTALGIA_GUARDRAILS.md)
 - [v1.3.2 Plan](V1_3_2_PLAN.md)
 - [v3.0 Planning](V3_0_PLAN.md)
 - [Troubleshooting](TROUBLESHOOTING.md)

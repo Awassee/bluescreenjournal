@@ -1,0 +1,15 @@
+                BLUESCREEN JOURNAL
+
+  TERMINAL TOO SMALL: NEED 56x18  CURRENT 50x16
+             Missing: 6 cols, 2 rows
+    Current size is below the usable minimum.
+Need at least 56x18 to edit. 80x25 is recommended.
+
+Tip: maximize terminal and reduce font size one st
+ After resize: press ? for help or Esc for menus.
+
+
+
+
+
+

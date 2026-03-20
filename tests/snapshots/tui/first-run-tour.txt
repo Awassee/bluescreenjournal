@@ -1,0 +1,29 @@
+
+
+          BLUESCREEN JOURNAL  ENTRY DATE TODAY FRI <DATE> [D+0]  ENTRY NO. ------  PAG
+           FILE   EDIT   SEARCH   GO   TOOLS   SETUP   HELP  ESC MENUS  F1 HELP  F2 SAVE
+          ....+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8
+
+
+            ┌ First-Run Tour ──────────────────────────────────────────────────────────┐
+            │ WELCOME TO BLUESCREEN JOURNAL                                            │
+            │                                                                          │
+            │ First 2 minutes:                                                         │
+            │ 1. Type immediately into today's entry.                                  │
+            │ 2. Save with F2 or FILE -> Save Entry.                                   │
+            │ 3. Type **save** on its own line, then Enter for quick save + clean next │
+            │ 4. SETUP -> Opening Line Template controls the persistent header line.   │
+            │ 5. Press Esc to open menus, or press ? to open key help.                 │
+            │ 6. Press Alt+, / Alt+. for day-by-day, Alt+Y/0 for today, Alt+N for next │
+            │ 7. Press Alt+[ / Alt+] for saved-entry jumps, Alt+D for calendar, Alt+I  │
+            │ 8. Use SEARCH -> Search Vault to find older entries fast.                │
+            │ 9. In Search: Ctrl+B pins a query, Ctrl+Shift+B saves a preset, Ctrl+1.. │
+            │                                                                          │
+            │ Up/Down/PgUp/PgDn scroll  Enter/Esc close                                │
+            └──────────────────────────────────────────────────────────────────────────┘
+
+
+          CLOSING THOUGHT: [none - press F9 to add] (closing thought)               F9 ADD
+          MODE INFO | SAVE READY | LINES 1-1 | Words 0 | VER v1.3.2 INFO: PGUP/PGDN SCROLL
+
+

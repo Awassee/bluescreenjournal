@@ -6,7 +6,7 @@ This is a directional roadmap, not a contract.
 
 - keep the installer and release path frictionless
 - strengthen product docs and support surfaces
-- keep the nostalgic TUI consistent across terminals
+- keep the nostalgic TUI consistent across terminals, with docs and render tests acting as release gates
 - improve reliability of sync, merge, and verify workflows
 - finish the current sync parity/menu setup polish tracked in [docs/V1_3_2_PLAN.md](docs/V1_3_2_PLAN.md)
 
