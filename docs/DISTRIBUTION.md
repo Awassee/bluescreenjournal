@@ -9,6 +9,8 @@ This repo supports two install paths:
 
 The prebuilt release bundle is the intended end-user distribution format, and the bootstrap installer is the intended public entry point.
 
+On macOS, the bootstrap installer now resolves the best published release asset for the current machine instead of assuming a single universal archive name.
+
 For the user-facing product story and capability summary, pair this guide with:
 
 - `docs/PRODUCT_GUIDE.md`
@@ -160,11 +162,13 @@ After extracting the tarball:
 Stable asset names published alongside versioned archives:
 
 ```text
-bsj-universal-apple-darwin.tar.gz
-bsj-universal-apple-darwin.tar.gz.sha256
+bsj-aarch64-apple-darwin.tar.gz
+bsj-aarch64-apple-darwin.tar.gz.sha256
+bsj-x86_64-apple-darwin.tar.gz
+bsj-x86_64-apple-darwin.tar.gz.sha256
 ```
 
-Those stable names are what the turnkey installer downloads from GitHub Releases.
+The turnkey installer chooses the matching stable asset for the current Mac and falls back to a universal archive if one is published.
 
 Default prebuilt install target:
 

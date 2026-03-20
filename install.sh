@@ -780,7 +780,7 @@ doctor_row() {
 run_doctor() {
   local failures warnings
   local os_name arch_name shell_name mode_selected
-  local release_api_url release_asset
+  local release_api_url release_asset release_asset_name_resolved
   local tmp_root tmp_free_kb tmp_free_mb
   local install_prefix install_bin_dir
   local active_bsj candidate
@@ -873,7 +873,8 @@ run_doctor() {
     fi
   fi
 
-  release_asset="$(release_bundle_url)"
+  release_asset_name_resolved="$(resolve_release_asset_name || true)"
+  release_asset="$(release_bundle_url "$release_asset_name_resolved")"
   if command -v curl >/dev/null 2>&1; then
     if curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error --max-time 12 --head "$release_asset" >/dev/null 2>&1; then
       doctor_row "[OK]" "Release asset URL" "$release_asset"
@@ -961,7 +962,6 @@ ensure_path_hint() {
     return
   fi
 
-  warn "Install finished, but this shell cannot find bsj yet ($path_entry is not on PATH)."
   persist_path_update "$path_entry"
   export PATH="$path_entry:$PATH"
   info "Added $path_entry to PATH for this installer session."
@@ -1348,11 +1348,29 @@ install_completion_files() {
 }
 
 release_asset_name() {
-  printf 'bsj-universal-apple-darwin.tar.gz'
+  local os_name arch_name
+  os_name="$(uname -s 2>/dev/null || printf "unknown")"
+  arch_name="$(uname -m 2>/dev/null || printf "unknown")"
+
+  if [[ "$os_name" == "Darwin" ]]; then
+    case "$arch_name" in
+      arm64|aarch64)
+        printf 'bsj-aarch64-apple-darwin.tar.gz'
+        return
+        ;;
+      x86_64)
+        printf 'bsj-x86_64-apple-darwin.tar.gz'
+        return
+        ;;
+    esac
+  fi
+
+  printf 'bsj-aarch64-apple-darwin.tar.gz'
 }
 
 release_checksum_name() {
-  printf '%s.sha256' "$(release_asset_name)"
+  local asset_name="${1:-$(release_asset_name)}"
+  printf '%s.sha256' "$asset_name"
 }
 
 archive_source_name() {
@@ -1371,11 +1389,43 @@ release_download_base() {
 }
 
 release_bundle_url() {
-  printf '%s/%s' "$(release_download_base)" "$(release_asset_name)"
+  local asset_name="${1:-$(release_asset_name)}"
+  printf '%s/%s' "$(release_download_base)" "$asset_name"
 }
 
 release_checksum_url() {
-  printf '%s/%s' "$(release_download_base)" "$(release_checksum_name)"
+  local asset_name="${1:-$(release_asset_name)}"
+  printf '%s/%s' "$(release_download_base)" "$(release_checksum_name "$asset_name")"
+}
+
+release_asset_candidates() {
+  local preferred
+  preferred="$(release_asset_name)"
+  printf '%s\n' "$preferred"
+  case "$preferred" in
+    bsj-aarch64-apple-darwin.tar.gz|bsj-x86_64-apple-darwin.tar.gz)
+      printf '%s\n' 'bsj-universal-apple-darwin.tar.gz'
+      ;;
+    bsj-universal-apple-darwin.tar.gz)
+      printf '%s\n' 'bsj-aarch64-apple-darwin.tar.gz'
+      ;;
+  esac
+}
+
+resolve_release_asset_name() {
+  local candidate url
+  require_command curl
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    url="$(release_bundle_url "$candidate")"
+    if curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error --max-time 12 --head "$url" >/dev/null 2>&1; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done < <(release_asset_candidates)
+
+  printf '%s' "$(release_asset_name)"
+  return 1
 }
 
 download_to() {
@@ -1452,7 +1502,7 @@ extract_archive_bundle() {
 }
 
 bootstrap_prebuilt_install() {
-  local tmp_dir archive_path checksum_path bundle_dir checksum_source require_checksum archive_name
+  local tmp_dir archive_path checksum_path bundle_dir checksum_source require_checksum archive_name resolved_asset
   tmp_dir="$(make_temp_dir bsj-install)"
   require_checksum=0
 
@@ -1467,11 +1517,13 @@ bootstrap_prebuilt_install() {
       require_checksum=1
     fi
   else
-    archive_path="$tmp_dir/$(release_asset_name)"
-    checksum_path="$tmp_dir/$(release_checksum_name)"
+    resolved_asset="$(resolve_release_asset_name || true)"
+    archive_path="$tmp_dir/$resolved_asset"
+    checksum_path="$tmp_dir/$(release_checksum_name "$resolved_asset")"
     info "Bootstrapping public release from GitHub"
-    download_to "$(release_bundle_url)" "$archive_path"
-    checksum_source="$(release_checksum_url)"
+    info "Selected release asset: $resolved_asset"
+    download_to "$(release_bundle_url "$resolved_asset")" "$archive_path"
+    checksum_source="$(release_checksum_url "$resolved_asset")"
     require_checksum=1
   fi
 
