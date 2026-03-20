@@ -19,7 +19,7 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - encrypted vault, drafts, backups, and sync blobs
 - append-only revisions and integrity verification
 - menu-driven discoverability so new users are not blocked by key memorization
-- local-first design with optional folder/S3/WebDAV encrypted sync
+- local-first design with encrypted folder sync plus S3/WebDAV and direct Google Drive/Dropbox API connectors
 - optional AI summary and reflective coach mode (off by default)
 
 ## New in v1.3.1
@@ -30,6 +30,13 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - Gap Finder, Conflict & Backup Risk
 - added regression tests for insights menu discovery and report behavior
 - kept all quality gates green (`fmt`, `clippy -D warnings`, `test`, `qa-gate`)
+
+## In progress for v1.3.2
+
+- sync parity pass so saved Setup defaults work across `doctor`, CLI sync, TUI sync, and cloud recovery
+- menu-driven direct connector setup for Google Drive API and Dropbox API
+- clearer trust/status copy in Dashboard, Sync Center, Journal Health, and Cloud Status
+- installer launch fallback and post-install guidance cleanup
 
 ## Screenshots
 
@@ -263,7 +270,9 @@ The app is direct by design:
 ### Protect and move data
 
 - `F8` or `TOOLS -> Sync Vault` syncs encrypted blobs
-- `SETUP -> Cloud Provider Setup` auto-detects Google Drive, Dropbox, OneDrive, iCloud Drive, or Box and sets sync target
+- `SETUP -> Cloud Provider Setup` handles both:
+  - folder sync detection for Google Drive, Dropbox, OneDrive, iCloud Drive, and Box
+  - direct Google Drive / Dropbox API mode with saved non-secret defaults
 - `TOOLS -> Cloud Status` shows upload/download queues and verify state
 - `TOOLS -> Recover From Cloud` runs pull-only cloud recovery without pushing local-only revisions
 - `TOOLS -> Soundtrack Source` sets the MIDI URL/path used for playback
@@ -290,7 +299,7 @@ The menu bar is the primary discoverability surface.
 - `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
 - `TOOLS` includes sync, soundtrack source + toggle, integrity details, review mode, prompts, dashboard, updates, doctor output, and a `SYSOP Center` menu for operator audits/runbooks
-- `SETUP` includes `Cloud Provider Setup` plus direct sync target and other runtime settings
+- `SETUP` includes `Cloud Provider Setup`, saved sync backend defaults, direct cloud target fields, and other runtime settings
 - `TOOLS` also includes `AI Summary (Optional)` and `AI Coach Mode (Optional)` for guided reflection workflows
 - `TOOLS -> Check for Updates` now offers an in-app install action that runs the installer in the background
 - `SETUP` includes a live settings summary plus editable vault/sync/device/opening-line/retention/clock/display values
@@ -444,6 +453,7 @@ Start here on GitHub:
 - [Release Notes](docs/releases/v1.3.1.md)
 - [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
 - [v1.3 UX Checklist](docs/V1_3_UX_CHECKLIST.md)
+- [v3.0 Planning](docs/V3_0_PLAN.md)
 - [Next 10 Feature Pack](docs/FEATURES_NEXT10.md)
 - [Feature Pass v1.0.3 (Archive)](docs/FEATURE_PASS_VNEXT.md)
 - [SYSOP Features](docs/SYSOP_FEATURES.md)

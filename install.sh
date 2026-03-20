@@ -1065,11 +1065,17 @@ Install complete.
 Launch:
   $installed_bin
 
+What to expect:
+  - bsj should now be available in new terminal windows/tabs
+  - this installer already attempted PATH repair for supported shells
+  - the app is menu-first: HELP, SETUP, and TOOLS cover normal setup and operations
+
 First-run flow:
   1) Launch BlueScreen Journal (setup wizard opens automatically if needed)
   2) Start typing your entry right away
   3) Press F2 to save, or type **save** then Enter for quick-save + next entry
   4) Press Esc (or Ctrl+O) to open menus: FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP
+  5) Use SETUP -> Cloud Provider Setup for folder sync or direct cloud connectors
 
 Reference:
   $help_ref
@@ -1083,9 +1089,16 @@ EOF
 launch_bsj_from_installer() {
   local installed_bin="$1"
 
+  if [[ ! -x "$installed_bin" ]]; then
+    warn "Installed binary is not executable: $installed_bin"
+    return 1
+  fi
+
   if tty_input_available && command -v script >/dev/null 2>&1; then
-    script -q /dev/null "$installed_bin"
-    return $?
+    if script -q /dev/null "$installed_bin"; then
+      return 0
+    fi
+    warn "PTY launch via script failed; retrying direct terminal launch."
   fi
 
   if tty_input_available; then
@@ -1109,12 +1122,12 @@ maybe_prompt_post_install_menu() {
   while true; do
     cat <<EOF
 
-Post-install menu
+BlueScreen Journal installer menu
   1) Launch BlueScreen Journal now (recommended)
-  2) Print Setup guide (menu-first flow)
+  2) Print first-run guide (menu-first flow)
   3) Print keyboard/menu cheat sheet
-  4) Show command help
-  5) Run health check (doctor) + PATH repair
+  4) Run health check (doctor) + PATH repair
+  5) Show command help
   6) Exit installer
 EOF
     read_line_interactive "Select [1-6]: " || return
@@ -1123,7 +1136,9 @@ EOF
     case "$normalized" in
       ""|1)
         if ! launch_bsj_from_installer "$installed_bin"; then
-          warn "Launch failed from installer. Run directly: $installed_bin"
+          warn "Launch failed from installer."
+          warn "Try: $installed_bin"
+          warn "If that fails too, use option 4 for doctor + PATH repair."
         fi
         return
         ;;
@@ -1134,11 +1149,11 @@ EOF
         "$installed_bin" guide quickstart | sed -n '1,120p'
         ;;
       4)
-        "$installed_bin" --help | sed -n '1,80p'
-        ;;
-      5)
         "$installed_bin" doctor || true
         run_path_repair
+        ;;
+      5)
+        "$installed_bin" --help | sed -n '1,80p'
         ;;
       6|q|quit|exit)
         return

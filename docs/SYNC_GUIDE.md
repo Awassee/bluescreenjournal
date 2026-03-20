@@ -16,6 +16,12 @@ It is not supposed to upload plaintext journal bodies.
 
 Folder sync is the simplest option and the best place to start.
 
+Menu-first path:
+
+- `SETUP -> Cloud Provider Setup`
+- choose a provider folder preset
+- verify from `TOOLS -> Sync Center` and `TOOLS -> Cloud Status`
+
 Example:
 
 ```bash
@@ -64,6 +70,13 @@ bsj sync
 
 Use this backend when you want bsj to talk to Google Drive directly (instead of syncing through a local Google Drive folder).
 
+Menu-first path:
+
+- `SETUP -> Cloud Provider Setup -> Use Direct Google Drive API`
+- `SETUP -> Sync Backend Default -> gdrive`
+- optional: `SETUP -> Google Drive Folder ID`
+- keep secrets in env vars, not config
+
 ```bash
 export BSJ_SYNC_BACKEND=gdrive
 export BSJ_GDRIVE_ACCESS_TOKEN=ya29...
@@ -85,6 +98,13 @@ bsj sync --backend gdrive --remote gdrive://<folder-id>
 ## Direct Dropbox API sync
 
 Use this backend when you want bsj to talk to Dropbox directly (instead of syncing through a local Dropbox folder).
+
+Menu-first path:
+
+- `SETUP -> Cloud Provider Setup -> Use Direct Dropbox API`
+- `SETUP -> Sync Backend Default -> dropbox`
+- optional: `SETUP -> Dropbox Root`
+- keep secrets in env vars, not config
 
 ```bash
 export BSJ_SYNC_BACKEND=dropbox
@@ -125,6 +145,23 @@ export BSJ_WEBDAV_ALLOW_INSECURE_HTTP=1
 ```
 
 ## How reconciliation works
+
+## Backend selection order
+
+bsj resolves sync backend in this order:
+
+1. explicit CLI `--backend`
+2. `BSJ_SYNC_BACKEND`
+3. saved `sync_backend_preference`
+4. inferred remote scheme
+5. folder sync fallback
+
+For direct Google Drive and Dropbox, target selection follows the same spirit:
+
+1. explicit CLI `--remote`
+2. env target override
+3. saved Setup default
+4. built-in default target
 
 At a high level, sync does this:
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- added config-backed sync defaults for `sync_backend_preference`, `gdrive_folder_id`, and `dropbox_root`
+- made CLI/TUI sync flows honor saved Setup defaults after env overrides, so direct cloud connectors no longer require `BSJ_SYNC_BACKEND` on every run
+- expanded `SETUP -> Cloud Provider Setup` to cover both folder sync providers and direct Google Drive / Dropbox API modes
+- improved sync trust surfaces in Dashboard, Journal Health, Sync Center, Cloud Status, and `doctor`
+- hardened installer launch fallback and refreshed post-install menu-first guidance
+- extended smoke install coverage for the updated cloud setup messaging
+
 ## v1.3.1
 
 - added `TOOLS -> Insights Center` as a menu-first picker with ten report modules:

@@ -17,6 +17,7 @@ Use this page as the docs control panel for BlueScreen Journal.
 
 - current stable: [`v1.3.1`](https://github.com/Awassee/bluescreenjournal/releases/tag/v1.3.1)
 - current release notes: [docs/releases/v1.3.1.md](releases/v1.3.1.md)
+- current patch scope on `main`: [docs/V1_3_2_PLAN.md](V1_3_2_PLAN.md)
 - full history: [docs/releases/](releases/)
 
 ## Visual tour
@@ -59,6 +60,7 @@ These are the primary public repo entry points to keep current:
 
 - [README](../README.md)
 - [Start Here](START_HERE.md)
+- [v1.3.2 Plan](V1_3_2_PLAN.md)
 - [v1.3 Plan](V1_3_PLAN.md)
 - [Support](../SUPPORT.md)
 - [Security](../SECURITY.md)

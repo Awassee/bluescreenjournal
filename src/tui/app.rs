@@ -1218,6 +1218,9 @@ impl MenuId {
 pub enum SettingField {
     VaultPath,
     SyncTargetPath,
+    SyncBackendPreference,
+    GDriveFolderId,
+    DropboxRoot,
     DeviceNickname,
     Clock12h,
     ShowSeconds,
@@ -1236,6 +1239,9 @@ impl SettingField {
         match self {
             SettingField::VaultPath => "vault_path",
             SettingField::SyncTargetPath => "sync_target_path",
+            SettingField::SyncBackendPreference => "sync_backend_preference",
+            SettingField::GDriveFolderId => "gdrive_folder_id",
+            SettingField::DropboxRoot => "dropbox_root",
             SettingField::DeviceNickname => "device_nickname",
             SettingField::Clock12h => "clock_12h",
             SettingField::ShowSeconds => "show_seconds",
@@ -1254,6 +1260,9 @@ impl SettingField {
         match self {
             SettingField::VaultPath => "Vault Path",
             SettingField::SyncTargetPath => "Sync Folder",
+            SettingField::SyncBackendPreference => "Sync Backend Default",
+            SettingField::GDriveFolderId => "Google Drive Folder ID",
+            SettingField::DropboxRoot => "Dropbox Root",
             SettingField::DeviceNickname => "Device Name",
             SettingField::Clock12h => "12-Hour Clock",
             SettingField::ShowSeconds => "Show Seconds",
@@ -1272,6 +1281,11 @@ impl SettingField {
         match self {
             SettingField::VaultPath => "Set vault path:",
             SettingField::SyncTargetPath => "Set folder sync path (blank clears):",
+            SettingField::SyncBackendPreference => {
+                "Set sync backend default (blank/auto/folder/s3/webdav/gdrive/dropbox):"
+            }
+            SettingField::GDriveFolderId => "Set Google Drive folder id (blank = appDataFolder):",
+            SettingField::DropboxRoot => "Set Dropbox root path (blank = /BlueScreenJournal-Sync):",
             SettingField::DeviceNickname => "Set device nickname:",
             SettingField::Clock12h => "Use 12-hour clock (true/false):",
             SettingField::ShowSeconds => "Show seconds in header clock (true/false):",
@@ -1291,6 +1305,15 @@ impl SettingField {
             SettingField::VaultPath => "Changing the path relocks into the selected vault.",
             SettingField::SyncTargetPath => {
                 "Folder sync target for iCloud/Dropbox/Google Drive/OneDrive/Box style sync."
+            }
+            SettingField::SyncBackendPreference => {
+                "Optional default backend when menus/CLI do not pass --backend. BSJ_SYNC_BACKEND still wins."
+            }
+            SettingField::GDriveFolderId => {
+                "Used by direct Google Drive API sync when env override is not set. Blank uses appDataFolder."
+            }
+            SettingField::DropboxRoot => {
+                "Used by direct Dropbox API sync when env override is not set. Blank uses /BlueScreenJournal-Sync."
             }
             SettingField::DeviceNickname => "Shown in devices/<deviceId>.json and conflicts.",
             SettingField::Clock12h => "Changes header clock formatting across the app.",
@@ -1318,6 +1341,11 @@ impl SettingField {
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
+            SettingField::SyncBackendPreference => {
+                config.sync_backend_preference.clone().unwrap_or_default()
+            }
+            SettingField::GDriveFolderId => config.gdrive_folder_id.clone().unwrap_or_default(),
+            SettingField::DropboxRoot => config.dropbox_root.clone().unwrap_or_default(),
             SettingField::DeviceNickname => config.device_nickname.clone(),
             SettingField::Clock12h => config.clock_12h.to_string(),
             SettingField::ShowSeconds => config.show_seconds.to_string(),
@@ -1342,6 +1370,19 @@ impl SettingField {
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "[unset]".to_string()),
+            SettingField::SyncBackendPreference => config
+                .sync_backend_preference
+                .as_deref()
+                .map(|value| value.to_ascii_uppercase())
+                .unwrap_or_else(|| "[auto]".to_string()),
+            SettingField::GDriveFolderId => config
+                .gdrive_folder_id
+                .clone()
+                .unwrap_or_else(|| "[appDataFolder]".to_string()),
+            SettingField::DropboxRoot => config
+                .dropbox_root
+                .clone()
+                .unwrap_or_else(|| "[/BlueScreenJournal-Sync]".to_string()),
             SettingField::SoundtrackSource => {
                 if config.soundtrack_source.trim().is_empty() {
                     "[unset]".to_string()
@@ -1688,6 +1729,8 @@ pub enum MenuAction {
     DailyFlowCoach,
     EditSetting(SettingField),
     CloudProviderSetup,
+    UseDirectGoogleDrive,
+    UseDirectDropbox,
     SetCloudProvider(platform::CloudProvider),
     Help,
 }
@@ -1823,9 +1866,11 @@ enum SyncRequest {
     },
     GDrive {
         target_label: String,
+        remote: Option<String>,
     },
     Dropbox {
         target_label: String,
+        remote: Option<String>,
     },
 }
 
@@ -1845,8 +1890,8 @@ impl SyncRequest {
             SyncRequest::Folder { target_label, .. }
             | SyncRequest::S3 { target_label }
             | SyncRequest::WebDav { target_label }
-            | SyncRequest::GDrive { target_label }
-            | SyncRequest::Dropbox { target_label } => target_label,
+            | SyncRequest::GDrive { target_label, .. }
+            | SyncRequest::Dropbox { target_label, .. } => target_label,
         }
     }
 }
@@ -3313,12 +3358,15 @@ impl App {
                 },
                 MenuItem {
                     label: "Cloud Provider Setup".to_string(),
-                    detail: "GDRIVE/DBX/OD/ICLOUD/BOX".to_string(),
+                    detail: "FOLDER/API".to_string(),
                     action: MenuAction::CloudProviderSetup,
                     enabled: true,
                 },
                 self.setting_menu_item(SettingField::VaultPath),
                 self.setting_menu_item(SettingField::SyncTargetPath),
+                self.setting_menu_item(SettingField::SyncBackendPreference),
+                self.setting_menu_item(SettingField::GDriveFolderId),
+                self.setting_menu_item(SettingField::DropboxRoot),
                 self.setting_menu_item(SettingField::DeviceNickname),
                 self.setting_menu_item(SettingField::DailyWordGoal),
                 self.setting_menu_item(SettingField::Clock12h),
@@ -3404,18 +3452,152 @@ impl App {
                     action: PickerAction::Menu(MenuAction::SetCloudProvider(*provider)),
                 }
             })
+            .chain([
+                PickerItem {
+                    title: "Use Direct Google Drive API".to_string(),
+                    detail: truncate_for_picker(
+                        &format!(
+                            "{} | {}",
+                            self.config
+                                .gdrive_folder_id
+                                .clone()
+                                .unwrap_or_else(|| "appDataFolder".to_string()),
+                            direct_connector_status_line("gdrive", &self.config)
+                        ),
+                        44,
+                    ),
+                    keywords: "sync cloud direct google drive api oauth token appdata folder"
+                        .to_string(),
+                    action: PickerAction::Menu(MenuAction::UseDirectGoogleDrive),
+                },
+                PickerItem {
+                    title: "Use Direct Dropbox API".to_string(),
+                    detail: truncate_for_picker(
+                        &format!(
+                            "{} | {}",
+                            self.config
+                                .dropbox_root
+                                .clone()
+                                .unwrap_or_else(|| "/BlueScreenJournal-Sync".to_string()),
+                            direct_connector_status_line("dropbox", &self.config)
+                        ),
+                        44,
+                    ),
+                    keywords: "sync cloud direct dropbox api oauth token root".to_string(),
+                    action: PickerAction::Menu(MenuAction::UseDirectDropbox),
+                },
+                PickerItem {
+                    title: "Edit Sync Backend Default".to_string(),
+                    detail: self
+                        .config
+                        .sync_backend_preference
+                        .clone()
+                        .unwrap_or_else(|| "auto".to_string()),
+                    keywords: "sync backend default folder s3 webdav gdrive dropbox".to_string(),
+                    action: PickerAction::Menu(MenuAction::EditSetting(
+                        SettingField::SyncBackendPreference,
+                    )),
+                },
+            ])
             .collect::<Vec<_>>();
         self.open_picker_overlay(PickerOverlay::new(
-            "Cloud Provider Setup",
+            "Cloud Sync Setup",
             items,
             "No providers available.",
         ));
+    }
+
+    fn configure_direct_cloud_backend(&mut self, backend: &str) {
+        let env = EnvironmentSettings::capture();
+        let (title, status, target, next_steps) = match backend {
+            "gdrive" => {
+                self.config.sync_backend_preference = Some("gdrive".to_string());
+                if self.config.gdrive_folder_id.is_none() {
+                    self.config.gdrive_folder_id = Some("appDataFolder".to_string());
+                }
+                (
+                    "Direct Google Drive Ready",
+                    direct_connector_status_line("gdrive", &self.config),
+                    self.config
+                        .gdrive_folder_id
+                        .clone()
+                        .unwrap_or_else(|| "appDataFolder".to_string()),
+                    vec![
+                        format!(
+                            "Creds      : {}",
+                            if env.gdrive_access_token_set
+                                || (env.gdrive_refresh_token_set
+                                    && env.gdrive_client_id_set
+                                    && env.gdrive_client_secret_set)
+                            {
+                                "READY"
+                            } else {
+                                "SET ENV VARS"
+                            }
+                        ),
+                        "Target     : SETUP -> Google Drive Folder ID".to_string(),
+                        "Sync       : TOOLS -> Sync Center -> Run Encrypted Sync".to_string(),
+                        "Verify     : TOOLS -> Cloud Status + Integrity".to_string(),
+                    ],
+                )
+            }
+            "dropbox" => {
+                self.config.sync_backend_preference = Some("dropbox".to_string());
+                if self.config.dropbox_root.is_none() {
+                    self.config.dropbox_root = Some("/BlueScreenJournal-Sync".to_string());
+                }
+                (
+                    "Direct Dropbox Ready",
+                    direct_connector_status_line("dropbox", &self.config),
+                    self.config
+                        .dropbox_root
+                        .clone()
+                        .unwrap_or_else(|| "/BlueScreenJournal-Sync".to_string()),
+                    vec![
+                        format!(
+                            "Creds      : {}",
+                            if env.dropbox_access_token_set
+                                || (env.dropbox_refresh_token_set
+                                    && env.dropbox_app_key_set
+                                    && env.dropbox_app_secret_set)
+                            {
+                                "READY"
+                            } else {
+                                "SET ENV VARS"
+                            }
+                        ),
+                        "Target     : SETUP -> Dropbox Root".to_string(),
+                        "Sync       : TOOLS -> Sync Center -> Run Encrypted Sync".to_string(),
+                        "Verify     : TOOLS -> Cloud Status + Integrity".to_string(),
+                    ],
+                )
+            }
+            _ => return,
+        };
+
+        if let Err(error) = self.config.save() {
+            self.flash_status("SETTINGS SAVE FAILED.");
+            log::warn!("failed to persist direct cloud backend: {error}");
+            return;
+        }
+
+        self.flash_status(&format!("{} MODE SET.", backend.to_ascii_uppercase()));
+        let mut lines = vec![
+            format!("Backend    : {}", backend.to_ascii_uppercase()),
+            format!("Target     : {target}"),
+            format!("Status     : {status}"),
+            String::new(),
+            "Next steps".to_string(),
+        ];
+        lines.extend(next_steps.into_iter().map(|line| format!("  {line}")));
+        self.open_info_overlay(title, lines.join("\n"));
     }
 
     fn set_sync_target_from_provider(&mut self, provider: platform::CloudProvider) {
         match platform::resolve_cloud_provider_sync_target(provider) {
             Ok(path) => {
                 self.config.sync_target_path = Some(path.clone());
+                self.config.sync_backend_preference = Some("folder".to_string());
                 if let Err(error) = self.config.save() {
                     self.flash_status("SETTINGS SAVE FAILED.");
                     log::warn!("failed to persist provider sync target: {error}");
@@ -3426,6 +3608,7 @@ impl App {
                     "Cloud Provider Ready",
                     [
                         format!("Provider    : {}", provider.label()),
+                        "Backend     : FOLDER".to_string(),
                         format!("Sync target : {}", path.display()),
                         String::new(),
                         "Next steps".to_string(),
@@ -6548,11 +6731,25 @@ impl App {
         if !vault::vault_exists(&self.config.vault_path) {
             actions.push("Initialize a vault first (launch setup wizard).".to_string());
         }
-        if self.config.sync_target_path.is_none() {
-            actions.push(
-                "Set sync target via SETUP -> Cloud Provider Setup or Sync Target Path."
-                    .to_string(),
-            );
+        match configured_sync_backend(&self.config) {
+            Ok(Some(backend)) if backend == "gdrive" || backend == "dropbox" => {
+                let connector = sync_connector_summary_line(&self.config);
+                if connector.contains("NEEDS") {
+                    actions.push(format!(
+                        "Finish {backend} connector setup in SETUP -> Cloud Provider Setup and export the required env vars."
+                    ));
+                }
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                if self.config.sync_target_path.is_none() {
+                    actions.push(
+                        "Set sync target via SETUP -> Cloud Provider Setup or Sync Target Path."
+                            .to_string(),
+                    );
+                }
+            }
+            Err(error) => actions.push(format!("Fix sync configuration: {error}")),
         }
 
         match sysop::collect_permission_issues(&self.config.vault_path) {
@@ -7026,6 +7223,8 @@ impl App {
         } else {
             "draft clean"
         };
+        let backend_source = sync_backend_source_label(&self.config);
+        let connector_status = sync_connector_summary_line(&self.config);
         let (backend_label, target_label, preview_detail, preview_text) =
             match self.resolve_sync_request() {
                 Ok(request) => match self.sync_preview_report(&request) {
@@ -7046,6 +7245,8 @@ impl App {
                             format!("Upload queue : {}", preview.local_only_revisions),
                             format!("Download q   : {}", preview.remote_only_revisions),
                             format!("Shared revs  : {}", preview.shared_revisions),
+                            format!("Control      : {backend_source}"),
+                            format!("Connector    : {connector_status}"),
                             format!("Conflicts    : {conflicts}"),
                             format!("Dirty draft  : {}", if self.dirty { "YES" } else { "NO" }),
                             format!(
@@ -7070,6 +7271,8 @@ impl App {
                             format!("Backend      : {}", request.backend_label()),
                             format!("Target       : {}", request.target_label()),
                             format!("Preview      : {error}"),
+                            format!("Control      : {backend_source}"),
+                            format!("Connector    : {connector_status}"),
                             format!("Conflicts    : {conflicts}"),
                             format!("Dirty draft  : {}", if self.dirty { "YES" } else { "NO" }),
                         ]
@@ -7082,6 +7285,8 @@ impl App {
                     "configure a target".to_string(),
                     [
                         format!("Backend      : {error}"),
+                        format!("Control      : {backend_source}"),
+                        format!("Connector    : {connector_status}"),
                         format!("Conflicts    : {conflicts}"),
                         format!("Dirty draft  : {}", if self.dirty { "YES" } else { "NO" }),
                     ]
@@ -7100,6 +7305,12 @@ impl App {
             })
             .unwrap_or_else(|| "never".to_string());
         let items = vec![
+            PickerItem {
+                title: "Configure Cloud Sync".to_string(),
+                detail: format!("{backend_source} | {connector_status}"),
+                keywords: "sync setup cloud connector provider backend".to_string(),
+                action: PickerAction::Menu(MenuAction::CloudProviderSetup),
+            },
             PickerItem {
                 title: "Run Encrypted Sync".to_string(),
                 detail: format!("{backend_label} {preview_detail}"),
@@ -7182,12 +7393,16 @@ impl App {
                 )
             })
             .unwrap_or_else(|| "never".to_string());
+        let backend_source = sync_backend_source_label(&self.config);
+        let connector_status = sync_connector_summary_line(&self.config);
 
         let lines = match self.resolve_sync_request() {
             Ok(request) => match self.sync_preview_report(&request) {
                 Ok(preview) => vec![
                     format!("Backend      : {}", request.backend_label()),
                     format!("Target       : {}", request.target_label()),
+                    format!("Control      : {backend_source}"),
+                    format!("Connector    : {connector_status}"),
                     format!("Local revs   : {}", preview.local_revisions),
                     format!("Remote revs  : {}", preview.remote_revisions),
                     format!("Upload queue : {}", preview.local_only_revisions),
@@ -7204,6 +7419,8 @@ impl App {
                 Err(error) => vec![
                     format!("Backend      : {}", request.backend_label()),
                     format!("Target       : {}", request.target_label()),
+                    format!("Control      : {backend_source}"),
+                    format!("Connector    : {connector_status}"),
                     format!("Preview      : {error}"),
                     format!("Conflicts    : {conflicts}"),
                     format!("Integrity    : {}", self.integrity_status_label()),
@@ -7212,12 +7429,14 @@ impl App {
             },
             Err(error) => vec![
                 "Backend      : UNCONFIGURED".to_string(),
+                format!("Control      : {backend_source}"),
+                format!("Connector    : {connector_status}"),
                 format!("Error        : {error}"),
                 format!("Conflicts    : {conflicts}"),
                 format!("Integrity    : {}", self.integrity_status_label()),
                 format!("Last sync    : {sync_status}"),
                 String::new(),
-                "Set sync target via SETUP -> Sync Target Path.".to_string(),
+                "Set cloud sync via SETUP -> Cloud Provider Setup.".to_string(),
             ],
         };
         self.open_info_overlay("Cloud Status", lines.join("\n"));
@@ -8115,6 +8334,13 @@ impl App {
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "[unset]".to_string());
+        let sync_mode = configured_sync_backend(&self.config)
+            .ok()
+            .flatten()
+            .map(|backend| backend.to_ascii_uppercase())
+            .unwrap_or_else(|| "FOLDER".to_string());
+        let sync_control = sync_backend_source_label(&self.config);
+        let connector_status = sync_connector_summary_line(&self.config);
         let soundtrack_source = if self.config.soundtrack_source.trim().is_empty() {
             "[unset]".to_string()
         } else {
@@ -8205,7 +8431,9 @@ impl App {
             format!("Backups     : {backup_count}"),
             format!("Recents     : {}", self.recent_dates.len()),
             format!("Favorites   : {}", self.favorite_dates().len()),
+            format!("Sync mode   : {sync_mode} ({sync_control})"),
             format!("Sync target : {sync_target}"),
+            format!("Connector   : {connector_status}"),
             format!(
                 "Soundtrack  : {} ({soundtrack_source})",
                 self.soundtrack_status_label()
@@ -8241,6 +8469,13 @@ impl App {
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "[unset]".to_string());
+        let sync_mode = configured_sync_backend(&self.config)
+            .ok()
+            .flatten()
+            .map(|backend| backend.to_ascii_uppercase())
+            .unwrap_or_else(|| "FOLDER".to_string());
+        let sync_control = sync_backend_source_label(&self.config);
+        let connector_status = sync_connector_summary_line(&self.config);
         let integrity = self.integrity_status_label();
         let save_state = self.save_status_label();
         let (conflict_count, backup_count) = if let Some(vault) = &self.vault {
@@ -8277,7 +8512,9 @@ impl App {
             ),
             format!("Backups     : {backup_count}"),
             format!("Conflicts   : {conflict_count}"),
+            format!("Sync mode   : {sync_mode} ({sync_control})"),
             format!("Sync target : {sync_target}"),
+            format!("Connector   : {connector_status}"),
             String::new(),
             "Use TOOLS -> Verify Integrity for chain checks and FILE -> Backup Snapshot for manual checkpoints."
                 .to_string(),
@@ -8713,6 +8950,8 @@ impl App {
             MenuAction::DailyFlowCoach => self.open_daily_flow_coach_overlay(),
             MenuAction::EditSetting(field) => self.open_setting_prompt(field),
             MenuAction::CloudProviderSetup => self.open_cloud_provider_setup_overlay(),
+            MenuAction::UseDirectGoogleDrive => self.configure_direct_cloud_backend("gdrive"),
+            MenuAction::UseDirectDropbox => self.configure_direct_cloud_backend("dropbox"),
             MenuAction::SetCloudProvider(provider) => self.set_sync_target_from_provider(provider),
             MenuAction::Help => self.overlay = Some(Overlay::Help),
         }
@@ -9148,14 +9387,14 @@ impl App {
                     .sync_with_backend(&mut backend)
                     .map_err(|error| format!("sync failed: {error}"))
             }
-            SyncRequest::GDrive { .. } => {
-                let mut backend = sync::GoogleDriveBackend::from_remote(None)?;
+            SyncRequest::GDrive { remote, .. } => {
+                let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
                 vault
                     .sync_with_backend(&mut backend)
                     .map_err(|error| format!("sync failed: {error}"))
             }
-            SyncRequest::Dropbox { .. } => {
-                let mut backend = sync::DropboxBackend::from_remote(None)?;
+            SyncRequest::Dropbox { remote, .. } => {
+                let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
                 vault
                     .sync_with_backend(&mut backend)
                     .map_err(|error| format!("sync failed: {error}"))
@@ -9188,13 +9427,13 @@ impl App {
                 sync::recover_root(&self.vault_path, &mut backend)
                     .map_err(|error| format!("cloud recovery failed: {error}"))?
             }
-            SyncRequest::GDrive { .. } => {
-                let mut backend = sync::GoogleDriveBackend::from_remote(None)?;
+            SyncRequest::GDrive { remote, .. } => {
+                let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
                 sync::recover_root(&self.vault_path, &mut backend)
                     .map_err(|error| format!("cloud recovery failed: {error}"))?
             }
-            SyncRequest::Dropbox { .. } => {
-                let mut backend = sync::DropboxBackend::from_remote(None)?;
+            SyncRequest::Dropbox { remote, .. } => {
+                let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
                 sync::recover_root(&self.vault_path, &mut backend)
                     .map_err(|error| format!("cloud recovery failed: {error}"))?
             }
@@ -9211,9 +9450,7 @@ impl App {
     }
 
     fn resolve_sync_request(&self) -> Result<SyncRequest, String> {
-        let backend = env::var("BSJ_SYNC_BACKEND")
-            .ok()
-            .map(|value| value.to_ascii_lowercase());
+        let backend = configured_sync_backend(&self.config)?;
 
         match backend.as_deref() {
             Some("s3") => Ok(SyncRequest::S3 {
@@ -9223,25 +9460,25 @@ impl App {
                 target_label: sync_target_label_webdav()?,
             }),
             Some("gdrive") | Some("google-drive") => Ok(SyncRequest::GDrive {
-                target_label: sync_target_label_gdrive(),
+                target_label: sync_target_label_gdrive(&self.config),
+                remote: configured_gdrive_remote(&self.config),
             }),
             Some("dropbox") => Ok(SyncRequest::Dropbox {
-                target_label: sync_target_label_dropbox(),
+                target_label: sync_target_label_dropbox(&self.config),
+                remote: configured_dropbox_remote(&self.config),
             }),
             Some("folder") | None => {
                 let remote_root = self
                     .config
                     .sync_target_path
                     .clone()
-                    .ok_or_else(|| "No folder sync target configured. Run `bsj sync --provider google-drive` or `bsj sync --backend folder --remote PATH` once, or set BSJ_SYNC_BACKEND=s3|webdav|gdrive|dropbox and the corresponding env vars.".to_string())?;
+                    .ok_or_else(|| "No folder sync target configured. Run SETUP -> Cloud Provider Setup for a folder target, or set Sync Backend Default plus the matching connector settings.".to_string())?;
                 Ok(SyncRequest::Folder {
                     target_label: remote_root.display().to_string(),
                     remote_root,
                 })
             }
-            Some(other) => Err(format!(
-                "Invalid BSJ_SYNC_BACKEND '{other}'. Expected folder, s3, webdav, gdrive, or dropbox."
-            )),
+            Some(other) => Err(format!("Invalid sync backend '{other}'.")),
         }
     }
 
@@ -9270,13 +9507,13 @@ impl App {
                 sync::preview_root(vault.metadata(), &self.vault_path, &mut backend)
                     .map_err(|error| format!("preview failed: {error}"))
             }
-            SyncRequest::GDrive { .. } => {
-                let mut backend = sync::GoogleDriveBackend::from_remote(None)?;
+            SyncRequest::GDrive { remote, .. } => {
+                let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
                 sync::preview_root(vault.metadata(), &self.vault_path, &mut backend)
                     .map_err(|error| format!("preview failed: {error}"))
             }
-            SyncRequest::Dropbox { .. } => {
-                let mut backend = sync::DropboxBackend::from_remote(None)?;
+            SyncRequest::Dropbox { remote, .. } => {
+                let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
                 sync::preview_root(vault.metadata(), &self.vault_path, &mut backend)
                     .map_err(|error| format!("preview failed: {error}"))
             }
@@ -9699,6 +9936,27 @@ impl App {
                     "SYNC FOLDER SET."
                 } else {
                     "SYNC FOLDER CLEARED."
+                }
+            }
+            SettingField::SyncBackendPreference => {
+                if self.config.sync_backend_preference.is_some() {
+                    "SYNC MODE SET."
+                } else {
+                    "SYNC MODE AUTO."
+                }
+            }
+            SettingField::GDriveFolderId => {
+                if self.config.gdrive_folder_id.is_some() {
+                    "GDRIVE TARGET SET."
+                } else {
+                    "GDRIVE TARGET DEFAULT."
+                }
+            }
+            SettingField::DropboxRoot => {
+                if self.config.dropbox_root.is_some() {
+                    "DROPBOX ROOT SET."
+                } else {
+                    "DROPBOX ROOT DEFAULT."
                 }
             }
             SettingField::DeviceNickname => "DEVICE NAME SET.",
@@ -10566,20 +10824,79 @@ fn sync_target_label_webdav() -> Result<String, String> {
         .map_err(|_| "BSJ_WEBDAV_URL is required for TUI WebDAV sync.".to_string())
 }
 
-fn sync_target_label_gdrive() -> String {
+fn configured_sync_backend(config: &AppConfig) -> Result<Option<String>, String> {
+    if let Ok(value) = env::var("BSJ_SYNC_BACKEND") {
+        return config::normalize_sync_backend_preference_value(&value)
+            .map_err(|_| {
+                format!(
+                    "Invalid BSJ_SYNC_BACKEND '{value}'. Expected folder, s3, webdav, gdrive, or dropbox."
+                )
+            });
+    }
+
+    config
+        .sync_backend_preference
+        .as_deref()
+        .map(config::normalize_sync_backend_preference_value)
+        .transpose()
+        .map(|value| value.flatten())
+        .map_err(|_| {
+            format!(
+                "Invalid sync backend default '{}'. Use folder, s3, webdav, gdrive, dropbox, or blank.",
+                config.sync_backend_preference.as_deref().unwrap_or_default()
+            )
+        })
+}
+
+fn sync_backend_source_label(config: &AppConfig) -> &'static str {
+    if env::var_os("BSJ_SYNC_BACKEND").is_some() {
+        "ENV OVERRIDE"
+    } else if config.sync_backend_preference.is_some() {
+        "SETUP DEFAULT"
+    } else if config.sync_target_path.is_some() {
+        "FOLDER TARGET"
+    } else {
+        "AUTO"
+    }
+}
+
+fn configured_gdrive_remote(config: &AppConfig) -> Option<String> {
     env::var("BSJ_GDRIVE_FOLDER_ID")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "appDataFolder".to_string())
+        .or_else(|| {
+            config
+                .gdrive_folder_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
 }
 
-fn sync_target_label_dropbox() -> String {
-    let raw = env::var("BSJ_DROPBOX_ROOT")
+fn sync_target_label_gdrive(config: &AppConfig) -> String {
+    configured_gdrive_remote(config).unwrap_or_else(|| "appDataFolder".to_string())
+}
+
+fn configured_dropbox_remote(config: &AppConfig) -> Option<String> {
+    env::var("BSJ_DROPBOX_ROOT")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "/BlueScreenJournal-Sync".to_string());
+        .or_else(|| {
+            config
+                .dropbox_root
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+}
+
+fn sync_target_label_dropbox(config: &AppConfig) -> String {
+    let raw =
+        configured_dropbox_remote(config).unwrap_or_else(|| "/BlueScreenJournal-Sync".to_string());
     if raw == "/" {
         return "/".to_string();
     }
@@ -10595,6 +10912,90 @@ fn sync_target_label_dropbox() -> String {
         "/".to_string()
     } else {
         normalized.trim_end_matches('/').to_string()
+    }
+}
+
+fn direct_connector_status_line(backend: &str, config: &AppConfig) -> String {
+    let env = EnvironmentSettings::capture();
+    match backend {
+        "gdrive" => {
+            if env.gdrive_access_token_set
+                || (env.gdrive_refresh_token_set
+                    && env.gdrive_client_id_set
+                    && env.gdrive_client_secret_set)
+            {
+                format!(
+                    "READY | {}",
+                    if env.gdrive_folder_id_set {
+                        "env target".to_string()
+                    } else {
+                        sync_target_label_gdrive(config)
+                    }
+                )
+            } else {
+                "NEEDS TOKENS".to_string()
+            }
+        }
+        "dropbox" => {
+            if env.dropbox_access_token_set
+                || (env.dropbox_refresh_token_set
+                    && env.dropbox_app_key_set
+                    && env.dropbox_app_secret_set)
+            {
+                format!(
+                    "READY | {}",
+                    if env.dropbox_root_set {
+                        "env target".to_string()
+                    } else {
+                        sync_target_label_dropbox(config)
+                    }
+                )
+            } else {
+                "NEEDS TOKENS".to_string()
+            }
+        }
+        _ => "UNKNOWN".to_string(),
+    }
+}
+
+fn sync_connector_summary_line(config: &AppConfig) -> String {
+    match configured_sync_backend(config) {
+        Ok(Some(backend)) if backend == "folder" => {
+            if config.sync_target_path.is_some() {
+                "READY | folder target".to_string()
+            } else {
+                "SET SYNC FOLDER".to_string()
+            }
+        }
+        Ok(Some(backend)) if backend == "s3" => {
+            let env = EnvironmentSettings::capture();
+            if env.s3_bucket_set {
+                "READY | env bucket".to_string()
+            } else {
+                "NEEDS BSJ_S3_BUCKET".to_string()
+            }
+        }
+        Ok(Some(backend)) if backend == "webdav" => {
+            let env = EnvironmentSettings::capture();
+            if env.webdav_url_set && (!env.webdav_username_set || env.webdav_password_set) {
+                "READY | env WebDAV".to_string()
+            } else {
+                "NEEDS WEBDAV ENV".to_string()
+            }
+        }
+        Ok(Some(backend)) if backend == "gdrive" => direct_connector_status_line("gdrive", config),
+        Ok(Some(backend)) if backend == "dropbox" => {
+            direct_connector_status_line("dropbox", config)
+        }
+        Ok(Some(backend)) => format!("UNKNOWN | {backend}"),
+        Ok(None) => {
+            if config.sync_target_path.is_some() {
+                "READY | auto folder".to_string()
+            } else {
+                "UNCONFIGURED".to_string()
+            }
+        }
+        Err(_) => "CONFIG ERROR".to_string(),
     }
 }
 
@@ -14688,15 +15089,65 @@ mod tests {
 
         match app.overlay() {
             Some(Overlay::Picker(picker)) => {
-                assert_eq!(picker.title, "Cloud Provider Setup");
+                assert_eq!(picker.title, "Cloud Sync Setup");
                 assert!(
                     picker
                         .items
                         .iter()
                         .any(|item| item.title.contains("Google Drive"))
                 );
+                assert!(
+                    picker
+                        .items
+                        .iter()
+                        .any(|item| item.title == "Use Direct Google Drive API")
+                );
+                assert!(
+                    picker
+                        .items
+                        .iter()
+                        .any(|item| item.title == "Use Direct Dropbox API")
+                );
             }
             other => panic!("expected cloud provider picker, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn direct_google_drive_setup_sets_backend_default_and_target() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::UseDirectGoogleDrive, 20);
+
+        assert_eq!(
+            app.config.sync_backend_preference.as_deref(),
+            Some("gdrive")
+        );
+        assert_eq!(
+            app.config.gdrive_folder_id.as_deref(),
+            Some("appDataFolder")
+        );
+        assert!(
+            matches!(app.overlay(), Some(Overlay::Info(info)) if info.title == "Direct Google Drive Ready")
+        );
+    }
+
+    #[test]
+    fn resolve_sync_request_uses_saved_dropbox_defaults() {
+        let mut app = App::with_initial_date(None);
+        app.config.sync_backend_preference = Some("dropbox".to_string());
+        app.config.dropbox_root = Some("/Shared Journal".to_string());
+
+        match app.resolve_sync_request().expect("sync request") {
+            SyncRequest::Dropbox {
+                target_label,
+                remote,
+            } => {
+                assert_eq!(target_label, "/Shared Journal");
+                assert_eq!(remote.as_deref(), Some("/Shared Journal"));
+            }
+            other => panic!("expected dropbox sync request, got {other:?}"),
         }
     }
 

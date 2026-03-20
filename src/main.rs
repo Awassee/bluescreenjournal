@@ -2873,7 +2873,7 @@ fn run_cli_sync(
     log::info!("running CLI sync");
     let mut config = config::AppConfig::load_or_default();
     let vault = unlock_cli_vault(&config)?;
-    let backend_kind = resolve_sync_backend_kind(backend_arg, provider_arg, remote_arg)?;
+    let backend_kind = resolve_sync_backend_kind(&config, backend_arg, provider_arg, remote_arg)?;
 
     let report = match backend_kind {
         SyncBackendArg::Folder => {
@@ -2896,13 +2896,15 @@ fn run_cli_sync(
                 .map_err(|error| format!("sync failed: {error}"))?
         }
         SyncBackendArg::Gdrive => {
-            let mut backend = sync::GoogleDriveBackend::from_remote(remote_arg)?;
+            let remote = configured_gdrive_remote(&config, remote_arg);
+            let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
             vault
                 .sync_with_backend(&mut backend)
                 .map_err(|error| format!("sync failed: {error}"))?
         }
         SyncBackendArg::Dropbox => {
-            let mut backend = sync::DropboxBackend::from_remote(remote_arg)?;
+            let remote = configured_dropbox_remote(&config, remote_arg);
+            let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
             vault
                 .sync_with_backend(&mut backend)
                 .map_err(|error| format!("sync failed: {error}"))?
@@ -2986,7 +2988,7 @@ fn run_cli_cloud_status(
     }
 
     let vault = unlock_cli_vault(&config)?;
-    let backend_kind = resolve_sync_backend_kind(backend_arg, provider_arg, remote_arg)?;
+    let backend_kind = resolve_sync_backend_kind(&config, backend_arg, provider_arg, remote_arg)?;
     let (target, preview) =
         preview_with_backend(&vault, &mut config, backend_kind, remote_arg, provider_arg)?;
     let integrity = vault
@@ -3052,7 +3054,7 @@ fn run_cli_cloud_recover(
     json_output: bool,
 ) -> Result<(), String> {
     let mut config = config::AppConfig::load_or_default();
-    let backend_kind = resolve_sync_backend_kind(backend_arg, provider_arg, remote_arg)?;
+    let backend_kind = resolve_sync_backend_kind(&config, backend_arg, provider_arg, remote_arg)?;
     let (target, recover_report) =
         recover_with_backend(&mut config, backend_kind, remote_arg, provider_arg)?;
     let vault = unlock_cli_vault(&config)?;
@@ -4191,7 +4193,8 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
             }
             let mut config = state.config;
             let vault = unlock_cli_vault(&config)?;
-            let backend_kind = resolve_sync_backend_kind(backend, None, remote.as_deref())?;
+            let backend_kind =
+                resolve_sync_backend_kind(&config, backend, None, remote.as_deref())?;
             let preview = match backend_kind {
                 SyncBackendArg::Folder => {
                     let remote_root =
@@ -4211,11 +4214,13 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
                         .map_err(|error| format!("sync preview failed: {error}"))?
                 }
                 SyncBackendArg::Gdrive => {
+                    let remote = configured_gdrive_remote(&config, remote.as_deref());
                     let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
                     sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                         .map_err(|error| format!("sync preview failed: {error}"))?
                 }
                 SyncBackendArg::Dropbox => {
+                    let remote = configured_dropbox_remote(&config, remote.as_deref());
                     let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
                     sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                         .map_err(|error| format!("sync preview failed: {error}"))?
@@ -4289,6 +4294,7 @@ fn read_cli_secret() -> Result<SecretString, String> {
 }
 
 fn resolve_sync_backend_kind(
+    config: &config::AppConfig,
     backend_arg: Option<SyncBackendArg>,
     provider_arg: Option<CloudProviderArg>,
     remote_arg: Option<&str>,
@@ -4319,6 +4325,19 @@ fn resolve_sync_backend_kind(
             "dropbox" => Ok(SyncBackendArg::Dropbox),
             other => Err(format!(
                 "invalid BSJ_SYNC_BACKEND '{other}'; expected folder, s3, webdav, gdrive, or dropbox"
+            )),
+        };
+    }
+
+    if let Some(value) = config.sync_backend_preference.as_deref() {
+        return match value {
+            "folder" => Ok(SyncBackendArg::Folder),
+            "s3" => Ok(SyncBackendArg::S3),
+            "webdav" => Ok(SyncBackendArg::Webdav),
+            "gdrive" => Ok(SyncBackendArg::Gdrive),
+            "dropbox" => Ok(SyncBackendArg::Dropbox),
+            other => Err(format!(
+                "invalid sync_backend_preference '{other}'; expected folder, s3, webdav, gdrive, or dropbox"
             )),
         };
     }
@@ -4436,15 +4455,17 @@ fn preview_with_backend(
             Ok((target, preview))
         }
         SyncBackendArg::Gdrive => {
-            let target = sync_target_label_gdrive(remote_arg);
-            let mut backend = sync::GoogleDriveBackend::from_remote(remote_arg)?;
+            let remote = configured_gdrive_remote(config, remote_arg);
+            let target = sync_target_label_gdrive(config, remote_arg);
+            let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
             let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                 .map_err(|error| format!("cloud status preview failed: {error}"))?;
             Ok((target, preview))
         }
         SyncBackendArg::Dropbox => {
-            let target = sync_target_label_dropbox(remote_arg);
-            let mut backend = sync::DropboxBackend::from_remote(remote_arg)?;
+            let remote = configured_dropbox_remote(config, remote_arg);
+            let target = sync_target_label_dropbox(config, remote_arg);
+            let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
             let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                 .map_err(|error| format!("cloud status preview failed: {error}"))?;
             Ok((target, preview))
@@ -4497,15 +4518,17 @@ fn recover_with_backend(
             Ok((target, report))
         }
         SyncBackendArg::Gdrive => {
-            let target = sync_target_label_gdrive(remote_arg);
-            let mut backend = sync::GoogleDriveBackend::from_remote(remote_arg)?;
+            let remote = configured_gdrive_remote(config, remote_arg);
+            let target = sync_target_label_gdrive(config, remote_arg);
+            let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
             let report = sync::recover_root(&config.vault_path, &mut backend)
                 .map_err(|error| format!("cloud recovery failed: {error}"))?;
             Ok((target, report))
         }
         SyncBackendArg::Dropbox => {
-            let target = sync_target_label_dropbox(remote_arg);
-            let mut backend = sync::DropboxBackend::from_remote(remote_arg)?;
+            let remote = configured_dropbox_remote(config, remote_arg);
+            let target = sync_target_label_dropbox(config, remote_arg);
+            let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
             let report = sync::recover_root(&config.vault_path, &mut backend)
                 .map_err(|error| format!("cloud recovery failed: {error}"))?;
             Ok((target, report))
@@ -4513,7 +4536,10 @@ fn recover_with_backend(
     }
 }
 
-fn sync_target_label_gdrive(remote_arg: Option<&str>) -> String {
+fn configured_gdrive_remote(
+    config: &config::AppConfig,
+    remote_arg: Option<&str>,
+) -> Option<String> {
     remote_arg
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -4524,11 +4550,25 @@ fn sync_target_label_gdrive(remote_arg: Option<&str>) -> String {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
-        .unwrap_or_else(|| "appDataFolder".to_string())
+        .or_else(|| {
+            config
+                .gdrive_folder_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
 }
 
-fn sync_target_label_dropbox(remote_arg: Option<&str>) -> String {
-    let raw = remote_arg
+fn sync_target_label_gdrive(config: &config::AppConfig, remote_arg: Option<&str>) -> String {
+    configured_gdrive_remote(config, remote_arg).unwrap_or_else(|| "appDataFolder".to_string())
+}
+
+fn configured_dropbox_remote(
+    config: &config::AppConfig,
+    remote_arg: Option<&str>,
+) -> Option<String> {
+    remote_arg
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
@@ -4538,6 +4578,18 @@ fn sync_target_label_dropbox(remote_arg: Option<&str>) -> String {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
+        .or_else(|| {
+            config
+                .dropbox_root
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+}
+
+fn sync_target_label_dropbox(config: &config::AppConfig, remote_arg: Option<&str>) -> String {
+    let raw = configured_dropbox_remote(config, remote_arg)
         .unwrap_or_else(|| "/BlueScreenJournal-Sync".to_string());
     if raw == "/" {
         return "/".to_string();
@@ -4750,6 +4802,9 @@ mod tests {
         let config = AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: None,
+            sync_backend_preference: None,
+            gdrive_folder_id: None,
+            dropbox_root: None,
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
             typewriter_mode: false,
@@ -4798,6 +4853,9 @@ mod tests {
         let config = AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: None,
+            sync_backend_preference: None,
+            gdrive_folder_id: None,
+            dropbox_root: None,
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
             typewriter_mode: false,
@@ -5397,6 +5455,76 @@ mod tests {
             }
             _ => panic!("expected cloud recover command"),
         }
+    }
+
+    #[test]
+    fn resolve_sync_backend_kind_uses_config_default_when_args_and_env_are_absent() {
+        let config = AppConfig {
+            vault_path: PathBuf::from("/tmp/vault"),
+            sync_target_path: None,
+            sync_backend_preference: Some("gdrive".to_string()),
+            gdrive_folder_id: None,
+            dropbox_root: None,
+            local_device_id: None,
+            device_nickname: "This Mac".to_string(),
+            typewriter_mode: false,
+            clock_12h: false,
+            show_seconds: false,
+            show_ruler: true,
+            show_footer_legend: true,
+            soundtrack_source: String::new(),
+            opening_line_template: String::new(),
+            daily_word_goal: None,
+            remember_passphrase_in_keychain: false,
+            first_run_coach_completed: false,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: Vec::new(),
+            export_history: Vec::new(),
+            search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
+            backup_retention: BackupRetentionConfig::default(),
+            macros: Vec::new(),
+        };
+
+        let backend = super::resolve_sync_backend_kind(&config, None, None, None).expect("backend");
+
+        assert!(matches!(backend, super::SyncBackendArg::Gdrive));
+    }
+
+    #[test]
+    fn configured_dropbox_remote_uses_config_when_env_and_arg_are_absent() {
+        let config = AppConfig {
+            vault_path: PathBuf::from("/tmp/vault"),
+            sync_target_path: None,
+            sync_backend_preference: None,
+            gdrive_folder_id: None,
+            dropbox_root: Some("/Shared Journal".to_string()),
+            local_device_id: None,
+            device_nickname: "This Mac".to_string(),
+            typewriter_mode: false,
+            clock_12h: false,
+            show_seconds: false,
+            show_ruler: true,
+            show_footer_legend: true,
+            soundtrack_source: String::new(),
+            opening_line_template: String::new(),
+            daily_word_goal: None,
+            remember_passphrase_in_keychain: false,
+            first_run_coach_completed: false,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: Vec::new(),
+            export_history: Vec::new(),
+            search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
+            backup_retention: BackupRetentionConfig::default(),
+            macros: Vec::new(),
+        };
+
+        let remote = super::configured_dropbox_remote(&config, None);
+
+        assert_eq!(remote.as_deref(), Some("/Shared Journal"));
     }
 
     fn sample_index_entry(date: (i32, u32, u32), conflict: bool, preview: &str) -> IndexEntry {

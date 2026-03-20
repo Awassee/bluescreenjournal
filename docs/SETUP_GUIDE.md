@@ -40,6 +40,7 @@ The installer:
 - installs docs and the man page
 - installs Bash, Zsh, and Fish completions
 - prints the exact `PATH` fix if needed
+- points new users back into the in-app `HELP`, `SETUP`, and `TOOLS` menus instead of requiring CLI follow-up
 
 The default public install path uses the prebuilt universal binary, so Rust and Cargo are not required.
 
@@ -114,6 +115,19 @@ bsj backup prune
 bsj restore ~/Documents/BlueScreenJournal/backups/backup-20260316T120000Z.bsjbak.enc --into ~/Documents/BlueScreenJournal-Restore
 bsj verify
 ```
+
+Menu-first sync setup:
+
+- `SETUP -> Cloud Provider Setup`
+  - folder sync detection for Google Drive, Dropbox, OneDrive, iCloud Drive, and Box
+  - direct Google Drive API mode
+  - direct Dropbox API mode
+- `SETUP -> Sync Backend Default`
+  - blank/auto, `folder`, `s3`, `webdav`, `gdrive`, `dropbox`
+- `SETUP -> Google Drive Folder ID`
+  - saved non-secret default target for direct Google Drive API sync
+- `SETUP -> Dropbox Root`
+  - saved non-secret default target for direct Dropbox API sync
 
 ## TUI Keys
 

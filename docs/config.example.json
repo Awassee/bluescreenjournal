@@ -1,6 +1,9 @@
 {
   "vault_path": "/Users/you/Documents/BlueScreenJournal",
   "sync_target_path": "/Users/you/Library/Mobile Documents/com~apple~CloudDocs/BlueScreenJournal",
+  "sync_backend_preference": "folder",
+  "gdrive_folder_id": "appDataFolder",
+  "dropbox_root": "/BlueScreenJournal-Sync",
   "local_device_id": null,
   "device_nickname": "This Mac",
   "typewriter_mode": false,

@@ -186,7 +186,7 @@ Fields:
   - if unset, CLI commands prompt securely
 - `BSJ_SYNC_BACKEND`
   - optional default sync backend
-  - values: `folder`, `s3`, `webdav`
+  - values: `folder`, `s3`, `webdav`, `gdrive`, `dropbox`
 - `BSJ_S3_BUCKET`
   - required for S3 sync unless `--remote s3://bucket/prefix` is provided
 - `BSJ_S3_PREFIX`
@@ -199,8 +199,46 @@ Fields:
   - optional WebDAV username
 - `BSJ_WEBDAV_PASSWORD`
   - required when `BSJ_WEBDAV_USERNAME` is set
+- `BSJ_GDRIVE_ACCESS_TOKEN`
+  - direct Google Drive API access token
+- `BSJ_GDRIVE_REFRESH_TOKEN`
+  - optional refresh token for direct Google Drive API sync
+- `BSJ_GDRIVE_CLIENT_ID`
+  - optional OAuth client id used with refresh flow
+- `BSJ_GDRIVE_CLIENT_SECRET`
+  - optional OAuth client secret used with refresh flow
+- `BSJ_GDRIVE_FOLDER_ID`
+  - optional direct Google Drive target folder id
+  - default if unset: `appDataFolder`
+- `BSJ_DROPBOX_ACCESS_TOKEN`
+  - direct Dropbox API access token
+- `BSJ_DROPBOX_REFRESH_TOKEN`
+  - optional refresh token for direct Dropbox API sync
+- `BSJ_DROPBOX_APP_KEY`
+  - optional OAuth app key used with refresh flow
+- `BSJ_DROPBOX_APP_SECRET`
+  - optional OAuth app secret used with refresh flow
+- `BSJ_DROPBOX_ROOT`
+  - optional direct Dropbox root path
+  - default if unset: `/BlueScreenJournal-Sync`
 
 Secrets are not written into `vault.json`.
+
+## Config-backed sync defaults
+
+These config keys are designed for menu-driven setup and non-secret defaults:
+
+- `sync_target_path`
+  - default folder sync location
+- `sync_backend_preference`
+  - saved backend default used when CLI args and `BSJ_SYNC_BACKEND` are absent
+  - values: blank/auto, `folder`, `s3`, `webdav`, `gdrive`, `dropbox`
+- `gdrive_folder_id`
+  - saved default direct Google Drive folder id
+- `dropbox_root`
+  - saved default direct Dropbox root path
+
+Secrets for direct cloud connectors still belong in env vars or a future secure store, not in config.
 
 ## Diagnostics And Logging
 

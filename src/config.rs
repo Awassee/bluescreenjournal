@@ -6,6 +6,9 @@ use thiserror::Error;
 const READABLE_SETTING_KEYS: &[&str] = &[
     "vault_path",
     "sync_target_path",
+    "sync_backend_preference",
+    "gdrive_folder_id",
+    "dropbox_root",
     "device_nickname",
     "typewriter_mode",
     "clock_12h",
@@ -28,6 +31,9 @@ const READABLE_SETTING_KEYS: &[&str] = &[
 const EDITABLE_SETTING_KEYS: &[&str] = &[
     "vault_path",
     "sync_target_path",
+    "sync_backend_preference",
+    "gdrive_folder_id",
+    "dropbox_root",
     "device_nickname",
     "typewriter_mode",
     "clock_12h",
@@ -62,6 +68,12 @@ pub struct AppConfig {
     pub vault_path: PathBuf,
     #[serde(default)]
     pub sync_target_path: Option<PathBuf>,
+    #[serde(default)]
+    pub sync_backend_preference: Option<String>,
+    #[serde(default)]
+    pub gdrive_folder_id: Option<String>,
+    #[serde(default)]
+    pub dropbox_root: Option<String>,
     #[serde(default)]
     pub local_device_id: Option<String>,
     #[serde(default = "default_device_nickname")]
@@ -210,6 +222,7 @@ impl AppConfig {
     pub fn load_or_default() -> Self {
         match Self::load() {
             Ok(Some(mut config)) => {
+                normalize_sync_config_fields(&mut config);
                 normalize_search_presets(&mut config.search_presets);
                 normalize_timeline_presets(&mut config.timeline_presets);
                 config
@@ -217,6 +230,9 @@ impl AppConfig {
             Ok(None) | Err(_) => Self {
                 vault_path: default_vault_path(),
                 sync_target_path: None,
+                sync_backend_preference: None,
+                gdrive_folder_id: None,
+                dropbox_root: None,
                 local_device_id: None,
                 device_nickname: default_device_nickname(),
                 typewriter_mode: false,
@@ -339,6 +355,18 @@ pub fn get_setting_value(config: &AppConfig, key: &str) -> Result<String, String
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "null".to_string())),
+        "sync_backend_preference" => Ok(config
+            .sync_backend_preference
+            .clone()
+            .unwrap_or_else(|| "null".to_string())),
+        "gdrive_folder_id" => Ok(config
+            .gdrive_folder_id
+            .clone()
+            .unwrap_or_else(|| "null".to_string())),
+        "dropbox_root" => Ok(config
+            .dropbox_root
+            .clone()
+            .unwrap_or_else(|| "null".to_string())),
         "device_nickname" => Ok(config.device_nickname.clone()),
         "typewriter_mode" => Ok(config.typewriter_mode.to_string()),
         "clock_12h" => Ok(config.clock_12h.to_string()),
@@ -381,6 +409,27 @@ pub fn set_setting_value(config: &mut AppConfig, key: &str, value: &str) -> Resu
                 .sync_target_path
                 .as_ref()
                 .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "null".to_string()))
+        }
+        "sync_backend_preference" => {
+            config.sync_backend_preference = normalize_sync_backend_preference_value(value)?;
+            Ok(config
+                .sync_backend_preference
+                .clone()
+                .unwrap_or_else(|| "null".to_string()))
+        }
+        "gdrive_folder_id" => {
+            config.gdrive_folder_id = normalize_optional_text_input(value);
+            Ok(config
+                .gdrive_folder_id
+                .clone()
+                .unwrap_or_else(|| "null".to_string()))
+        }
+        "dropbox_root" => {
+            config.dropbox_root = normalize_dropbox_root_value(value)?;
+            Ok(config
+                .dropbox_root
+                .clone()
                 .unwrap_or_else(|| "null".to_string()))
         }
         "device_nickname" => {
@@ -473,6 +522,98 @@ fn normalize_optional_path(value: &str) -> Option<PathBuf> {
         None
     } else {
         Some(expand_path_like(trimmed))
+    }
+}
+
+fn normalize_sync_config_fields(config: &mut AppConfig) {
+    config.sync_backend_preference = config.sync_backend_preference.take().and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            match normalize_sync_backend_preference_value(trimmed) {
+                Ok(normalized) => normalized,
+                Err(_) => Some(trimmed.to_ascii_lowercase()),
+            }
+        }
+    });
+    config.gdrive_folder_id = config
+        .gdrive_folder_id
+        .take()
+        .and_then(|value| normalize_optional_text_input(&value));
+    config.dropbox_root = config.dropbox_root.take().and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            match normalize_dropbox_root_value(trimmed) {
+                Ok(normalized) => normalized,
+                Err(_) => Some(trimmed.to_string()),
+            }
+        }
+    });
+}
+
+pub fn normalize_sync_backend_preference_value(value: &str) -> Result<Option<String>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("null")
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("unset")
+        || trimmed.eq_ignore_ascii_case("auto")
+    {
+        return Ok(None);
+    }
+
+    match trimmed.to_ascii_lowercase().as_str() {
+        "folder" => Ok(Some("folder".to_string())),
+        "s3" => Ok(Some("s3".to_string())),
+        "webdav" => Ok(Some("webdav".to_string())),
+        "gdrive" | "google-drive" => Ok(Some("gdrive".to_string())),
+        "dropbox" => Ok(Some("dropbox".to_string())),
+        _ => Err(
+            "sync_backend_preference must be blank, auto, folder, s3, webdav, gdrive, or dropbox"
+                .to_string(),
+        ),
+    }
+}
+
+fn normalize_optional_text_input(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("null")
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("unset")
+    {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_dropbox_root_value(value: &str) -> Result<Option<String>, String> {
+    let Some(raw) = normalize_optional_text_input(value) else {
+        return Ok(None);
+    };
+    let trimmed = raw
+        .strip_prefix("dropbox://")
+        .unwrap_or(raw.as_str())
+        .trim()
+        .to_string();
+    let normalized = if trimmed.is_empty() {
+        "/BlueScreenJournal-Sync".to_string()
+    } else if trimmed.starts_with('/') {
+        trimmed
+    } else {
+        format!("/{trimmed}")
+    };
+    if normalized.contains('\\') {
+        return Err("dropbox_root must use forward slashes".to_string());
+    }
+    if normalized == "/" {
+        Ok(Some("/".to_string()))
+    } else {
+        Ok(Some(normalized.trim_end_matches('/').to_string()))
     }
 }
 
@@ -645,6 +786,9 @@ mod tests {
         AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: None,
+            sync_backend_preference: None,
+            gdrive_folder_id: None,
+            dropbox_root: None,
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
             typewriter_mode: false,
@@ -686,6 +830,9 @@ mod tests {
         let config = AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: Some(PathBuf::from("/tmp/remote")),
+            sync_backend_preference: Some("gdrive".to_string()),
+            gdrive_folder_id: Some("appDataFolder".to_string()),
+            dropbox_root: Some("/BlueScreenJournal-Sync".to_string()),
             local_device_id: Some("device".to_string()),
             device_nickname: "QA Mac".to_string(),
             typewriter_mode: true,
@@ -731,6 +878,18 @@ mod tests {
             "5"
         );
         assert_eq!(
+            get_setting_value(&config, "sync_backend_preference").expect("sync backend"),
+            "gdrive"
+        );
+        assert_eq!(
+            get_setting_value(&config, "gdrive_folder_id").expect("gdrive folder"),
+            "appDataFolder"
+        );
+        assert_eq!(
+            get_setting_value(&config, "dropbox_root").expect("dropbox root"),
+            "/BlueScreenJournal-Sync"
+        );
+        assert_eq!(
             get_setting_value(&config, "local_device_id").expect("device id"),
             "device"
         );
@@ -773,6 +932,9 @@ mod tests {
         let mut config = AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: None,
+            sync_backend_preference: None,
+            gdrive_folder_id: None,
+            dropbox_root: None,
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
             typewriter_mode: false,
@@ -796,6 +958,11 @@ mod tests {
         };
 
         set_setting_value(&mut config, "sync_target_path", "/tmp/remote").expect("sync target");
+        set_setting_value(&mut config, "sync_backend_preference", "google-drive")
+            .expect("sync backend");
+        set_setting_value(&mut config, "gdrive_folder_id", "folder-123").expect("gdrive folder");
+        set_setting_value(&mut config, "dropbox_root", "dropbox://Team Journal")
+            .expect("dropbox root");
         set_setting_value(&mut config, "backup_retention.weekly", "9").expect("weekly");
         set_setting_value(&mut config, "typewriter_mode", "true").expect("typewriter");
         set_setting_value(&mut config, "clock_12h", "true").expect("clock");
@@ -815,6 +982,9 @@ mod tests {
         set_setting_value(&mut config, "daily_word_goal", "500").expect("word goal");
 
         assert_eq!(config.sync_target_path, Some(PathBuf::from("/tmp/remote")));
+        assert_eq!(config.sync_backend_preference.as_deref(), Some("gdrive"));
+        assert_eq!(config.gdrive_folder_id.as_deref(), Some("folder-123"));
+        assert_eq!(config.dropbox_root.as_deref(), Some("/Team Journal"));
         assert_eq!(config.backup_retention.weekly, 9);
         assert!(config.typewriter_mode);
         assert!(config.clock_12h);
@@ -832,6 +1002,9 @@ mod tests {
         let mut config = AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: Some(PathBuf::from("/tmp/remote")),
+            sync_backend_preference: Some("dropbox".to_string()),
+            gdrive_folder_id: Some("folder-123".to_string()),
+            dropbox_root: Some("/Team Journal".to_string()),
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
             typewriter_mode: false,
@@ -855,7 +1028,21 @@ mod tests {
         };
 
         set_setting_value(&mut config, "sync_target_path", "unset").expect("unset");
+        set_setting_value(&mut config, "sync_backend_preference", "auto").expect("clear backend");
+        set_setting_value(&mut config, "gdrive_folder_id", "").expect("clear gdrive");
+        set_setting_value(&mut config, "dropbox_root", "unset").expect("clear dropbox");
         assert!(config.sync_target_path.is_none());
+        assert!(config.sync_backend_preference.is_none());
+        assert!(config.gdrive_folder_id.is_none());
+        assert!(config.dropbox_root.is_none());
+    }
+
+    #[test]
+    fn set_setting_value_rejects_invalid_sync_backend_preference() {
+        let mut config = empty_test_config();
+        let error = set_setting_value(&mut config, "sync_backend_preference", "ftp")
+            .expect_err("invalid backend");
+        assert!(error.contains("sync_backend_preference"));
     }
 
     #[test]

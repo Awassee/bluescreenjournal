@@ -234,6 +234,21 @@ pub fn render_settings_report(
         "sync_target_path",
         option_path(&config.sync_target_path),
     );
+    push_row(
+        &mut output,
+        "sync_backend_preference",
+        option_string(&config.sync_backend_preference),
+    );
+    push_row(
+        &mut output,
+        "gdrive_folder_id",
+        option_string(&config.gdrive_folder_id),
+    );
+    push_row(
+        &mut output,
+        "dropbox_root",
+        option_string(&config.dropbox_root),
+    );
     writeln!(&mut output).unwrap();
 
     writeln!(&mut output, "User-editable config").unwrap();
@@ -737,6 +752,9 @@ mod tests {
         let config = AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: Some(PathBuf::from("/tmp/remote")),
+            sync_backend_preference: Some("dropbox".to_string()),
+            gdrive_folder_id: Some("appDataFolder".to_string()),
+            dropbox_root: Some("/BlueScreenJournal-Sync".to_string()),
             local_device_id: Some("abc123".to_string()),
             device_nickname: "QA Mac".to_string(),
             typewriter_mode: true,
@@ -816,6 +834,10 @@ mod tests {
         assert!(report.contains("set"));
         assert!(report.contains("insert_template"));
         assert!(report.contains("opening_line_template"));
+        assert!(report.contains("sync_backend_preference"));
+        assert!(report.contains("dropbox"));
+        assert!(report.contains("gdrive_folder_id"));
+        assert!(report.contains("dropbox_root"));
         assert!(report.contains("present (32 hex chars)"));
         assert!(!report.contains("TODAY\n"));
     }

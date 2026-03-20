@@ -100,6 +100,16 @@ bsj cloud recover --backend folder --remote ~/Library/Mobile\ Documents/com~appl
 bsj cloud recover --provider google-drive
 ```
 
+Menu-first alternative:
+
+- open `SETUP -> Cloud Provider Setup`
+- choose a folder sync provider, or choose direct Google Drive / Dropbox API mode
+- if you choose direct API mode, keep credentials in env vars and use:
+  - `SETUP -> Sync Backend Default`
+  - `SETUP -> Google Drive Folder ID`
+  - `SETUP -> Dropbox Root`
+- verify everything from `TOOLS -> Sync Center` and `TOOLS -> Cloud Status`
+
 ## 8. Optional: run review and timeline summaries
 
 These commands are useful for weekly check-ins and automation:

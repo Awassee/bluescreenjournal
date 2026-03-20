@@ -1,5 +1,5 @@
 use crate::{
-    config::AppConfig,
+    config::{self, AppConfig},
     help::EnvironmentSettings,
     vault::{IntegrityReport, VaultMetadata},
 };
@@ -126,57 +126,53 @@ pub fn build_report(input: DoctorInputs<'_>) -> DoctorReport {
         checks.push(check("vault_metadata", status, epoch_detail));
     }
 
-    let sync_status = match input
-        .env
-        .sync_backend
-        .as_deref()
-        .map(|value| value.to_ascii_lowercase())
-    {
-        Some(value) if value == "folder" => {
+    let sync_status = match effective_sync_backend(input.config, input.env) {
+        Ok(Some((backend, source))) if backend == "folder" => {
             if let Some(path) = &input.config.sync_target_path {
                 if path.exists() {
                     check(
                         "sync",
                         DoctorStatus::Ok,
-                        format!("folder sync target {}", path.display()),
+                        format!("folder sync target {} ({source})", path.display()),
                     )
                 } else {
                     check(
                         "sync",
                         DoctorStatus::Warn,
-                        format!("folder sync target missing: {}", path.display()),
+                        format!("folder sync target missing: {} ({source})", path.display()),
                     )
                 }
             } else {
                 check(
                     "sync",
                     DoctorStatus::Warn,
-                    "BSJ_SYNC_BACKEND=folder is set but sync_target_path is not configured"
-                        .to_string(),
+                    format!(
+                        "folder sync selected via {source} but sync_target_path is not configured"
+                    ),
                 )
             }
         }
-        Some(value) if value == "s3" => {
+        Ok(Some((backend, source))) if backend == "s3" => {
             if input.env.s3_bucket_set {
                 check(
                     "sync",
                     DoctorStatus::Ok,
-                    "S3 sync environment looks configured".to_string(),
+                    format!("S3 sync environment looks configured ({source})"),
                 )
             } else {
                 check(
                     "sync",
                     DoctorStatus::Fail,
-                    "BSJ_SYNC_BACKEND=s3 is set but BSJ_S3_BUCKET is missing".to_string(),
+                    format!("S3 sync selected via {source} but BSJ_S3_BUCKET is missing"),
                 )
             }
         }
-        Some(value) if value == "webdav" => {
+        Ok(Some((backend, source))) if backend == "webdav" => {
             if !input.env.webdav_url_set {
                 check(
                     "sync",
                     DoctorStatus::Fail,
-                    "BSJ_SYNC_BACKEND=webdav is set but BSJ_WEBDAV_URL is missing".to_string(),
+                    format!("WebDAV sync selected via {source} but BSJ_WEBDAV_URL is missing"),
                 )
             } else if input.env.webdav_username_set && !input.env.webdav_password_set {
                 check(
@@ -188,16 +184,69 @@ pub fn build_report(input: DoctorInputs<'_>) -> DoctorReport {
                 check(
                     "sync",
                     DoctorStatus::Ok,
-                    "WebDAV sync environment looks configured".to_string(),
+                    format!("WebDAV sync environment looks configured ({source})"),
                 )
             }
         }
-        Some(value) => check(
+        Ok(Some((backend, source))) if backend == "gdrive" => {
+            let target = if input.env.gdrive_folder_id_set {
+                "env:BSJ_GDRIVE_FOLDER_ID".to_string()
+            } else {
+                input
+                    .config
+                    .gdrive_folder_id
+                    .clone()
+                    .unwrap_or_else(|| "appDataFolder".to_string())
+            };
+            if gdrive_auth_ready(input.env) {
+                check(
+                    "sync",
+                    DoctorStatus::Ok,
+                    format!("Google Drive API sync target {target} ({source})"),
+                )
+            } else {
+                check(
+                    "sync",
+                    DoctorStatus::Fail,
+                    format!(
+                        "Google Drive API sync selected via {source} but credentials are missing (set BSJ_GDRIVE_ACCESS_TOKEN or refresh/client credentials)"
+                    ),
+                )
+            }
+        }
+        Ok(Some((backend, source))) if backend == "dropbox" => {
+            let target = if input.env.dropbox_root_set {
+                "env:BSJ_DROPBOX_ROOT".to_string()
+            } else {
+                input
+                    .config
+                    .dropbox_root
+                    .clone()
+                    .unwrap_or_else(|| "/BlueScreenJournal-Sync".to_string())
+            };
+            if dropbox_auth_ready(input.env) {
+                check(
+                    "sync",
+                    DoctorStatus::Ok,
+                    format!("Dropbox API sync target {target} ({source})"),
+                )
+            } else {
+                check(
+                    "sync",
+                    DoctorStatus::Fail,
+                    format!(
+                        "Dropbox API sync selected via {source} but credentials are missing (set BSJ_DROPBOX_ACCESS_TOKEN or refresh/app credentials)"
+                    ),
+                )
+            }
+        }
+        Ok(Some((backend, source))) => check(
             "sync",
             DoctorStatus::Warn,
-            format!("unknown BSJ_SYNC_BACKEND value '{value}'"),
+            format!("unknown sync backend '{backend}' ({source})"),
         ),
-        None => {
+        Err(error) => check("sync", DoctorStatus::Warn, error),
+        Ok(None) => {
             if let Some(path) = &input.config.sync_target_path {
                 let status = if path.exists() {
                     DoctorStatus::Ok
@@ -298,6 +347,41 @@ fn check(name: &str, status: DoctorStatus, detail: String) -> DoctorCheck {
     }
 }
 
+fn effective_sync_backend(
+    config: &AppConfig,
+    env: &EnvironmentSettings,
+) -> Result<Option<(String, &'static str)>, String> {
+    if let Some(value) = env.sync_backend.as_deref() {
+        return config::normalize_sync_backend_preference_value(value)
+            .map(|backend| backend.map(|backend| (backend, "env override")))
+            .map_err(|_| {
+                format!(
+                    "invalid BSJ_SYNC_BACKEND '{value}'; expected folder, s3, webdav, gdrive, or dropbox"
+                )
+            });
+    }
+
+    if let Some(value) = config.sync_backend_preference.as_deref() {
+        return config::normalize_sync_backend_preference_value(value)
+            .map(|backend| backend.map(|backend| (backend, "setup default")))
+            .map_err(|_| format!("invalid config sync_backend_preference '{value}'"));
+    }
+
+    Ok(None)
+}
+
+fn gdrive_auth_ready(env: &EnvironmentSettings) -> bool {
+    env.gdrive_access_token_set
+        || (env.gdrive_refresh_token_set
+            && env.gdrive_client_id_set
+            && env.gdrive_client_secret_set)
+}
+
+fn dropbox_auth_ready(env: &EnvironmentSettings) -> bool {
+    env.dropbox_access_token_set
+        || (env.dropbox_refresh_token_set && env.dropbox_app_key_set && env.dropbox_app_secret_set)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DoctorInputs, DoctorStatus, build_report, render_text};
@@ -313,6 +397,9 @@ mod tests {
         let config = AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: None,
+            sync_backend_preference: None,
+            gdrive_folder_id: None,
+            dropbox_root: None,
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
             typewriter_mode: false,
@@ -361,6 +448,9 @@ mod tests {
         let config = AppConfig {
             vault_path: PathBuf::from("/tmp/vault"),
             sync_target_path: None,
+            sync_backend_preference: None,
+            gdrive_folder_id: None,
+            dropbox_root: None,
             local_device_id: None,
             device_nickname: "This Mac".to_string(),
             typewriter_mode: false,
@@ -425,6 +515,71 @@ mod tests {
                 .checks
                 .iter()
                 .any(|check| check.name == "sync" && check.status == DoctorStatus::Fail)
+        );
+    }
+
+    #[test]
+    fn doctor_uses_configured_google_drive_default_when_env_backend_is_unset() {
+        let config = AppConfig {
+            vault_path: PathBuf::from("/tmp/vault"),
+            sync_target_path: None,
+            sync_backend_preference: Some("gdrive".to_string()),
+            gdrive_folder_id: Some("folder-123".to_string()),
+            dropbox_root: None,
+            local_device_id: None,
+            device_nickname: "This Mac".to_string(),
+            typewriter_mode: false,
+            clock_12h: false,
+            show_seconds: false,
+            show_ruler: true,
+            show_footer_legend: true,
+            soundtrack_source: String::new(),
+            opening_line_template: "JOURNAL ENTRY {DATE}".to_string(),
+            daily_word_goal: None,
+            remember_passphrase_in_keychain: false,
+            first_run_coach_completed: false,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: Vec::new(),
+            export_history: Vec::new(),
+            search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
+            backup_retention: BackupRetentionConfig::default(),
+            macros: Vec::new(),
+        };
+        let env = EnvironmentSettings {
+            gdrive_access_token_set: true,
+            ..EnvironmentSettings::default()
+        };
+
+        let report = build_report(DoctorInputs {
+            config_path: PathBuf::from("/tmp/config.json").as_path(),
+            config_exists: true,
+            config_error: None,
+            config: &config,
+            log_path: PathBuf::from("/tmp/bsj.log").as_path(),
+            env: &env,
+            vault_exists: false,
+            vault_metadata: None,
+            vault_metadata_error: None,
+            integrity_report: None,
+            unlock_error: None,
+            entry_count: None,
+            backup_count: None,
+            conflict_count: None,
+        });
+
+        assert!(report.ok);
+        let sync_check = report
+            .checks
+            .iter()
+            .find(|check| check.name == "sync")
+            .expect("sync check");
+        assert_eq!(sync_check.status, DoctorStatus::Ok);
+        assert!(
+            sync_check
+                .detail
+                .contains("Google Drive API sync target folder-123")
         );
     }
 }
