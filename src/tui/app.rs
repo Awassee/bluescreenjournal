@@ -1158,6 +1158,12 @@ impl SyncStatusOverlay {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingSyncMode {
+    FullSync,
+    CloudRecovery,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuId {
     File,
     Edit,
@@ -1574,6 +1580,8 @@ pub enum MenuAction {
     WeekCompass,
     InsightsCenter,
     SyncCenter,
+    CloudStatus,
+    CloudRecover,
     ToggleSoundtrack,
     AiSummary,
     AiCoach,
@@ -1939,6 +1947,7 @@ pub struct App {
     pending_recovery_metadata: Option<EntryMetadata>,
     merge_context: Option<MergeContext>,
     pending_sync_request: Option<SyncRequest>,
+    pending_sync_mode: Option<PendingSyncMode>,
     reveal_codes: bool,
     last_viewport_height: usize,
     last_viewport_width: usize,
@@ -2028,6 +2037,7 @@ impl App {
             pending_recovery_metadata: None,
             merge_context: None,
             pending_sync_request: None,
+            pending_sync_mode: None,
             reveal_codes: false,
             last_viewport_height: 23,
             last_viewport_width: 80,
@@ -3162,6 +3172,18 @@ impl App {
                     label: "Sync Center".to_string(),
                     detail: "PLAN".to_string(),
                     action: MenuAction::SyncCenter,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Cloud Status".to_string(),
+                    detail: "11".to_string(),
+                    action: MenuAction::CloudStatus,
+                    enabled: self.vault.is_some(),
+                },
+                MenuItem {
+                    label: "Recover From Cloud".to_string(),
+                    detail: "PULL".to_string(),
+                    action: MenuAction::CloudRecover,
                     enabled: self.vault.is_some(),
                 },
                 MenuItem {
@@ -6967,6 +6989,18 @@ impl App {
                 },
             },
             PickerItem {
+                title: "Cloud Status + Integrity".to_string(),
+                detail: self.integrity_status_label(),
+                keywords: "cloud status integrity verify recovery".to_string(),
+                action: PickerAction::Menu(MenuAction::CloudStatus),
+            },
+            PickerItem {
+                title: "Recover Missing Cloud Data".to_string(),
+                detail: "pull-only restore".to_string(),
+                keywords: "cloud recover pull restore missing revisions".to_string(),
+                action: PickerAction::Menu(MenuAction::CloudRecover),
+            },
+            PickerItem {
                 title: "Recent Sync Runs".to_string(),
                 detail: truncate_for_picker(&last_sync_detail, 40),
                 keywords: "sync history runs last sync".to_string(),
@@ -6996,6 +7030,70 @@ impl App {
             items,
             "No sync actions available.",
         ));
+    }
+
+    fn open_cloud_status_overlay(&mut self) {
+        if self.vault.is_none() {
+            self.flash_status("LOCKED.");
+            return;
+        }
+        self.refresh_integrity_status();
+        let conflicts = self
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.list_conflicted_dates().ok())
+            .map(|dates| dates.len())
+            .unwrap_or(0);
+        let sync_status = self
+            .config
+            .last_sync
+            .as_ref()
+            .map(|sync| {
+                format!(
+                    "{} {} +{} / -{}",
+                    sync.timestamp, sync.backend, sync.pushed, sync.pulled
+                )
+            })
+            .unwrap_or_else(|| "never".to_string());
+
+        let lines = match self.resolve_sync_request() {
+            Ok(request) => match self.sync_preview_report(&request) {
+                Ok(preview) => vec![
+                    format!("Backend      : {}", request.backend_label()),
+                    format!("Target       : {}", request.target_label()),
+                    format!("Local revs   : {}", preview.local_revisions),
+                    format!("Remote revs  : {}", preview.remote_revisions),
+                    format!("Upload queue : {}", preview.local_only_revisions),
+                    format!("Download q   : {}", preview.remote_only_revisions),
+                    format!("Shared revs  : {}", preview.shared_revisions),
+                    format!("Conflicts    : {conflicts}"),
+                    format!("Integrity    : {}", self.integrity_status_label()),
+                    format!("Last sync    : {sync_status}"),
+                    String::new(),
+                    "Recovery flow".to_string(),
+                    "  1) TOOLS -> Recover From Cloud (pull-only)".to_string(),
+                    "  2) TOOLS -> Verify Integrity / Integrity Details".to_string(),
+                ],
+                Err(error) => vec![
+                    format!("Backend      : {}", request.backend_label()),
+                    format!("Target       : {}", request.target_label()),
+                    format!("Preview      : {error}"),
+                    format!("Conflicts    : {conflicts}"),
+                    format!("Integrity    : {}", self.integrity_status_label()),
+                    format!("Last sync    : {sync_status}"),
+                ],
+            },
+            Err(error) => vec![
+                "Backend      : UNCONFIGURED".to_string(),
+                format!("Error        : {error}"),
+                format!("Conflicts    : {conflicts}"),
+                format!("Integrity    : {}", self.integrity_status_label()),
+                format!("Last sync    : {sync_status}"),
+                String::new(),
+                "Set sync target via SETUP -> Sync Target Path.".to_string(),
+            ],
+        };
+        self.open_info_overlay("Cloud Status", lines.join("\n"));
     }
 
     fn open_today_brief_overlay(&mut self) {
@@ -8230,6 +8328,8 @@ impl App {
             MenuAction::WeekCompass => self.open_week_compass_overlay(),
             MenuAction::InsightsCenter => self.open_insights_center_overlay(),
             MenuAction::SyncCenter => self.open_sync_center_overlay(),
+            MenuAction::CloudStatus => self.open_cloud_status_overlay(),
+            MenuAction::CloudRecover => self.begin_cloud_recovery(),
             MenuAction::ToggleSoundtrack => self.toggle_soundtrack_playback(),
             MenuAction::AiSummary => self.open_ai_summary_overlay(),
             MenuAction::AiCoach => self.open_ai_coach_overlay(),
@@ -8520,6 +8620,41 @@ impl App {
             draft_notice,
         )));
         self.pending_sync_request = Some(request);
+        self.pending_sync_mode = Some(PendingSyncMode::FullSync);
+    }
+
+    fn begin_cloud_recovery(&mut self) {
+        if self.vault.is_none() {
+            self.flash_status("LOCKED.");
+            return;
+        }
+
+        let draft_notice = self.dirty;
+        if draft_notice {
+            self.autosave_current_date();
+        }
+
+        let request = match self.resolve_sync_request() {
+            Ok(request) => request,
+            Err(error) => {
+                self.overlay = Some(Overlay::SyncStatus(SyncStatusOverlay {
+                    backend_label: "RECOVERY".to_string(),
+                    target_label: "UNCONFIGURED".to_string(),
+                    draft_notice,
+                    phase: SyncPhase::Error { message: error },
+                }));
+                self.flash_status("RECOVERY FAILED.");
+                return;
+            }
+        };
+
+        self.overlay = Some(Overlay::SyncStatus(SyncStatusOverlay::pending(
+            request.backend_label().to_string(),
+            request.target_label().to_string(),
+            draft_notice,
+        )));
+        self.pending_sync_request = Some(request);
+        self.pending_sync_mode = Some(PendingSyncMode::CloudRecovery);
     }
 
     fn create_backup_now(&mut self) {
@@ -8805,6 +8940,7 @@ impl App {
         self.pending_archive_confirm = None;
         self.last_save_receipt = None;
         self.clear_dirty_tracking();
+        self.pending_sync_mode = None;
     }
 
     fn rebuild_search_index(&mut self) {
@@ -8822,12 +8958,19 @@ impl App {
         let Some(request) = self.pending_sync_request.take() else {
             return;
         };
+        let mode = self
+            .pending_sync_mode
+            .take()
+            .unwrap_or(PendingSyncMode::FullSync);
 
         if let Some(Overlay::SyncStatus(sync_status)) = &mut self.overlay {
             sync_status.mark_running();
         }
 
-        let result = self.execute_sync_request(&request);
+        let result = match mode {
+            PendingSyncMode::FullSync => self.execute_sync_request(&request),
+            PendingSyncMode::CloudRecovery => self.execute_cloud_recovery_request(&request),
+        };
         match result {
             Ok(report) => {
                 self.refresh_integrity_status();
@@ -8836,14 +8979,20 @@ impl App {
                     sync_status.set_complete(report, integrity_status.as_ref());
                 }
                 self.record_sync_result(&request, None);
-                self.flash_status("SYNC COMPLETE.");
+                self.flash_status(match mode {
+                    PendingSyncMode::FullSync => "SYNC COMPLETE.",
+                    PendingSyncMode::CloudRecovery => "CLOUD RECOVERY COMPLETE.",
+                });
             }
             Err(error) => {
                 if let Some(Overlay::SyncStatus(sync_status)) = &mut self.overlay {
                     sync_status.set_error(error.clone());
                 }
                 self.record_sync_result(&request, Some(error.clone()));
-                self.flash_status("SYNC FAILED.");
+                self.flash_status(match mode {
+                    PendingSyncMode::FullSync => "SYNC FAILED.",
+                    PendingSyncMode::CloudRecovery => "CLOUD RECOVERY FAILED.",
+                });
             }
         }
     }
@@ -8871,6 +9020,43 @@ impl App {
                     .map_err(|error| format!("sync failed: {error}"))
             }
         }
+    }
+
+    fn execute_cloud_recovery_request(
+        &self,
+        request: &SyncRequest,
+    ) -> Result<vault::SyncReport, String> {
+        let vault = self
+            .vault
+            .as_ref()
+            .ok_or_else(|| "Vault locked.".to_string())?;
+
+        let report = match request {
+            SyncRequest::Folder { remote_root, .. } => {
+                let mut backend = sync::FolderBackend::new(remote_root.clone());
+                sync::recover_root(&self.vault_path, &mut backend)
+                    .map_err(|error| format!("cloud recovery failed: {error}"))?
+            }
+            SyncRequest::S3 { .. } => {
+                let mut backend = sync::S3Backend::from_remote(None)?;
+                sync::recover_root(&self.vault_path, &mut backend)
+                    .map_err(|error| format!("cloud recovery failed: {error}"))?
+            }
+            SyncRequest::WebDav { .. } => {
+                let mut backend = sync::WebDavBackend::from_remote(None)?;
+                sync::recover_root(&self.vault_path, &mut backend)
+                    .map_err(|error| format!("cloud recovery failed: {error}"))?
+            }
+        };
+
+        let conflicts = vault
+            .list_conflicted_dates()
+            .map_err(|error| format!("cloud recovery conflict scan failed: {error}"))?;
+        Ok(vault::SyncReport {
+            pulled: report.pulled,
+            pushed: report.pushed,
+            conflicts,
+        })
     }
 
     fn resolve_sync_request(&self) -> Result<SyncRequest, String> {
@@ -9967,6 +10153,7 @@ impl App {
         if let Some(mut entry_metadata) = self.pending_recovery_metadata.take() {
             wipe_entry_metadata(&mut entry_metadata);
         }
+        self.pending_sync_mode = None;
         self.wipe_merge_context();
     }
 
@@ -11198,10 +11385,10 @@ fn next_entry_month(entry_dates: &BTreeSet<NaiveDate>, selected: NaiveDate) -> O
 mod tests {
     use super::{
         ARCHIVE_CONFIRM_OLDER_THAN_DAYS, App, ConflictOverlay, DatePicker, ExportFormatUi,
-        ExportPrompt, IndexScope, IndexState, MenuAction, MenuId, Overlay, PickerAction,
-        PickerItem, PickerOverlay, RestorePrompt, SearchField, SearchJump, SearchOverlay,
-        SettingField, SettingPrompt, SetupWizard, SyncPhase, SyncRequest, SyncStatusOverlay,
-        compute_streak_metrics, default_export_path, encode_wav_pcm16_mono,
+        ExportPrompt, IndexScope, IndexState, MenuAction, MenuId, Overlay, PendingSyncMode,
+        PickerAction, PickerItem, PickerOverlay, RestorePrompt, SearchField, SearchJump,
+        SearchOverlay, SettingField, SettingPrompt, SetupWizard, SyncPhase, SyncRequest,
+        SyncStatusOverlay, compute_streak_metrics, default_export_path, encode_wav_pcm16_mono,
         extract_midi_note_events, format_mm_ss, format_reveal_codes, is_quick_save_command_line,
         macro_key_matches, parse_optional_overlay_date, resolve_recovery_text,
         soundtrack_cache_extension, soundtrack_cache_path, soundtrack_source_is_midi,
@@ -13408,6 +13595,8 @@ mod tests {
         assert!(labels.contains(&"Today Brief".to_string()));
         assert!(labels.contains(&"Week Compass".to_string()));
         assert!(labels.contains(&"SYSOP Center".to_string()));
+        assert!(labels.contains(&"Cloud Status".to_string()));
+        assert!(labels.contains(&"Recover From Cloud".to_string()));
     }
 
     #[test]
@@ -13437,6 +13626,34 @@ mod tests {
         app.perform_menu_action(MenuAction::TodayBrief, 20);
 
         assert!(matches!(app.overlay(), Some(Overlay::Info(info)) if info.title == "Today Brief"));
+    }
+
+    #[test]
+    fn cloud_status_menu_action_opens_info_overlay_when_unlocked() {
+        let dir = tempdir().expect("tempdir");
+        let local_root = dir.path().join("local");
+        let remote_root = dir.path().join("remote");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+
+        let metadata =
+            vault::create_vault(&local_root, &passphrase, None, "Local").expect("create local");
+        vault::create_vault(&remote_root, &passphrase, None, "Remote").expect("create remote");
+        let local_metadata = std::fs::read(local_root.join("vault.json")).expect("local metadata");
+        std::fs::write(remote_root.join("vault.json"), local_metadata).expect("align metadata");
+
+        let unlocked =
+            vault::unlock_vault_with_device(&local_root, &passphrase, metadata.device_id)
+                .expect("unlock");
+        let mut app =
+            App::with_initial_date(Some(NaiveDate::from_ymd_opt(2026, 3, 18).expect("date")));
+        app.vault_path = local_root;
+        app.vault = Some(unlocked);
+        app.config.sync_target_path = Some(remote_root);
+
+        app.perform_menu_action(MenuAction::CloudStatus, 20);
+
+        assert!(matches!(app.overlay(), Some(Overlay::Info(info)) if info.title == "Cloud Status"));
     }
 
     #[test]
@@ -14282,6 +14499,8 @@ mod tests {
         assert!(labels.contains(&"Insights Center".to_string()));
         assert!(labels.contains(&"AI Summary (Optional)".to_string()));
         assert!(labels.contains(&"AI Coach Mode (Optional)".to_string()));
+        assert!(labels.contains(&"Cloud Status".to_string()));
+        assert!(labels.contains(&"Recover From Cloud".to_string()));
     }
 
     #[test]
@@ -14886,6 +15105,66 @@ mod tests {
             .filter_map(Result::ok)
             .count();
         assert_eq!(synced_files, 1);
+    }
+
+    #[test]
+    fn cloud_recovery_mode_is_pull_only_and_does_not_push_local_revisions() {
+        let dir = tempdir().expect("tempdir");
+        let local_root = dir.path().join("local");
+        let remote_root = dir.path().join("remote");
+        let passphrase =
+            SecretString::new("correct horse battery staple".to_string().into_boxed_str());
+
+        let metadata =
+            vault::create_vault(&local_root, &passphrase, None, "Local").expect("create local");
+        vault::create_vault(&remote_root, &passphrase, None, "Remote").expect("create remote");
+        let local_metadata = std::fs::read(local_root.join("vault.json")).expect("local metadata");
+        std::fs::write(remote_root.join("vault.json"), local_metadata).expect("align metadata");
+
+        let unlocked =
+            vault::unlock_vault_with_device(&local_root, &passphrase, metadata.device_id.clone())
+                .expect("unlock local");
+        unlocked
+            .save_revision(
+                NaiveDate::from_ymd_opt(2026, 3, 19).expect("date"),
+                "local only entry",
+            )
+            .expect("save local");
+
+        let mut app =
+            App::with_initial_date(Some(NaiveDate::from_ymd_opt(2026, 3, 19).expect("date")));
+        app.vault = Some(unlocked);
+        app.vault_path = local_root.clone();
+        app.config.sync_target_path = Some(remote_root.clone());
+        app.overlay = Some(Overlay::SyncStatus(SyncStatusOverlay::pending(
+            "FOLDER".to_string(),
+            remote_root.display().to_string(),
+            false,
+        )));
+        app.pending_sync_request = Some(SyncRequest::Folder {
+            remote_root: remote_root.clone(),
+            target_label: remote_root.display().to_string(),
+        });
+        app.pending_sync_mode = Some(PendingSyncMode::CloudRecovery);
+
+        app.run_pending_sync();
+
+        match app.overlay.as_ref().expect("sync overlay") {
+            Overlay::SyncStatus(SyncStatusOverlay {
+                phase: SyncPhase::Complete { pulled, pushed, .. },
+                ..
+            }) => {
+                assert_eq!(*pulled, 0);
+                assert_eq!(*pushed, 0);
+            }
+            other => panic!("unexpected overlay after recovery: {other:?}"),
+        }
+
+        let remote_entry_dir = remote_root.join("entries/2026/2026-03-19");
+        assert!(
+            !remote_entry_dir.exists(),
+            "recovery mode must not upload local-only revisions"
+        );
     }
 
     #[test]

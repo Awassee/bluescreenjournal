@@ -196,6 +196,8 @@ The app is direct by design:
 | Global search | Searches saved entries after unlock without disk plaintext index | Fast retrieval without leaving search residue on disk |
 | Search presets and cache status | Adds today/month/all scopes plus encrypted cache inspection | Makes search faster to aim and easier to trust |
 | Encrypted sync | Syncs encrypted revision blobs to folder, S3, or WebDAV targets | Lets you use cloud storage without uploading plaintext |
+| Cloud recovery status | Shows upload/download queues plus verify status in `TOOLS -> Cloud Status` and `bsj cloud status` | Makes recovery readiness visible before something goes wrong |
+| Pull-only cloud recovery | Pulls missing encrypted blobs from remote without uploading local-only data (`TOOLS -> Recover From Cloud`, `bsj cloud recover`) | Safely rebuilds a machine after loss while preserving remote history |
 | Integrity verify | Checks revision hashchains | Detects missing or tampered history |
 | Review and dashboard surfaces | Show streaks, mood distribution, backup policy, sync preview, and doctor output | Keeps operational awareness inside the product |
 | Insights Center | Adds ten actionable reports (momentum, readiness, volume, streak, metadata trends, cadence gaps, conflict/backup risk) | Turns journal history into immediate writing and safety feedback from menus |
@@ -394,6 +396,8 @@ bsj ai coach --date 2026-03-16 --questions 5
 bsj export 2026-03-16
 bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md
 bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj cloud status --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj cloud recover --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
 bsj backup
 bsj backup list
 bsj backup prune

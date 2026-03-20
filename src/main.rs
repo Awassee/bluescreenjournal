@@ -31,7 +31,7 @@ use std::{
     version = env!("CARGO_PKG_VERSION"),
     about = "BlueScreen Journal",
     long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, a menu-driven TUI, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.",
-    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj spellcheck --date 2026-03-16\n  bsj spellcheck --range last7 --count-only\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj spellcheck --date 2026-03-16\n  bsj spellcheck --range last7 --count-only\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud status --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud recover --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
 )]
 struct Cli {
     #[arg(
@@ -253,6 +253,11 @@ enum Command {
         #[arg(long)]
         remote: Option<String>,
     },
+    /// Cloud status + pull-only recovery (encrypted blobs only)
+    Cloud {
+        #[command(subcommand)]
+        command: CloudCommand,
+    },
     /// Create, list, or prune encrypted backups under <vault>/backups
     Backup {
         #[command(subcommand)]
@@ -305,6 +310,30 @@ enum BackupCommand {
     Prune {
         #[arg(long, help = "Delete the backups instead of showing a dry run")]
         apply: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CloudCommand {
+    /// Show cloud/local sync queue status and integrity check
+    Status {
+        #[arg(long, value_enum)]
+        backend: Option<SyncBackendArg>,
+        #[arg(long)]
+        remote: Option<String>,
+        #[arg(long, help = "Print cloud status report as JSON")]
+        json: bool,
+    },
+    /// Pull missing encrypted blobs from cloud and re-check integrity
+    Recover {
+        #[arg(long, value_enum)]
+        backend: Option<SyncBackendArg>,
+        #[arg(long)]
+        remote: Option<String>,
+        #[arg(long, help = "Skip hashchain verification after recovery pull")]
+        no_verify: bool,
+        #[arg(long, help = "Print cloud recovery report as JSON")]
+        json: bool,
     },
 }
 
@@ -916,6 +945,13 @@ fn main() {
         Some(Command::Sync { backend, remote }) => {
             if let Err(error) = run_cli_sync(backend, remote.as_deref()) {
                 log::error!("sync failed: {error}");
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        Some(Command::Cloud { command }) => {
+            if let Err(error) = run_cli_cloud(command) {
+                log::error!("cloud command failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
             }
@@ -2825,6 +2861,192 @@ fn run_cli_sync(
     Ok(())
 }
 
+#[derive(Debug, Serialize)]
+struct CloudStatusOutput {
+    backend: String,
+    target: String,
+    local_revisions: usize,
+    remote_revisions: usize,
+    upload_queue: usize,
+    download_queue: usize,
+    shared_revisions: usize,
+    conflicts: usize,
+    integrity_ok: bool,
+    integrity_issue_count: usize,
+    last_sync: Option<config::LastSyncInfo>,
+}
+
+#[derive(Debug, Serialize)]
+struct CloudRecoveryOutput {
+    backend: String,
+    target: String,
+    pulled: usize,
+    pushed: usize,
+    conflicts: usize,
+    integrity_ok: Option<bool>,
+    integrity_issue_count: Option<usize>,
+    verification_skipped: bool,
+    post_recovery_upload_queue: usize,
+    post_recovery_download_queue: usize,
+}
+
+fn run_cli_cloud(command: CloudCommand) -> Result<(), String> {
+    log::info!("running CLI cloud command");
+    match command {
+        CloudCommand::Status {
+            backend,
+            remote,
+            json,
+        } => run_cli_cloud_status(backend, remote.as_deref(), json),
+        CloudCommand::Recover {
+            backend,
+            remote,
+            no_verify,
+            json,
+        } => run_cli_cloud_recover(backend, remote.as_deref(), no_verify, json),
+    }
+}
+
+fn run_cli_cloud_status(
+    backend_arg: Option<SyncBackendArg>,
+    remote_arg: Option<&str>,
+    json_output: bool,
+) -> Result<(), String> {
+    let mut config = config::AppConfig::load_or_default();
+    if !vault::vault_exists(&config.vault_path) {
+        return Err(format!(
+            "vault not found at {} (run `bsj cloud recover --backend ... --remote ...` to pull it from cloud)",
+            config.vault_path.display()
+        ));
+    }
+
+    let vault = unlock_cli_vault(&config)?;
+    let backend_kind = resolve_sync_backend_kind(backend_arg, remote_arg)?;
+    let (target, preview) = preview_with_backend(&vault, &mut config, backend_kind, remote_arg)?;
+    let integrity = vault
+        .verify_integrity()
+        .map_err(|error| format!("integrity check failed: {error}"))?;
+    let conflicts = vault
+        .list_conflicted_dates()
+        .map_err(|error| format!("conflict scan failed: {error}"))?;
+
+    let output = CloudStatusOutput {
+        backend: sync_backend_name(backend_kind).to_string(),
+        target,
+        local_revisions: preview.local_revisions,
+        remote_revisions: preview.remote_revisions,
+        upload_queue: preview.local_only_revisions,
+        download_queue: preview.remote_only_revisions,
+        shared_revisions: preview.shared_revisions,
+        conflicts: conflicts.len(),
+        integrity_ok: integrity.ok,
+        integrity_issue_count: integrity.issues.len(),
+        last_sync: config.last_sync.clone(),
+    };
+
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output)
+                .map_err(|error| format!("failed to serialize cloud status JSON: {error}"))?
+        );
+        return Ok(());
+    }
+
+    println!("Cloud Status");
+    println!("Backend        : {}", output.backend);
+    println!("Target         : {}", output.target);
+    println!("Local revisions: {}", output.local_revisions);
+    println!("Remote revisions: {}", output.remote_revisions);
+    println!("Upload queue   : {}", output.upload_queue);
+    println!("Download queue : {}", output.download_queue);
+    println!("Shared revisions: {}", output.shared_revisions);
+    println!("Conflicts      : {}", output.conflicts);
+    if output.integrity_ok {
+        println!("Integrity      : OK");
+    } else {
+        println!("Integrity      : BROKEN ({})", output.integrity_issue_count);
+    }
+    if let Some(last_sync) = &output.last_sync {
+        println!(
+            "Last sync      : {} {} +{} / -{}",
+            last_sync.timestamp, last_sync.backend, last_sync.pushed, last_sync.pulled
+        );
+    } else {
+        println!("Last sync      : never");
+    }
+    Ok(())
+}
+
+fn run_cli_cloud_recover(
+    backend_arg: Option<SyncBackendArg>,
+    remote_arg: Option<&str>,
+    no_verify: bool,
+    json_output: bool,
+) -> Result<(), String> {
+    let mut config = config::AppConfig::load_or_default();
+    let backend_kind = resolve_sync_backend_kind(backend_arg, remote_arg)?;
+    let (target, recover_report) = recover_with_backend(&mut config, backend_kind, remote_arg)?;
+    let vault = unlock_cli_vault(&config)?;
+    let conflicts = vault
+        .list_conflicted_dates()
+        .map_err(|error| format!("conflict scan failed: {error}"))?;
+    let integrity = if no_verify {
+        None
+    } else {
+        Some(
+            vault
+                .verify_integrity()
+                .map_err(|error| format!("integrity check failed: {error}"))?,
+        )
+    };
+    let (_, preview) = preview_with_backend(&vault, &mut config, backend_kind, remote_arg)?;
+
+    let output = CloudRecoveryOutput {
+        backend: sync_backend_name(backend_kind).to_string(),
+        target,
+        pulled: recover_report.pulled,
+        pushed: recover_report.pushed,
+        conflicts: conflicts.len(),
+        integrity_ok: integrity.as_ref().map(|report| report.ok),
+        integrity_issue_count: integrity.as_ref().map(|report| report.issues.len()),
+        verification_skipped: no_verify,
+        post_recovery_upload_queue: preview.local_only_revisions,
+        post_recovery_download_queue: preview.remote_only_revisions,
+    };
+
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output)
+                .map_err(|error| format!("failed to serialize cloud recovery JSON: {error}"))?
+        );
+        return Ok(());
+    }
+
+    println!("Cloud Recovery");
+    println!("Backend        : {}", output.backend);
+    println!("Target         : {}", output.target);
+    println!("Pulled revisions: {}", output.pulled);
+    println!("Pushed revisions: {}", output.pushed);
+    println!("Conflicts      : {}", output.conflicts);
+    if output.verification_skipped {
+        println!("Integrity      : skipped (--no-verify)");
+    } else if output.integrity_ok.unwrap_or(false) {
+        println!("Integrity      : OK");
+    } else {
+        println!(
+            "Integrity      : BROKEN ({})",
+            output.integrity_issue_count.unwrap_or(0)
+        );
+    }
+    println!(
+        "Queue after recover: upload={} download={}",
+        output.post_recovery_upload_queue, output.post_recovery_download_queue
+    );
+    Ok(())
+}
+
 fn run_cli_verify() -> Result<(), String> {
     log::info!("running CLI verify");
     let config = config::AppConfig::load_or_default();
@@ -3999,6 +4221,107 @@ fn resolve_folder_sync_target_path(
         .ok_or_else(|| "missing sync target; use --remote PATH".to_string())
 }
 
+fn sync_backend_name(kind: SyncBackendArg) -> &'static str {
+    match kind {
+        SyncBackendArg::Folder => "FOLDER",
+        SyncBackendArg::S3 => "S3",
+        SyncBackendArg::Webdav => "WEBDAV",
+    }
+}
+
+fn preview_with_backend(
+    vault: &vault::UnlockedVault,
+    config: &mut config::AppConfig,
+    backend_kind: SyncBackendArg,
+    remote_arg: Option<&str>,
+) -> Result<(String, sync::SyncPreviewReport), String> {
+    match backend_kind {
+        SyncBackendArg::Folder => {
+            let remote_root = resolve_folder_sync_target_path(config, remote_arg)?;
+            let target = remote_root.display().to_string();
+            let mut backend = sync::FolderBackend::new(remote_root);
+            let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud status preview failed: {error}"))?;
+            Ok((target, preview))
+        }
+        SyncBackendArg::S3 => {
+            let target = remote_arg
+                .map(ToString::to_string)
+                .or_else(|| {
+                    env::var("BSJ_S3_BUCKET").ok().map(|bucket| {
+                        let prefix = env::var("BSJ_S3_PREFIX").unwrap_or_default();
+                        if prefix.trim().is_empty() {
+                            format!("s3://{bucket}")
+                        } else {
+                            format!("s3://{bucket}/{}", prefix.trim_matches('/'))
+                        }
+                    })
+                })
+                .unwrap_or_else(|| "s3://<env>".to_string());
+            let mut backend = sync::S3Backend::from_remote(remote_arg)?;
+            let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud status preview failed: {error}"))?;
+            Ok((target, preview))
+        }
+        SyncBackendArg::Webdav => {
+            let target = remote_arg
+                .map(ToString::to_string)
+                .or_else(|| env::var("BSJ_WEBDAV_URL").ok())
+                .unwrap_or_else(|| "<missing BSJ_WEBDAV_URL>".to_string());
+            let mut backend = sync::WebDavBackend::from_remote(remote_arg)?;
+            let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud status preview failed: {error}"))?;
+            Ok((target, preview))
+        }
+    }
+}
+
+fn recover_with_backend(
+    config: &mut config::AppConfig,
+    backend_kind: SyncBackendArg,
+    remote_arg: Option<&str>,
+) -> Result<(String, sync::BackendSyncReport), String> {
+    match backend_kind {
+        SyncBackendArg::Folder => {
+            let remote_root = resolve_folder_sync_target_path(config, remote_arg)?;
+            let target = remote_root.display().to_string();
+            let mut backend = sync::FolderBackend::new(remote_root);
+            let report = sync::recover_root(&config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud recovery failed: {error}"))?;
+            Ok((target, report))
+        }
+        SyncBackendArg::S3 => {
+            let target = remote_arg
+                .map(ToString::to_string)
+                .or_else(|| {
+                    env::var("BSJ_S3_BUCKET").ok().map(|bucket| {
+                        let prefix = env::var("BSJ_S3_PREFIX").unwrap_or_default();
+                        if prefix.trim().is_empty() {
+                            format!("s3://{bucket}")
+                        } else {
+                            format!("s3://{bucket}/{}", prefix.trim_matches('/'))
+                        }
+                    })
+                })
+                .unwrap_or_else(|| "s3://<env>".to_string());
+            let mut backend = sync::S3Backend::from_remote(remote_arg)?;
+            let report = sync::recover_root(&config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud recovery failed: {error}"))?;
+            Ok((target, report))
+        }
+        SyncBackendArg::Webdav => {
+            let target = remote_arg
+                .map(ToString::to_string)
+                .or_else(|| env::var("BSJ_WEBDAV_URL").ok())
+                .unwrap_or_else(|| "<missing BSJ_WEBDAV_URL>".to_string());
+            let mut backend = sync::WebDavBackend::from_remote(remote_arg)?;
+            let report = sync::recover_root(&config.vault_path, &mut backend)
+                .map_err(|error| format!("cloud recovery failed: {error}"))?;
+            Ok((target, report))
+        }
+    }
+}
+
 fn fallback_config_path(app_name: &str) -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -4691,6 +5014,66 @@ mod tests {
                 assert!(json);
             }
             _ => panic!("expected sysop sync-preview command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_cloud_status_command() {
+        let cli = Cli::parse_from([
+            "bsj",
+            "cloud",
+            "status",
+            "--backend",
+            "folder",
+            "--remote",
+            "/tmp/bsj-sync",
+            "--json",
+        ]);
+        match cli.command {
+            Some(Command::Cloud {
+                command:
+                    super::CloudCommand::Status {
+                        backend,
+                        remote,
+                        json,
+                    },
+            }) => {
+                assert!(matches!(backend, Some(super::SyncBackendArg::Folder)));
+                assert_eq!(remote.as_deref(), Some("/tmp/bsj-sync"));
+                assert!(json);
+            }
+            _ => panic!("expected cloud status command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_cloud_recover_command() {
+        let cli = Cli::parse_from([
+            "bsj",
+            "cloud",
+            "recover",
+            "--backend",
+            "s3",
+            "--remote",
+            "s3://journal/archive",
+            "--no-verify",
+        ]);
+        match cli.command {
+            Some(Command::Cloud {
+                command:
+                    super::CloudCommand::Recover {
+                        backend,
+                        remote,
+                        no_verify,
+                        json,
+                    },
+            }) => {
+                assert!(matches!(backend, Some(super::SyncBackendArg::S3)));
+                assert_eq!(remote.as_deref(), Some("s3://journal/archive"));
+                assert!(no_verify);
+                assert!(!json);
+            }
+            _ => panic!("expected cloud recover command"),
         }
     }
 

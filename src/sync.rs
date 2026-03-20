@@ -619,6 +619,41 @@ pub fn sync_root<B: SyncBackend>(
     Ok(BackendSyncReport { pulled, pushed })
 }
 
+pub fn recover_root<B: SyncBackend>(
+    local_root: &Path,
+    backend: &mut B,
+) -> VaultResult<BackendSyncReport> {
+    let remote_keys = backend.list_keys()?;
+    if !remote_keys.contains("vault.json") {
+        return Err(VaultError::Sync(
+            "remote recovery source is missing vault.json".to_string(),
+        ));
+    }
+
+    secure_fs::ensure_private_dir(local_root)?;
+    secure_fs::ensure_private_dir(&local_root.join("entries"))?;
+    secure_fs::ensure_private_dir(&local_root.join("devices"))?;
+
+    let mut pulled = 0usize;
+    for key in &remote_keys {
+        let local_path = sync_key_to_path(local_root, key)?;
+        if local_path.exists() {
+            continue;
+        }
+        let bytes = backend.read(key)?;
+        write_local_key(local_root, key, &bytes)?;
+        if matches!(classify_sync_key(key), Some(SyncObjectKind::Revision)) {
+            pulled += 1;
+        }
+    }
+
+    ensure_local_and_remote_metadata_match(local_root, backend)?;
+    let local_inventory = list_local_inventory(local_root)?;
+    ensure_shared_revision_bytes_match(local_root, backend, &local_inventory, &remote_keys)?;
+
+    Ok(BackendSyncReport { pulled, pushed: 0 })
+}
+
 pub fn preview_root<B: SyncBackend>(
     _metadata: &VaultMetadata,
     local_root: &Path,
@@ -729,6 +764,22 @@ fn vault_metadata_compatible(local: &VaultMetadata, remote: &VaultMetadata) -> b
         && local.kdf.iterations == remote.kdf.iterations
         && local.kdf.parallelism == remote.kdf.parallelism
         && local.options.epoch_date == remote.options.epoch_date
+}
+
+fn ensure_local_and_remote_metadata_match<B: SyncBackend>(
+    local_root: &Path,
+    backend: &mut B,
+) -> VaultResult<()> {
+    let local_vault_json = fs::read(local_root.join("vault.json"))?;
+    let remote_vault_json = backend.read("vault.json")?;
+    let local_metadata: VaultMetadata = serde_json::from_slice(&local_vault_json)?;
+    let remote_metadata: VaultMetadata = serde_json::from_slice(&remote_vault_json)?;
+    if !vault_metadata_compatible(&local_metadata, &remote_metadata) {
+        return Err(VaultError::InvalidFormat(
+            "recovery source metadata is incompatible".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn ensure_shared_revision_bytes_match<B: SyncBackend>(
@@ -1035,6 +1086,61 @@ mod tests {
                 .join("entries/2026/2026-03-17/rev-device-b-000001.bsj.enc")
                 .exists()
         );
+    }
+
+    #[test]
+    fn recover_root_restores_missing_local_vault_from_remote() {
+        let dir = tempdir().expect("tempdir");
+        let local_root = dir.path().join("local-recovered");
+        let remote_root = dir.path().join("remote-source");
+        let passphrase = SecretString::new("correct horse battery staple".into());
+
+        create_vault(&remote_root, &passphrase, None, "Remote").expect("create remote");
+        let remote =
+            unlock_vault_with_device(&remote_root, &passphrase, "device-remote").expect("unlock");
+        register_device(&remote_root, "device-remote", "Remote").expect("register");
+        remote
+            .save_revision(
+                NaiveDate::from_ymd_opt(2026, 3, 18).expect("date"),
+                "remote-only entry",
+            )
+            .expect("save");
+
+        let mut backend = MemoryBackend::default();
+        for key in list_local_inventory(&remote_root)
+            .expect("remote inventory")
+            .keys
+        {
+            backend.insert(
+                &key,
+                fs::read(sync_key_to_path(&remote_root, &key).expect("remote path"))
+                    .expect("remote bytes"),
+            );
+        }
+
+        let report = recover_root(&local_root, &mut backend).expect("recover");
+        assert_eq!(report.pulled, 1);
+        assert_eq!(report.pushed, 0);
+        assert!(local_root.join("vault.json").exists());
+        assert!(
+            local_root
+                .join("entries/2026/2026-03-18/rev-device-remote-000001.bsj.enc")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn recover_root_requires_remote_vault_json() {
+        let dir = tempdir().expect("tempdir");
+        let local_root = dir.path().join("local");
+        let mut backend = MemoryBackend::default();
+        backend.insert(
+            "entries/2026/2026-03-18/rev-device-a-000001.bsj.enc",
+            vec![1, 2, 3],
+        );
+
+        let error = recover_root(&local_root, &mut backend).expect_err("missing metadata");
+        assert!(error.to_string().contains("missing vault.json"));
     }
 
     #[test]

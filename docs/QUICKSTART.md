@@ -91,6 +91,8 @@ Folder sync example:
 
 ```bash
 bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj cloud status --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj cloud recover --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
 ```
 
 ## 8. Optional: run review and timeline summaries

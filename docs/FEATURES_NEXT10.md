@@ -61,3 +61,9 @@ This pass defines and ships ten workflow features in order, keeping the nostalgi
 - Spec: show 7-day window metrics, conflict count, mood mix, and top metadata signals.
 - Surface: `TOOLS -> Week Compass`.
 - Done when: info overlay opens from unlocked vault and displays weekly summary lines.
+
+## 11) Cloud Recovery + Integrity Status
+- Problem: cloud sync existed, but recovery readiness and pull-only recovery needed a direct surface.
+- Spec: add dedicated status and recovery flows that show queue state and verify integrity.
+- Surface: `TOOLS -> Cloud Status`, `TOOLS -> Recover From Cloud`, `bsj cloud status`, `bsj cloud recover`.
+- Done when: users can inspect upload/download queues, run pull-only recovery, and immediately verify hashchain state.
