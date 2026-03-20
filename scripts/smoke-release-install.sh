@@ -49,10 +49,12 @@ TMP_ROOT="${TMPDIR:-/tmp}"
 mkdir -p "$TMP_ROOT"
 TMP_DIR="$(mktemp -d "$TMP_ROOT/bsj-dist-smoke.XXXXXX")"
 INSTALL_PREFIX="$TMP_DIR/install-root"
+SMART_PREFIX="$TMP_DIR/install-smart-root"
 MENU_PREFIX="$TMP_DIR/install-menu-root"
 MENU_LAUNCH_PREFIX="$TMP_DIR/install-menu-launch-root"
 BOOTSTRAP_PREFIX="$TMP_DIR/bootstrap-root"
 INSTALL_HOME="$TMP_DIR/install-home"
+SMART_HOME="$TMP_DIR/install-home-smart"
 MENU_HOME="$TMP_DIR/install-home-menu"
 MENU_LAUNCH_HOME="$TMP_DIR/install-home-menu-launch"
 BOOTSTRAP_HOME="$TMP_DIR/bootstrap-home"
@@ -60,6 +62,7 @@ BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
 BOOTSTRAP_BASH_HOME="$TMP_DIR/bootstrap-home-bash"
 SMOKE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 INSTALL_LOG="$TMP_DIR/install-prebuilt.log"
+SMART_LOG="$TMP_DIR/install-smart.log"
 MENU_LOG="$TMP_DIR/install-prebuilt-menu.log"
 MENU_LAUNCH_LOG="$TMP_DIR/install-prebuilt-menu-launch.log"
 
@@ -102,6 +105,20 @@ grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.zshrc"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.bash_profile"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.bashrc"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.config/fish/config.fish"
+
+HOME="$SMART_HOME" SHELL=/bin/zsh \
+  BSJ_INSTALL_PREFIX="$SMART_PREFIX" \
+  BSJ_INSTALLER_ACTION_SELECTION="1" \
+  BSJ_INSTALLER_POST_INSTALL_SELECTION="7" \
+  script -q "$SMART_LOG" "$BUNDLE_DIR/install.sh" >/dev/null
+"$SMART_PREFIX/bin/bsj" --help >/dev/null
+grep -Fq "Choose what to do:" "$SMART_LOG"
+grep -Fq "Install / Update (Recommended smart mode)" "$SMART_LOG"
+grep -Fq "Installer auto-select: 1" "$SMART_LOG"
+grep -Fq "Smart mode selected bundled prebuilt install from this folder" "$SMART_LOG"
+grep -Fq "Plan: fetch or use a signed release bundle, install bsj, repair PATH, then offer a menu-first launch." "$SMART_LOG"
+grep -Fq "Installer auto-select: 7" "$SMART_LOG"
+grep -Fq "$SMART_PREFIX/bin" "$SMART_HOME/.zprofile"
 
 HOME="$MENU_LAUNCH_HOME" SHELL=/bin/zsh \
   BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \

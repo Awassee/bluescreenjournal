@@ -28,6 +28,7 @@ declare -a UNINSTALL_TARGETS
 declare -a DATA_TARGETS
 declare -a KEYCHAIN_VAULT_PATHS
 declare -a CONFIG_TARGETS
+ACTION_SELECTIONS="${BSJ_INSTALLER_ACTION_SELECTION:-}"
 POST_INSTALL_SELECTIONS="${BSJ_INSTALLER_POST_INSTALL_SELECTION:-}"
 
 PRODUCT_NAME="BlueScreen Journal"
@@ -296,6 +297,77 @@ pick_mode() {
   fi
 }
 
+describe_install_mode() {
+  local resolved_mode="$1"
+
+  if [[ "$MODE" != "auto" ]]; then
+    case "$resolved_mode" in
+      prebuilt)
+        printf "Installer mode: stable prebuilt"
+        ;;
+      source)
+        printf "Installer mode: source build"
+        ;;
+      *)
+        printf "Installer mode: %s" "$resolved_mode"
+        ;;
+    esac
+    return
+  fi
+
+  case "$resolved_mode" in
+    prebuilt)
+      if local_bundle_root; then
+        printf "Smart mode selected bundled prebuilt install from this folder"
+      elif [[ -n "$ARCHIVE_SOURCE" ]]; then
+        printf "Smart mode selected prebuilt install from the provided archive source"
+      else
+        printf "Smart mode selected the latest stable prebuilt release"
+      fi
+      ;;
+    source)
+      if local_source_root; then
+        printf "Smart mode selected source install from this checkout"
+      elif command -v bsj >/dev/null 2>&1 && [[ -z "$ARCHIVE_SOURCE" && "$RELEASE_VERSION" == "latest" ]]; then
+        printf "Smart mode selected source update from latest main because bsj is already installed"
+      else
+        printf "Smart mode selected source install"
+      fi
+      ;;
+    *)
+      printf "Installer mode: %s" "$resolved_mode"
+      ;;
+  esac
+}
+
+announce_install_plan() {
+  local resolved_mode="$1"
+  info "$(describe_install_mode "$resolved_mode")"
+  case "$resolved_mode" in
+    prebuilt)
+      info "Plan: fetch or use a signed release bundle, install bsj, repair PATH, then offer a menu-first launch."
+      ;;
+    source)
+      info "Plan: prepare build tools if needed, build/install bsj from source, repair PATH, then offer a menu-first launch."
+      warn "Source installs can take a few minutes while Cargo builds dependencies."
+      ;;
+  esac
+}
+
+print_launch_handoff() {
+  local installed_bin="$1"
+  cat <<EOF
+BlueScreen Journal
+
+Preparing this terminal for the full-screen journal...
+  [1/3] Resetting terminal input state
+  [2/3] Handing off to $(basename "$installed_bin")
+  [3/3] Opening the blue-screen workspace
+
+If this screen sits here for more than a moment, press Ctrl+C and try installer option 5.
+EOF
+}
+
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
@@ -384,7 +456,18 @@ Choose what to do:
 EOF
 
   while true; do
-    read_line_interactive "Select an option [1-7,a,h,q]: " || die "Failed to read installer menu selection."
+    if [[ -n "$ACTION_SELECTIONS" ]]; then
+      if [[ "$ACTION_SELECTIONS" == *","* ]]; then
+        REPLY="${ACTION_SELECTIONS%%,*}"
+        ACTION_SELECTIONS="${ACTION_SELECTIONS#*,}"
+      else
+        REPLY="$ACTION_SELECTIONS"
+        ACTION_SELECTIONS=""
+      fi
+      info "Installer auto-select: $REPLY"
+    else
+      read_line_interactive "Select an option [1-7,a,h,q]: " || die "Failed to read installer menu selection."
+    fi
     selection="$REPLY"
     normalized="$(printf "%s" "$selection" | tr '[:upper:]' '[:lower:]')"
     case "$normalized" in
@@ -1169,7 +1252,9 @@ launch_bsj_from_installer() {
       if tty_input_available; then
         if [[ "$launch_mode" == "app" ]]; then
           clear
-          printf "Launching BlueScreen Journal in this terminal...\n\n"
+          print_launch_handoff "$installed_bin"
+          stty sane < /dev/tty >/dev/null 2>&1 || true
+          sleep 0.5
         fi
         exec "${launch_cmd[@]}"
       fi
@@ -1181,7 +1266,9 @@ launch_bsj_from_installer() {
     same-terminal|current)
       if [[ "$launch_mode" == "app" ]]; then
         clear
-        printf "Launching BlueScreen Journal in this terminal...\n\n"
+        print_launch_handoff "$installed_bin"
+        stty sane < /dev/tty >/dev/null 2>&1 || true
+        sleep 0.5
       fi
       exec "${launch_cmd[@]}"
       ;;
@@ -1711,7 +1798,9 @@ fi
 
 case "$ACTION" in
   install)
-    case "$(pick_mode)" in
+    RESOLVED_MODE="$(pick_mode)"
+    announce_install_plan "$RESOLVED_MODE"
+    case "$RESOLVED_MODE" in
       prebuilt)
         install_prebuilt
         ;;
