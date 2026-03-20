@@ -22,21 +22,13 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with encrypted folder sync plus S3/WebDAV and direct Google Drive/Dropbox API connectors
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v1.3.1
+## New in v1.3.2
 
-- added `TOOLS -> Insights Center` with ten menu-driven report modules:
-- Momentum Snapshot, Save Readiness, Word Volume, Streak Tracker
-- Mood Mix, Tag Radar, People Radar, Project Radar
-- Gap Finder, Conflict & Backup Risk
-- added regression tests for insights menu discovery and report behavior
-- kept all quality gates green (`fmt`, `clippy -D warnings`, `test`, `qa-gate`)
-
-## In progress for v1.3.2
-
-- sync parity pass so saved Setup defaults work across `doctor`, CLI sync, TUI sync, and cloud recovery
-- menu-driven direct connector setup for Google Drive API and Dropbox API
-- clearer trust/status copy in Dashboard, Sync Center, Journal Health, and Cloud Status
-- installer launch fallback and post-install guidance cleanup
+- sync backend defaults now stay consistent across `doctor`, CLI sync, TUI sync, cloud status, cloud recovery, and SYSOP preview
+- `SETUP -> Cloud Provider Setup` now covers both folder-based provider sync and direct Google Drive / Dropbox API modes
+- direct Google Drive and Dropbox credentials can now be stored in macOS Keychain from inside the app instead of requiring env vars for the full setup flow
+- Dashboard, Journal Health, Sync Center, Cloud Status, and SYSOP Environment now show clearer connector readiness and whether auth is coming from env or Keychain
+- installer launch fallback, smoke coverage, and post-install guidance were tightened for a cleaner release path
 
 ## Screenshots
 
@@ -85,7 +77,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.3.1.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v1.3.2.md) |
 
 ## Turnkey install
 
@@ -98,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.3.1
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v1.3.2
 ```
 
 Install from source instead of the prebuilt release:
@@ -450,7 +442,7 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v1.3.1.md)
+- [Release Notes](docs/releases/v1.3.2.md)
 - [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
 - [v1.3 UX Checklist](docs/V1_3_UX_CHECKLIST.md)
 - [v3.0 Planning](docs/V3_0_PLAN.md)

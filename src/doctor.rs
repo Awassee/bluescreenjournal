@@ -1,6 +1,7 @@
 use crate::{
     config::{self, AppConfig},
     help::EnvironmentSettings,
+    sync,
     vault::{IntegrityReport, VaultMetadata},
 };
 use serde::Serialize;
@@ -198,18 +199,21 @@ pub fn build_report(input: DoctorInputs<'_>) -> DoctorReport {
                     .clone()
                     .unwrap_or_else(|| "appDataFolder".to_string())
             };
-            if gdrive_auth_ready(input.env) {
+            if input.env.gdrive_auth_ready() {
                 check(
                     "sync",
                     DoctorStatus::Ok,
-                    format!("Google Drive API sync target {target} ({source})"),
+                    format!(
+                        "Google Drive API sync target {target} ({source}, auth {})",
+                        direct_auth_source_label("gdrive", input.env)
+                    ),
                 )
             } else {
                 check(
                     "sync",
                     DoctorStatus::Fail,
                     format!(
-                        "Google Drive API sync selected via {source} but credentials are missing (set BSJ_GDRIVE_ACCESS_TOKEN or refresh/client credentials)"
+                        "Google Drive API sync selected via {source} but credentials are missing (set BSJ_GDRIVE_ACCESS_TOKEN, related refresh/client env vars, or store them in SETUP -> Cloud Provider Setup)"
                     ),
                 )
             }
@@ -224,18 +228,21 @@ pub fn build_report(input: DoctorInputs<'_>) -> DoctorReport {
                     .clone()
                     .unwrap_or_else(|| "/BlueScreenJournal-Sync".to_string())
             };
-            if dropbox_auth_ready(input.env) {
+            if input.env.dropbox_auth_ready() {
                 check(
                     "sync",
                     DoctorStatus::Ok,
-                    format!("Dropbox API sync target {target} ({source})"),
+                    format!(
+                        "Dropbox API sync target {target} ({source}, auth {})",
+                        direct_auth_source_label("dropbox", input.env)
+                    ),
                 )
             } else {
                 check(
                     "sync",
                     DoctorStatus::Fail,
                     format!(
-                        "Dropbox API sync selected via {source} but credentials are missing (set BSJ_DROPBOX_ACCESS_TOKEN or refresh/app credentials)"
+                        "Dropbox API sync selected via {source} but credentials are missing (set BSJ_DROPBOX_ACCESS_TOKEN, related refresh/app env vars, or store them in SETUP -> Cloud Provider Setup)"
                     ),
                 )
             }
@@ -370,16 +377,45 @@ fn effective_sync_backend(
     Ok(None)
 }
 
-fn gdrive_auth_ready(env: &EnvironmentSettings) -> bool {
-    env.gdrive_access_token_set
-        || (env.gdrive_refresh_token_set
-            && env.gdrive_client_id_set
-            && env.gdrive_client_secret_set)
-}
+fn direct_auth_source_label(backend: &str, env: &EnvironmentSettings) -> &'static str {
+    let (env_presence, keychain_presence) = match backend {
+        "gdrive" => (
+            sync::OAuthCredentialPresence {
+                access_token: env.gdrive_access_token_set,
+                refresh_token: env.gdrive_refresh_token_set,
+                client_id: env.gdrive_client_id_set,
+                client_secret: env.gdrive_client_secret_set,
+            },
+            sync::OAuthCredentialPresence {
+                access_token: env.gdrive_access_token_keychain,
+                refresh_token: env.gdrive_refresh_token_keychain,
+                client_id: env.gdrive_client_id_keychain,
+                client_secret: env.gdrive_client_secret_keychain,
+            },
+        ),
+        "dropbox" => (
+            sync::OAuthCredentialPresence {
+                access_token: env.dropbox_access_token_set,
+                refresh_token: env.dropbox_refresh_token_set,
+                client_id: env.dropbox_app_key_set,
+                client_secret: env.dropbox_app_secret_set,
+            },
+            sync::OAuthCredentialPresence {
+                access_token: env.dropbox_access_token_keychain,
+                refresh_token: env.dropbox_refresh_token_keychain,
+                client_id: env.dropbox_app_key_keychain,
+                client_secret: env.dropbox_app_secret_keychain,
+            },
+        ),
+        _ => return "missing",
+    };
 
-fn dropbox_auth_ready(env: &EnvironmentSettings) -> bool {
-    env.dropbox_access_token_set
-        || (env.dropbox_refresh_token_set && env.dropbox_app_key_set && env.dropbox_app_secret_set)
+    match env_presence.source_label(keychain_presence) {
+        "ENV+KEYCHAIN" => "env+keychain",
+        "ENV" => "env",
+        "KEYCHAIN" => "keychain",
+        _ => "missing",
+    }
 }
 
 #[cfg(test)]

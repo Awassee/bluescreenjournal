@@ -4,11 +4,11 @@ pub mod calendar;
 
 use crate::tui::{
     app::{
-        AiCoachOverlay, App, ConflictMode, ConflictOverlay, DatePicker, ExportPrompt, IndexState,
-        InfoOverlay, MenuId, MenuItem, MetadataField, MetadataPrompt, Overlay, PickerOverlay,
-        ReplacePrompt, ReplaceStage, RestorePrompt, RestoreStage, SearchField, SearchOverlay,
-        SettingPrompt, SetupStep, SetupWizard, SyncPhase, SyncStatusOverlay, index_detail_summary,
-        index_row_flags,
+        AiCoachOverlay, App, CloudCredentialField, CloudCredentialPrompt, ConflictMode,
+        ConflictOverlay, DatePicker, ExportPrompt, IndexState, InfoOverlay, MenuId, MenuItem,
+        MetadataField, MetadataPrompt, Overlay, PickerOverlay, ReplacePrompt, ReplaceStage,
+        RestorePrompt, RestoreStage, SearchField, SearchOverlay, SettingPrompt, SetupStep,
+        SetupWizard, SyncPhase, SyncStatusOverlay, index_detail_summary, index_row_flags,
     },
     buffer::MatchPos,
 };
@@ -572,6 +572,7 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         Overlay::ReplaceConfirm(_) => popup_rect(body_area, 62, 8),
         Overlay::ExportPrompt(_) => popup_rect(body_area, 72, 9),
         Overlay::SettingPrompt(_) => popup_rect(body_area, 70, 8),
+        Overlay::CloudCredentialPrompt(_) => popup_rect(body_area, 76, 10),
         Overlay::MetadataPrompt(_) => popup_rect(body_area, 72, 9),
         Overlay::Index(_) => popup_rect(body_area, 78, 16),
         Overlay::SyncStatus(_) => popup_rect(body_area, 76, 14),
@@ -667,6 +668,9 @@ fn draw_overlay(frame: &mut Frame<'_>, app: &App, body_area: Rect) -> Option<(u1
         }
         Overlay::ExportPrompt(prompt) => draw_export_prompt_overlay(frame, inner, prompt),
         Overlay::SettingPrompt(prompt) => draw_setting_prompt_overlay(frame, inner, prompt),
+        Overlay::CloudCredentialPrompt(prompt) => {
+            draw_cloud_credential_prompt_overlay(frame, inner, prompt)
+        }
         Overlay::MetadataPrompt(prompt) => draw_metadata_prompt_overlay(frame, inner, prompt),
         Overlay::Index(index) => {
             draw_index_overlay(frame, inner, index);
@@ -1257,6 +1261,51 @@ fn draw_setting_prompt_overlay(
     ))
 }
 
+fn draw_cloud_credential_prompt_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    prompt: &CloudCredentialPrompt,
+) -> Option<(u16, u16)> {
+    let lines = vec![
+        credential_input_line(CloudCredentialField::AccessToken, prompt),
+        credential_input_line(CloudCredentialField::RefreshToken, prompt),
+        credential_input_line(CloudCredentialField::ClientId, prompt),
+        credential_input_line(CloudCredentialField::ClientSecret, prompt),
+        Line::from("Access token or refresh+client credentials are required."),
+        Line::from("Saved to macOS Keychain only. Env vars still override matching fields."),
+        Line::from("Tab next field  Enter save  Esc cancel"),
+        Line::from(prompt.error.clone().unwrap_or_default()),
+    ];
+    frame.render_widget(Paragraph::new(lines).style(screen_style()), area);
+
+    let (input, row_offset) = match prompt.active_field {
+        CloudCredentialField::AccessToken => (&prompt.access_token_input, 0),
+        CloudCredentialField::RefreshToken => (&prompt.refresh_token_input, 1),
+        CloudCredentialField::ClientId => (&prompt.client_id_input, 2),
+        CloudCredentialField::ClientSecret => (&prompt.client_secret_input, 3),
+    };
+    Some((
+        (area.x + 14 + input.chars().count() as u16).min(area.right().saturating_sub(1)),
+        (area.y + row_offset).min(area.bottom().saturating_sub(1)),
+    ))
+}
+
+fn credential_input_line(
+    field: CloudCredentialField,
+    prompt: &CloudCredentialPrompt,
+) -> Line<'static> {
+    let label = field.label(prompt.provider);
+    let value = prompt.masked_value(field);
+    let mut style = screen_style();
+    if prompt.active_field == field {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    Line::from(vec![
+        Span::styled(format!("{label:<12}"), style.add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" {}", value), style),
+    ])
+}
+
 fn draw_metadata_prompt_overlay(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -1812,6 +1861,9 @@ fn overlay_title(overlay: &Overlay) -> String {
         Overlay::ReplaceConfirm(_) => " Replace (F6) ".to_string(),
         Overlay::ExportPrompt(prompt) => format!(" Export {} ", prompt.format.label()),
         Overlay::SettingPrompt(_) => " Setup ".to_string(),
+        Overlay::CloudCredentialPrompt(prompt) => {
+            format!(" {} Keychain ", prompt.provider.label())
+        }
         Overlay::MetadataPrompt(_) => " Metadata ".to_string(),
         Overlay::Index(_) => " Index (F7) ".to_string(),
         Overlay::SyncStatus(_) => " Sync (F8) ".to_string(),

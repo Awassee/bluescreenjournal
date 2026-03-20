@@ -75,7 +75,8 @@ Menu-first path:
 - `SETUP -> Cloud Provider Setup -> Use Direct Google Drive API`
 - `SETUP -> Sync Backend Default -> gdrive`
 - optional: `SETUP -> Google Drive Folder ID`
-- keep secrets in env vars, not config
+- `SETUP -> Cloud Provider Setup -> Store Google Drive Credentials`
+- secrets stay out of config; use env vars and/or macOS Keychain
 
 ```bash
 export BSJ_SYNC_BACKEND=gdrive
@@ -88,6 +89,8 @@ export BSJ_GDRIVE_CLIENT_SECRET=...
 export BSJ_GDRIVE_FOLDER_ID=appdata
 bsj sync
 ```
+
+If you prefer a full in-product setup flow, store the same credential fields in `SETUP -> Cloud Provider Setup -> Store Google Drive Credentials`. bsj saves them in macOS Keychain and uses env vars only as per-field overrides.
 
 You can also pass a remote override:
 
@@ -104,7 +107,8 @@ Menu-first path:
 - `SETUP -> Cloud Provider Setup -> Use Direct Dropbox API`
 - `SETUP -> Sync Backend Default -> dropbox`
 - optional: `SETUP -> Dropbox Root`
-- keep secrets in env vars, not config
+- `SETUP -> Cloud Provider Setup -> Store Dropbox Credentials`
+- secrets stay out of config; use env vars and/or macOS Keychain
 
 ```bash
 export BSJ_SYNC_BACKEND=dropbox
@@ -117,6 +121,8 @@ export BSJ_DROPBOX_APP_SECRET=...
 export BSJ_DROPBOX_ROOT=/BlueScreenJournal-Sync
 bsj sync
 ```
+
+If you prefer a full in-product setup flow, store the same credential fields in `SETUP -> Cloud Provider Setup -> Store Dropbox Credentials`. bsj saves them in macOS Keychain and uses env vars only as per-field overrides.
 
 You can also pass a remote override:
 

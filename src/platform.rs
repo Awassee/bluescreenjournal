@@ -1,3 +1,4 @@
+use crate::sync::{OAuthCredentialBundle, OAuthCredentialPresence};
 use reqwest::blocking::Client;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -14,7 +15,8 @@ use std::{
     time::Duration,
 };
 
-const KEYCHAIN_SERVICE: &str = "com.awassee.bsj.passphrase";
+const PASSPHRASE_KEYCHAIN_SERVICE: &str = "com.awassee.bsj.passphrase";
+const SECRET_KEYCHAIN_SERVICE: &str = "com.awassee.bsj.secret";
 const RELEASES_URL: &str = "https://api.github.com/repos/Awassee/bluescreenjournal/releases/latest";
 const INSTALLER_SCRIPT_URL: &str =
     "https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh";
@@ -22,6 +24,15 @@ const UPDATER_TEMP_DIR_NAME: &str = "bsj-updater";
 const UPDATE_LOG_FILE_NAME: &str = "update.log";
 const MAX_TAG_LENGTH: usize = 64;
 const PROVIDER_SYNC_FOLDER_NAME: &str = "BlueScreenJournal-Sync";
+
+pub const GDRIVE_ACCESS_TOKEN_SECRET_NAME: &str = "gdrive_access_token";
+pub const GDRIVE_REFRESH_TOKEN_SECRET_NAME: &str = "gdrive_refresh_token";
+pub const GDRIVE_CLIENT_ID_SECRET_NAME: &str = "gdrive_client_id";
+pub const GDRIVE_CLIENT_SECRET_SECRET_NAME: &str = "gdrive_client_secret";
+pub const DROPBOX_ACCESS_TOKEN_SECRET_NAME: &str = "dropbox_access_token";
+pub const DROPBOX_REFRESH_TOKEN_SECRET_NAME: &str = "dropbox_refresh_token";
+pub const DROPBOX_APP_KEY_SECRET_NAME: &str = "dropbox_app_key";
+pub const DROPBOX_APP_SECRET_SECRET_NAME: &str = "dropbox_app_secret";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CloudProvider {
@@ -90,6 +101,27 @@ pub fn keychain_account(vault_path: &Path) -> String {
     format!("vault-{}", &digest[..16])
 }
 
+fn keychain_secret_account(vault_path: &Path, secret_name: &str) -> String {
+    format!(
+        "{}-{}",
+        keychain_account(vault_path),
+        normalize_secret_name(secret_name)
+    )
+}
+
+fn normalize_secret_name(secret_name: &str) -> String {
+    let normalized = secret_name
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        .take(40)
+        .collect::<String>();
+    if normalized.is_empty() {
+        "secret".to_string()
+    } else {
+        normalized
+    }
+}
+
 pub fn store_passphrase(vault_path: &Path, passphrase: &SecretString) -> Result<(), String> {
     let status = Command::new("security")
         .arg("add-generic-password")
@@ -97,7 +129,7 @@ pub fn store_passphrase(vault_path: &Path, passphrase: &SecretString) -> Result<
         .arg("-a")
         .arg(keychain_account(vault_path))
         .arg("-s")
-        .arg(KEYCHAIN_SERVICE)
+        .arg(PASSPHRASE_KEYCHAIN_SERVICE)
         .arg("-w")
         .arg(passphrase.expose_secret())
         .stdout(Stdio::null())
@@ -117,7 +149,7 @@ pub fn load_passphrase(vault_path: &Path) -> Result<Option<SecretString>, String
         .arg("-a")
         .arg(keychain_account(vault_path))
         .arg("-s")
-        .arg(KEYCHAIN_SERVICE)
+        .arg(PASSPHRASE_KEYCHAIN_SERVICE)
         .arg("-w")
         .output()
         .map_err(|error| format!("failed to run security find-generic-password: {error}"))?;
@@ -139,7 +171,7 @@ pub fn delete_passphrase(vault_path: &Path) -> Result<(), String> {
         .arg("-a")
         .arg(keychain_account(vault_path))
         .arg("-s")
-        .arg(KEYCHAIN_SERVICE)
+        .arg(PASSPHRASE_KEYCHAIN_SERVICE)
         .output()
         .map_err(|error| format!("failed to run security delete-generic-password: {error}"))?;
 
@@ -155,6 +187,209 @@ pub fn delete_passphrase(vault_path: &Path) -> Result<(), String> {
     }
 
     Err("failed to delete passphrase from macOS Keychain".to_string())
+}
+
+pub fn store_named_secret(
+    vault_path: &Path,
+    secret_name: &str,
+    secret: &SecretString,
+) -> Result<(), String> {
+    let status = Command::new("security")
+        .arg("add-generic-password")
+        .arg("-U")
+        .arg("-a")
+        .arg(keychain_secret_account(vault_path, secret_name))
+        .arg("-s")
+        .arg(SECRET_KEYCHAIN_SERVICE)
+        .arg("-w")
+        .arg(secret.expose_secret())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .status()
+        .map_err(|error| format!("failed to run security add-generic-password: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("failed to store {secret_name} in macOS Keychain"))
+    }
+}
+
+pub fn load_named_secret(
+    vault_path: &Path,
+    secret_name: &str,
+) -> Result<Option<SecretString>, String> {
+    let output = Command::new("security")
+        .arg("find-generic-password")
+        .arg("-a")
+        .arg(keychain_secret_account(vault_path, secret_name))
+        .arg("-s")
+        .arg(SECRET_KEYCHAIN_SERVICE)
+        .arg("-w")
+        .output()
+        .map_err(|error| format!("failed to run security find-generic-password: {error}"))?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let secret = String::from_utf8(output.stdout)
+        .map_err(|error| format!("keychain returned invalid UTF-8: {error}"))?;
+    Ok(Some(SecretString::new(
+        secret.trim_end().to_string().into_boxed_str(),
+    )))
+}
+
+pub fn has_named_secret(vault_path: &Path, secret_name: &str) -> Result<bool, String> {
+    load_named_secret(vault_path, secret_name).map(|secret| secret.is_some())
+}
+
+pub fn delete_named_secret(vault_path: &Path, secret_name: &str) -> Result<(), String> {
+    let output = Command::new("security")
+        .arg("delete-generic-password")
+        .arg("-a")
+        .arg(keychain_secret_account(vault_path, secret_name))
+        .arg("-s")
+        .arg(SECRET_KEYCHAIN_SERVICE)
+        .output()
+        .map_err(|error| format!("failed to run security delete-generic-password: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    if stderr.contains("could not be found")
+        || stderr.contains("the specified item could not be found")
+    {
+        return Ok(());
+    }
+
+    Err(format!(
+        "failed to delete {secret_name} from macOS Keychain"
+    ))
+}
+
+pub fn google_drive_keychain_presence(
+    vault_path: &Path,
+) -> Result<OAuthCredentialPresence, String> {
+    Ok(OAuthCredentialPresence {
+        access_token: has_named_secret(vault_path, GDRIVE_ACCESS_TOKEN_SECRET_NAME)?,
+        refresh_token: has_named_secret(vault_path, GDRIVE_REFRESH_TOKEN_SECRET_NAME)?,
+        client_id: has_named_secret(vault_path, GDRIVE_CLIENT_ID_SECRET_NAME)?,
+        client_secret: has_named_secret(vault_path, GDRIVE_CLIENT_SECRET_SECRET_NAME)?,
+    })
+}
+
+pub fn dropbox_keychain_presence(vault_path: &Path) -> Result<OAuthCredentialPresence, String> {
+    Ok(OAuthCredentialPresence {
+        access_token: has_named_secret(vault_path, DROPBOX_ACCESS_TOKEN_SECRET_NAME)?,
+        refresh_token: has_named_secret(vault_path, DROPBOX_REFRESH_TOKEN_SECRET_NAME)?,
+        client_id: has_named_secret(vault_path, DROPBOX_APP_KEY_SECRET_NAME)?,
+        client_secret: has_named_secret(vault_path, DROPBOX_APP_SECRET_SECRET_NAME)?,
+    })
+}
+
+pub fn load_google_drive_keychain_credentials(
+    vault_path: &Path,
+) -> Result<OAuthCredentialBundle, String> {
+    Ok(OAuthCredentialBundle {
+        access_token: load_named_secret(vault_path, GDRIVE_ACCESS_TOKEN_SECRET_NAME)?,
+        refresh_token: load_named_secret(vault_path, GDRIVE_REFRESH_TOKEN_SECRET_NAME)?,
+        client_id: load_named_secret(vault_path, GDRIVE_CLIENT_ID_SECRET_NAME)?,
+        client_secret: load_named_secret(vault_path, GDRIVE_CLIENT_SECRET_SECRET_NAME)?,
+    }
+    .normalized())
+}
+
+pub fn load_dropbox_keychain_credentials(
+    vault_path: &Path,
+) -> Result<OAuthCredentialBundle, String> {
+    Ok(OAuthCredentialBundle {
+        access_token: load_named_secret(vault_path, DROPBOX_ACCESS_TOKEN_SECRET_NAME)?,
+        refresh_token: load_named_secret(vault_path, DROPBOX_REFRESH_TOKEN_SECRET_NAME)?,
+        client_id: load_named_secret(vault_path, DROPBOX_APP_KEY_SECRET_NAME)?,
+        client_secret: load_named_secret(vault_path, DROPBOX_APP_SECRET_SECRET_NAME)?,
+    }
+    .normalized())
+}
+
+pub fn store_google_drive_keychain_credentials(
+    vault_path: &Path,
+    credentials: &OAuthCredentialBundle,
+) -> Result<(), String> {
+    store_optional_named_secret(
+        vault_path,
+        GDRIVE_ACCESS_TOKEN_SECRET_NAME,
+        credentials.access_token.as_ref(),
+    )?;
+    store_optional_named_secret(
+        vault_path,
+        GDRIVE_REFRESH_TOKEN_SECRET_NAME,
+        credentials.refresh_token.as_ref(),
+    )?;
+    store_optional_named_secret(
+        vault_path,
+        GDRIVE_CLIENT_ID_SECRET_NAME,
+        credentials.client_id.as_ref(),
+    )?;
+    store_optional_named_secret(
+        vault_path,
+        GDRIVE_CLIENT_SECRET_SECRET_NAME,
+        credentials.client_secret.as_ref(),
+    )
+}
+
+pub fn store_dropbox_keychain_credentials(
+    vault_path: &Path,
+    credentials: &OAuthCredentialBundle,
+) -> Result<(), String> {
+    store_optional_named_secret(
+        vault_path,
+        DROPBOX_ACCESS_TOKEN_SECRET_NAME,
+        credentials.access_token.as_ref(),
+    )?;
+    store_optional_named_secret(
+        vault_path,
+        DROPBOX_REFRESH_TOKEN_SECRET_NAME,
+        credentials.refresh_token.as_ref(),
+    )?;
+    store_optional_named_secret(
+        vault_path,
+        DROPBOX_APP_KEY_SECRET_NAME,
+        credentials.client_id.as_ref(),
+    )?;
+    store_optional_named_secret(
+        vault_path,
+        DROPBOX_APP_SECRET_SECRET_NAME,
+        credentials.client_secret.as_ref(),
+    )
+}
+
+pub fn clear_google_drive_keychain_credentials(vault_path: &Path) -> Result<(), String> {
+    delete_named_secret(vault_path, GDRIVE_ACCESS_TOKEN_SECRET_NAME)?;
+    delete_named_secret(vault_path, GDRIVE_REFRESH_TOKEN_SECRET_NAME)?;
+    delete_named_secret(vault_path, GDRIVE_CLIENT_ID_SECRET_NAME)?;
+    delete_named_secret(vault_path, GDRIVE_CLIENT_SECRET_SECRET_NAME)
+}
+
+pub fn clear_dropbox_keychain_credentials(vault_path: &Path) -> Result<(), String> {
+    delete_named_secret(vault_path, DROPBOX_ACCESS_TOKEN_SECRET_NAME)?;
+    delete_named_secret(vault_path, DROPBOX_REFRESH_TOKEN_SECRET_NAME)?;
+    delete_named_secret(vault_path, DROPBOX_APP_KEY_SECRET_NAME)?;
+    delete_named_secret(vault_path, DROPBOX_APP_SECRET_SECRET_NAME)
+}
+
+fn store_optional_named_secret(
+    vault_path: &Path,
+    secret_name: &str,
+    secret: Option<&SecretString>,
+) -> Result<(), String> {
+    match secret {
+        Some(secret) if !secret.expose_secret().trim().is_empty() => {
+            store_named_secret(vault_path, secret_name, secret)
+        }
+        _ => delete_named_secret(vault_path, secret_name),
+    }
 }
 
 pub fn check_for_updates(current_version: &str) -> Result<UpdateInfo, String> {

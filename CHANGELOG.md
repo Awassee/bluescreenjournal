@@ -2,9 +2,13 @@
 
 ## Unreleased
 
+## v1.3.2
+
 - added config-backed sync defaults for `sync_backend_preference`, `gdrive_folder_id`, and `dropbox_root`
 - made CLI/TUI sync flows honor saved Setup defaults after env overrides, so direct cloud connectors no longer require `BSJ_SYNC_BACKEND` on every run
 - expanded `SETUP -> Cloud Provider Setup` to cover both folder sync providers and direct Google Drive / Dropbox API modes
+- added macOS Keychain-backed storage for direct Google Drive and Dropbox connector credentials
+- taught `bsj sync`, `bsj cloud status`, `bsj cloud recover`, TUI sync, and SYSOP preview to merge env credentials with vault-scoped Keychain credentials
 - improved sync trust surfaces in Dashboard, Journal Health, Sync Center, Cloud Status, and `doctor`
 - hardened installer launch fallback and refreshed post-install menu-first guidance
 - extended smoke install coverage for the updated cloud setup messaging

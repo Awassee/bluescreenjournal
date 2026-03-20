@@ -238,7 +238,8 @@ These config keys are designed for menu-driven setup and non-secret defaults:
 - `dropbox_root`
   - saved default direct Dropbox root path
 
-Secrets for direct cloud connectors still belong in env vars or a future secure store, not in config.
+Secrets for direct cloud connectors do not belong in config.
+Use env vars and/or `SETUP -> Cloud Provider Setup -> Store ... Credentials`; in-product stored values go to macOS Keychain, not config.
 
 ## Diagnostics And Logging
 

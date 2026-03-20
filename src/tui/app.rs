@@ -19,7 +19,7 @@ use crate::{
 };
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -72,6 +72,7 @@ pub enum Overlay {
     MetadataPrompt(MetadataPrompt),
     ExportPrompt(ExportPrompt),
     SettingPrompt(SettingPrompt),
+    CloudCredentialPrompt(CloudCredentialPrompt),
     Index(IndexState),
     SyncStatus(SyncStatusOverlay),
     RestorePrompt(RestorePrompt),
@@ -1425,6 +1426,140 @@ impl SettingPrompt {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloudCredentialProvider {
+    GoogleDrive,
+    Dropbox,
+}
+
+impl CloudCredentialProvider {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::GoogleDrive => "Google Drive",
+            Self::Dropbox => "Dropbox",
+        }
+    }
+
+    fn backend_name(self) -> &'static str {
+        match self {
+            Self::GoogleDrive => "gdrive",
+            Self::Dropbox => "dropbox",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloudCredentialField {
+    AccessToken,
+    RefreshToken,
+    ClientId,
+    ClientSecret,
+}
+
+impl CloudCredentialField {
+    pub(crate) fn label(self, provider: CloudCredentialProvider) -> &'static str {
+        match (provider, self) {
+            (_, Self::AccessToken) => "Access Token",
+            (_, Self::RefreshToken) => "Refresh Token",
+            (CloudCredentialProvider::GoogleDrive, Self::ClientId) => "Client ID",
+            (CloudCredentialProvider::GoogleDrive, Self::ClientSecret) => "Client Secret",
+            (CloudCredentialProvider::Dropbox, Self::ClientId) => "App Key",
+            (CloudCredentialProvider::Dropbox, Self::ClientSecret) => "App Secret",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CloudCredentialPrompt {
+    pub provider: CloudCredentialProvider,
+    pub access_token_input: String,
+    pub refresh_token_input: String,
+    pub client_id_input: String,
+    pub client_secret_input: String,
+    pub active_field: CloudCredentialField,
+    pub error: Option<String>,
+}
+
+impl CloudCredentialPrompt {
+    fn new(provider: CloudCredentialProvider, credentials: sync::OAuthCredentialBundle) -> Self {
+        Self {
+            provider,
+            access_token_input: credentials
+                .access_token
+                .as_ref()
+                .map(|secret| secret.expose_secret().to_string())
+                .unwrap_or_default(),
+            refresh_token_input: credentials
+                .refresh_token
+                .as_ref()
+                .map(|secret| secret.expose_secret().to_string())
+                .unwrap_or_default(),
+            client_id_input: credentials
+                .client_id
+                .as_ref()
+                .map(|secret| secret.expose_secret().to_string())
+                .unwrap_or_default(),
+            client_secret_input: credentials
+                .client_secret
+                .as_ref()
+                .map(|secret| secret.expose_secret().to_string())
+                .unwrap_or_default(),
+            active_field: CloudCredentialField::AccessToken,
+            error: None,
+        }
+    }
+
+    fn cycle(&mut self) {
+        self.active_field = match self.active_field {
+            CloudCredentialField::AccessToken => CloudCredentialField::RefreshToken,
+            CloudCredentialField::RefreshToken => CloudCredentialField::ClientId,
+            CloudCredentialField::ClientId => CloudCredentialField::ClientSecret,
+            CloudCredentialField::ClientSecret => CloudCredentialField::AccessToken,
+        };
+    }
+
+    fn active_input_mut(&mut self) -> &mut String {
+        match self.active_field {
+            CloudCredentialField::AccessToken => &mut self.access_token_input,
+            CloudCredentialField::RefreshToken => &mut self.refresh_token_input,
+            CloudCredentialField::ClientId => &mut self.client_id_input,
+            CloudCredentialField::ClientSecret => &mut self.client_secret_input,
+        }
+    }
+
+    pub(crate) fn masked_value(&self, field: CloudCredentialField) -> String {
+        let input = match field {
+            CloudCredentialField::AccessToken => &self.access_token_input,
+            CloudCredentialField::RefreshToken => &self.refresh_token_input,
+            CloudCredentialField::ClientId => &self.client_id_input,
+            CloudCredentialField::ClientSecret => &self.client_secret_input,
+        };
+        if input.is_empty() {
+            "[blank]".to_string()
+        } else {
+            "*".repeat(input.chars().count().min(48))
+        }
+    }
+
+    fn credentials(&self) -> sync::OAuthCredentialBundle {
+        sync::OAuthCredentialBundle {
+            access_token: secret_from_prompt(&self.access_token_input),
+            refresh_token: secret_from_prompt(&self.refresh_token_input),
+            client_id: secret_from_prompt(&self.client_id_input),
+            client_secret: secret_from_prompt(&self.client_secret_input),
+        }
+        .normalized()
+    }
+
+    fn wipe(&mut self) {
+        self.access_token_input.zeroize();
+        self.refresh_token_input.zeroize();
+        self.client_id_input.zeroize();
+        self.client_secret_input.zeroize();
+        zeroize_optional_string(&mut self.error);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MetadataField {
     Tags,
     People,
@@ -1731,6 +1866,10 @@ pub enum MenuAction {
     CloudProviderSetup,
     UseDirectGoogleDrive,
     UseDirectDropbox,
+    EditGoogleDriveCredentials,
+    ClearGoogleDriveCredentials,
+    EditDropboxCredentials,
+    ClearDropboxCredentials,
     SetCloudProvider(platform::CloudProvider),
     Help,
 }
@@ -2391,6 +2530,7 @@ impl App {
                 Some(Overlay::MetadataPrompt(_)) => "METADATA",
                 Some(Overlay::ExportPrompt(_)) => "EXPORT",
                 Some(Overlay::SettingPrompt(_)) => "SETUP",
+                Some(Overlay::CloudCredentialPrompt(_)) => "KEYCHAIN",
                 Some(Overlay::Index(_)) => "INDEX",
                 Some(Overlay::SyncStatus(_)) => "SYNC",
                 Some(Overlay::RestorePrompt(_)) => "RESTORE",
@@ -2619,6 +2759,7 @@ impl App {
             Overlay::MetadataPrompt(_) => Some("METADATA: TAB FIELDS | ENTER SAVE"),
             Overlay::ExportPrompt(_) => Some("EXPORT: TAB FORMAT | ENTER WRITE"),
             Overlay::SettingPrompt(_) => Some("SETUP: ENTER SAVE | ESC CANCEL"),
+            Overlay::CloudCredentialPrompt(_) => Some("KEYCHAIN: TAB FIELDS | ENTER SAVE"),
             Overlay::Index(_) => Some("INDEX: TYPE FILTER | 1-4 RANGE | ENTER OPEN"),
             Overlay::SyncStatus(_) => Some("SYNC: ENTER/ESC CLOSE WHEN DONE"),
             Overlay::RestorePrompt(_) => Some("RESTORE: TAB STAGE | ENTER CONTINUE"),
@@ -3471,6 +3612,22 @@ impl App {
                     action: PickerAction::Menu(MenuAction::UseDirectGoogleDrive),
                 },
                 PickerItem {
+                    title: "Store Google Drive Credentials".to_string(),
+                    detail: truncate_for_picker(
+                        &direct_connector_status_line("gdrive", &self.config),
+                        44,
+                    ),
+                    keywords: "sync cloud google drive credentials keychain oauth token refresh"
+                        .to_string(),
+                    action: PickerAction::Menu(MenuAction::EditGoogleDriveCredentials),
+                },
+                PickerItem {
+                    title: "Clear Google Drive Credentials".to_string(),
+                    detail: "KEYCHAIN".to_string(),
+                    keywords: "sync cloud google drive clear keychain credentials".to_string(),
+                    action: PickerAction::Menu(MenuAction::ClearGoogleDriveCredentials),
+                },
+                PickerItem {
                     title: "Use Direct Dropbox API".to_string(),
                     detail: truncate_for_picker(
                         &format!(
@@ -3485,6 +3642,22 @@ impl App {
                     ),
                     keywords: "sync cloud direct dropbox api oauth token root".to_string(),
                     action: PickerAction::Menu(MenuAction::UseDirectDropbox),
+                },
+                PickerItem {
+                    title: "Store Dropbox Credentials".to_string(),
+                    detail: truncate_for_picker(
+                        &direct_connector_status_line("dropbox", &self.config),
+                        44,
+                    ),
+                    keywords: "sync cloud dropbox credentials keychain oauth token refresh"
+                        .to_string(),
+                    action: PickerAction::Menu(MenuAction::EditDropboxCredentials),
+                },
+                PickerItem {
+                    title: "Clear Dropbox Credentials".to_string(),
+                    detail: "KEYCHAIN".to_string(),
+                    keywords: "sync cloud dropbox clear keychain credentials".to_string(),
+                    action: PickerAction::Menu(MenuAction::ClearDropboxCredentials),
                 },
                 PickerItem {
                     title: "Edit Sync Backend Default".to_string(),
@@ -3508,7 +3681,7 @@ impl App {
     }
 
     fn configure_direct_cloud_backend(&mut self, backend: &str) {
-        let env = EnvironmentSettings::capture();
+        let env = EnvironmentSettings::capture_for_vault(&self.vault_path);
         let (title, status, target, next_steps) = match backend {
             "gdrive" => {
                 self.config.sync_backend_preference = Some("gdrive".to_string());
@@ -3525,16 +3698,9 @@ impl App {
                     vec![
                         format!(
                             "Creds      : {}",
-                            if env.gdrive_access_token_set
-                                || (env.gdrive_refresh_token_set
-                                    && env.gdrive_client_id_set
-                                    && env.gdrive_client_secret_set)
-                            {
-                                "READY"
-                            } else {
-                                "SET ENV VARS"
-                            }
+                            direct_connector_auth_source_label("gdrive", &env)
                         ),
+                        "Setup      : SETUP -> Cloud Provider Setup -> Store Google Drive Credentials".to_string(),
                         "Target     : SETUP -> Google Drive Folder ID".to_string(),
                         "Sync       : TOOLS -> Sync Center -> Run Encrypted Sync".to_string(),
                         "Verify     : TOOLS -> Cloud Status + Integrity".to_string(),
@@ -3556,16 +3722,10 @@ impl App {
                     vec![
                         format!(
                             "Creds      : {}",
-                            if env.dropbox_access_token_set
-                                || (env.dropbox_refresh_token_set
-                                    && env.dropbox_app_key_set
-                                    && env.dropbox_app_secret_set)
-                            {
-                                "READY"
-                            } else {
-                                "SET ENV VARS"
-                            }
+                            direct_connector_auth_source_label("dropbox", &env)
                         ),
+                        "Setup      : SETUP -> Cloud Provider Setup -> Store Dropbox Credentials"
+                            .to_string(),
                         "Target     : SETUP -> Dropbox Root".to_string(),
                         "Sync       : TOOLS -> Sync Center -> Run Encrypted Sync".to_string(),
                         "Verify     : TOOLS -> Cloud Status + Integrity".to_string(),
@@ -3591,6 +3751,61 @@ impl App {
         ];
         lines.extend(next_steps.into_iter().map(|line| format!("  {line}")));
         self.open_info_overlay(title, lines.join("\n"));
+    }
+
+    fn open_cloud_credential_prompt(&mut self, provider: CloudCredentialProvider) {
+        let credentials = match provider {
+            CloudCredentialProvider::GoogleDrive => {
+                platform::load_google_drive_keychain_credentials(&self.vault_path)
+            }
+            CloudCredentialProvider::Dropbox => {
+                platform::load_dropbox_keychain_credentials(&self.vault_path)
+            }
+        };
+
+        match credentials {
+            Ok(credentials) => {
+                self.menu = None;
+                self.overlay = Some(Overlay::CloudCredentialPrompt(CloudCredentialPrompt::new(
+                    provider,
+                    credentials,
+                )));
+            }
+            Err(error) => self.flash_status(&format!("KEYCHAIN FAILED: {error}")),
+        }
+    }
+
+    fn clear_cloud_credentials(&mut self, provider: CloudCredentialProvider) {
+        let result = match provider {
+            CloudCredentialProvider::GoogleDrive => {
+                platform::clear_google_drive_keychain_credentials(&self.vault_path)
+            }
+            CloudCredentialProvider::Dropbox => {
+                platform::clear_dropbox_keychain_credentials(&self.vault_path)
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                self.flash_status(&format!(
+                    "{} KEYCHAIN CLEARED.",
+                    provider.backend_name().to_ascii_uppercase()
+                ));
+                self.open_info_overlay(
+                    format!("{} Credentials Cleared", provider.label()),
+                    [
+                        format!("Provider   : {}", provider.label()),
+                        "Storage    : macOS Keychain".to_string(),
+                        "Result     : credentials removed".to_string(),
+                        String::new(),
+                        "Direct sync will now use env vars only until you store new credentials."
+                            .to_string(),
+                    ]
+                    .join("\n"),
+                );
+            }
+            Err(error) => self.flash_status(&format!("KEYCHAIN FAILED: {error}")),
+        }
     }
 
     fn set_sync_target_from_provider(&mut self, provider: platform::CloudProvider) {
@@ -4648,6 +4863,27 @@ impl App {
                         prompt.input.push(ch);
                         prompt.error = None;
                     }
+                }
+                _ => {}
+            },
+            Overlay::CloudCredentialPrompt(prompt) => match key.code {
+                KeyCode::Esc => keep_overlay = false,
+                KeyCode::Tab => {
+                    prompt.cycle();
+                    prompt.error = None;
+                }
+                KeyCode::Backspace => {
+                    prompt.active_input_mut().pop();
+                    prompt.error = None;
+                }
+                KeyCode::Enter => {
+                    if self.apply_cloud_credential_prompt(prompt) {
+                        keep_overlay = false;
+                    }
+                }
+                KeyCode::Char(ch) if Self::is_text_input_key(&key) => {
+                    prompt.active_input_mut().push(ch);
+                    prompt.error = None;
                 }
                 _ => {}
             },
@@ -6538,7 +6774,7 @@ impl App {
         };
         let config_exists = config_path.exists();
         let log_path = logging::log_file_path();
-        let env = EnvironmentSettings::capture();
+        let env = EnvironmentSettings::capture_for_vault(&self.vault_path);
         let (vault_metadata, _) = if vault::vault_exists(&self.config.vault_path) {
             match vault::load_vault_metadata(&self.config.vault_path) {
                 Ok(metadata) => (Some(metadata), None::<String>),
@@ -6569,7 +6805,7 @@ impl App {
         };
         let config_exists = config_path.exists();
         let log_path = logging::log_file_path();
-        let env = EnvironmentSettings::capture();
+        let env = EnvironmentSettings::capture_for_vault(&self.vault_path);
         let (vault_metadata, vault_metadata_error) = if vault::vault_exists(&self.config.vault_path)
         {
             match vault::load_vault_metadata(&self.config.vault_path) {
@@ -6736,7 +6972,7 @@ impl App {
                 let connector = sync_connector_summary_line(&self.config);
                 if connector.contains("NEEDS") {
                     actions.push(format!(
-                        "Finish {backend} connector setup in SETUP -> Cloud Provider Setup and export the required env vars."
+                        "Finish {backend} connector setup in SETUP -> Cloud Provider Setup and store or export the required credentials."
                     ));
                 }
             }
@@ -6823,7 +7059,7 @@ impl App {
     }
 
     fn open_sysop_environment_overlay(&mut self) {
-        let env = EnvironmentSettings::capture();
+        let env = EnvironmentSettings::capture_for_vault(&self.vault_path);
         let lines = [
             "SYSOP Environment".to_string(),
             String::new(),
@@ -6840,30 +7076,51 @@ impl App {
             format!("BSJ_WEBDAV_PASSWORD {}", on_off(env.webdav_password_set)),
             format!(
                 "BSJ_GDRIVE_ACCESS_TOKEN {}",
-                on_off(env.gdrive_access_token_set)
+                secret_source_label(
+                    env.gdrive_access_token_set,
+                    env.gdrive_access_token_keychain
+                )
             ),
             format!(
                 "BSJ_GDRIVE_REFRESH_TOKEN {}",
-                on_off(env.gdrive_refresh_token_set)
+                secret_source_label(
+                    env.gdrive_refresh_token_set,
+                    env.gdrive_refresh_token_keychain
+                )
             ),
-            format!("BSJ_GDRIVE_CLIENT_ID {}", on_off(env.gdrive_client_id_set)),
+            format!(
+                "BSJ_GDRIVE_CLIENT_ID {}",
+                secret_source_label(env.gdrive_client_id_set, env.gdrive_client_id_keychain)
+            ),
             format!(
                 "BSJ_GDRIVE_CLIENT_SECRET {}",
-                on_off(env.gdrive_client_secret_set)
+                secret_source_label(
+                    env.gdrive_client_secret_set,
+                    env.gdrive_client_secret_keychain
+                )
             ),
             format!("BSJ_GDRIVE_FOLDER_ID {}", on_off(env.gdrive_folder_id_set)),
             format!(
                 "BSJ_DROPBOX_ACCESS_TOKEN {}",
-                on_off(env.dropbox_access_token_set)
+                secret_source_label(
+                    env.dropbox_access_token_set,
+                    env.dropbox_access_token_keychain
+                )
             ),
             format!(
                 "BSJ_DROPBOX_REFRESH_TOKEN {}",
-                on_off(env.dropbox_refresh_token_set)
+                secret_source_label(
+                    env.dropbox_refresh_token_set,
+                    env.dropbox_refresh_token_keychain
+                )
             ),
-            format!("BSJ_DROPBOX_APP_KEY {}", on_off(env.dropbox_app_key_set)),
+            format!(
+                "BSJ_DROPBOX_APP_KEY {}",
+                secret_source_label(env.dropbox_app_key_set, env.dropbox_app_key_keychain)
+            ),
             format!(
                 "BSJ_DROPBOX_APP_SECRET {}",
-                on_off(env.dropbox_app_secret_set)
+                secret_source_label(env.dropbox_app_secret_set, env.dropbox_app_secret_keychain)
             ),
             format!("BSJ_DROPBOX_ROOT {}", on_off(env.dropbox_root_set)),
         ]
@@ -8952,6 +9209,18 @@ impl App {
             MenuAction::CloudProviderSetup => self.open_cloud_provider_setup_overlay(),
             MenuAction::UseDirectGoogleDrive => self.configure_direct_cloud_backend("gdrive"),
             MenuAction::UseDirectDropbox => self.configure_direct_cloud_backend("dropbox"),
+            MenuAction::EditGoogleDriveCredentials => {
+                self.open_cloud_credential_prompt(CloudCredentialProvider::GoogleDrive)
+            }
+            MenuAction::ClearGoogleDriveCredentials => {
+                self.clear_cloud_credentials(CloudCredentialProvider::GoogleDrive)
+            }
+            MenuAction::EditDropboxCredentials => {
+                self.open_cloud_credential_prompt(CloudCredentialProvider::Dropbox)
+            }
+            MenuAction::ClearDropboxCredentials => {
+                self.clear_cloud_credentials(CloudCredentialProvider::Dropbox)
+            }
             MenuAction::SetCloudProvider(provider) => self.set_sync_target_from_provider(provider),
             MenuAction::Help => self.overlay = Some(Overlay::Help),
         }
@@ -9388,13 +9657,13 @@ impl App {
                     .map_err(|error| format!("sync failed: {error}"))
             }
             SyncRequest::GDrive { remote, .. } => {
-                let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
+                let mut backend = build_google_drive_backend(&self.vault_path, remote.as_deref())?;
                 vault
                     .sync_with_backend(&mut backend)
                     .map_err(|error| format!("sync failed: {error}"))
             }
             SyncRequest::Dropbox { remote, .. } => {
-                let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
+                let mut backend = build_dropbox_backend(&self.vault_path, remote.as_deref())?;
                 vault
                     .sync_with_backend(&mut backend)
                     .map_err(|error| format!("sync failed: {error}"))
@@ -9428,12 +9697,12 @@ impl App {
                     .map_err(|error| format!("cloud recovery failed: {error}"))?
             }
             SyncRequest::GDrive { remote, .. } => {
-                let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
+                let mut backend = build_google_drive_backend(&self.vault_path, remote.as_deref())?;
                 sync::recover_root(&self.vault_path, &mut backend)
                     .map_err(|error| format!("cloud recovery failed: {error}"))?
             }
             SyncRequest::Dropbox { remote, .. } => {
-                let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
+                let mut backend = build_dropbox_backend(&self.vault_path, remote.as_deref())?;
                 sync::recover_root(&self.vault_path, &mut backend)
                     .map_err(|error| format!("cloud recovery failed: {error}"))?
             }
@@ -9508,12 +9777,12 @@ impl App {
                     .map_err(|error| format!("preview failed: {error}"))
             }
             SyncRequest::GDrive { remote, .. } => {
-                let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
+                let mut backend = build_google_drive_backend(&self.vault_path, remote.as_deref())?;
                 sync::preview_root(vault.metadata(), &self.vault_path, &mut backend)
                     .map_err(|error| format!("preview failed: {error}"))
             }
             SyncRequest::Dropbox { remote, .. } => {
-                let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
+                let mut backend = build_dropbox_backend(&self.vault_path, remote.as_deref())?;
                 sync::preview_root(vault.metadata(), &self.vault_path, &mut backend)
                     .map_err(|error| format!("preview failed: {error}"))
             }
@@ -9990,6 +10259,57 @@ impl App {
             | SettingField::BackupMonthly => "RETENTION UPDATED.",
         });
         true
+    }
+
+    fn apply_cloud_credential_prompt(&mut self, prompt: &mut CloudCredentialPrompt) -> bool {
+        let credentials = prompt.credentials();
+        if !credentials.ready() {
+            let provider = prompt.provider;
+            prompt.error = Some(format!(
+                "{} needs either an access token or refresh token + client credentials.",
+                provider.label()
+            ));
+            return false;
+        }
+
+        let result = match prompt.provider {
+            CloudCredentialProvider::GoogleDrive => {
+                platform::store_google_drive_keychain_credentials(&self.vault_path, &credentials)
+            }
+            CloudCredentialProvider::Dropbox => {
+                platform::store_dropbox_keychain_credentials(&self.vault_path, &credentials)
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                let provider = prompt.provider;
+                let source = direct_connector_auth_source_label(
+                    provider.backend_name(),
+                    &EnvironmentSettings::capture_for_vault(&self.vault_path),
+                );
+                self.flash_status(&format!(
+                    "{} KEYCHAIN READY.",
+                    provider.backend_name().to_ascii_uppercase()
+                ));
+                self.open_info_overlay(
+                    format!("{} Credentials Saved", provider.label()),
+                    [
+                        format!("Provider   : {}", provider.label()),
+                        "Storage    : macOS Keychain".to_string(),
+                        format!("Status     : {source}"),
+                        String::new(),
+                        "Env vars still override matching fields when present.".to_string(),
+                    ]
+                    .join("\n"),
+                );
+                true
+            }
+            Err(error) => {
+                prompt.error = Some(format!("Keychain write failed: {error}"));
+                false
+            }
+        }
     }
 
     fn apply_export_prompt(&mut self, prompt: &mut ExportPrompt) -> bool {
@@ -10915,17 +11235,80 @@ fn sync_target_label_dropbox(config: &AppConfig) -> String {
     }
 }
 
+fn build_google_drive_backend(
+    vault_path: &Path,
+    remote: Option<&str>,
+) -> Result<sync::GoogleDriveBackend, String> {
+    let credentials = sync::OAuthCredentialBundle::from_env(
+        "BSJ_GDRIVE_ACCESS_TOKEN",
+        "BSJ_GDRIVE_REFRESH_TOKEN",
+        "BSJ_GDRIVE_CLIENT_ID",
+        "BSJ_GDRIVE_CLIENT_SECRET",
+    )
+    .fill_missing_from(platform::load_google_drive_keychain_credentials(
+        vault_path,
+    )?);
+    sync::GoogleDriveBackend::from_remote_with_credentials(remote, credentials)
+}
+
+fn build_dropbox_backend(
+    vault_path: &Path,
+    remote: Option<&str>,
+) -> Result<sync::DropboxBackend, String> {
+    let credentials = sync::OAuthCredentialBundle::from_env(
+        "BSJ_DROPBOX_ACCESS_TOKEN",
+        "BSJ_DROPBOX_REFRESH_TOKEN",
+        "BSJ_DROPBOX_APP_KEY",
+        "BSJ_DROPBOX_APP_SECRET",
+    )
+    .fill_missing_from(platform::load_dropbox_keychain_credentials(vault_path)?);
+    sync::DropboxBackend::from_remote_with_credentials(remote, credentials)
+}
+
+fn direct_connector_auth_source_label(backend: &str, env: &EnvironmentSettings) -> &'static str {
+    let (env_presence, keychain_presence) = match backend {
+        "gdrive" => (
+            sync::OAuthCredentialPresence {
+                access_token: env.gdrive_access_token_set,
+                refresh_token: env.gdrive_refresh_token_set,
+                client_id: env.gdrive_client_id_set,
+                client_secret: env.gdrive_client_secret_set,
+            },
+            sync::OAuthCredentialPresence {
+                access_token: env.gdrive_access_token_keychain,
+                refresh_token: env.gdrive_refresh_token_keychain,
+                client_id: env.gdrive_client_id_keychain,
+                client_secret: env.gdrive_client_secret_keychain,
+            },
+        ),
+        "dropbox" => (
+            sync::OAuthCredentialPresence {
+                access_token: env.dropbox_access_token_set,
+                refresh_token: env.dropbox_refresh_token_set,
+                client_id: env.dropbox_app_key_set,
+                client_secret: env.dropbox_app_secret_set,
+            },
+            sync::OAuthCredentialPresence {
+                access_token: env.dropbox_access_token_keychain,
+                refresh_token: env.dropbox_refresh_token_keychain,
+                client_id: env.dropbox_app_key_keychain,
+                client_secret: env.dropbox_app_secret_keychain,
+            },
+        ),
+        _ => return "UNKNOWN",
+    };
+
+    env_presence.source_label(keychain_presence)
+}
+
 fn direct_connector_status_line(backend: &str, config: &AppConfig) -> String {
-    let env = EnvironmentSettings::capture();
+    let env = EnvironmentSettings::capture_for_vault(&config.vault_path);
+    let auth_source = direct_connector_auth_source_label(backend, &env);
     match backend {
         "gdrive" => {
-            if env.gdrive_access_token_set
-                || (env.gdrive_refresh_token_set
-                    && env.gdrive_client_id_set
-                    && env.gdrive_client_secret_set)
-            {
+            if env.gdrive_auth_ready() {
                 format!(
-                    "READY | {}",
+                    "READY {auth_source} | {}",
                     if env.gdrive_folder_id_set {
                         "env target".to_string()
                     } else {
@@ -10933,17 +11316,13 @@ fn direct_connector_status_line(backend: &str, config: &AppConfig) -> String {
                     }
                 )
             } else {
-                "NEEDS TOKENS".to_string()
+                "NEEDS CREDS".to_string()
             }
         }
         "dropbox" => {
-            if env.dropbox_access_token_set
-                || (env.dropbox_refresh_token_set
-                    && env.dropbox_app_key_set
-                    && env.dropbox_app_secret_set)
-            {
+            if env.dropbox_auth_ready() {
                 format!(
-                    "READY | {}",
+                    "READY {auth_source} | {}",
                     if env.dropbox_root_set {
                         "env target".to_string()
                     } else {
@@ -10951,7 +11330,7 @@ fn direct_connector_status_line(backend: &str, config: &AppConfig) -> String {
                     }
                 )
             } else {
-                "NEEDS TOKENS".to_string()
+                "NEEDS CREDS".to_string()
             }
         }
         _ => "UNKNOWN".to_string(),
@@ -10968,7 +11347,7 @@ fn sync_connector_summary_line(config: &AppConfig) -> String {
             }
         }
         Ok(Some(backend)) if backend == "s3" => {
-            let env = EnvironmentSettings::capture();
+            let env = EnvironmentSettings::capture_for_vault(&config.vault_path);
             if env.s3_bucket_set {
                 "READY | env bucket".to_string()
             } else {
@@ -10976,7 +11355,7 @@ fn sync_connector_summary_line(config: &AppConfig) -> String {
             }
         }
         Ok(Some(backend)) if backend == "webdav" => {
-            let env = EnvironmentSettings::capture();
+            let env = EnvironmentSettings::capture_for_vault(&config.vault_path);
             if env.webdav_url_set && (!env.webdav_username_set || env.webdav_password_set) {
                 "READY | env WebDAV".to_string()
             } else {
@@ -11426,6 +11805,24 @@ fn on_off(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
+fn secret_source_label(env_set: bool, keychain_set: bool) -> &'static str {
+    match (env_set, keychain_set) {
+        (true, true) => "env+keychain",
+        (true, false) => "env",
+        (false, true) => "keychain",
+        (false, false) => "no",
+    }
+}
+
+fn secret_from_prompt(value: &str) -> Option<SecretString> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(SecretString::new(trimmed.to_string().into_boxed_str()))
+    }
+}
+
 fn ai_remote_requested() -> bool {
     env::var("BSJ_AI_ENABLE_REMOTE")
         .ok()
@@ -11486,6 +11883,7 @@ fn wipe_overlay(overlay: &mut Overlay) {
         Overlay::MetadataPrompt(prompt) => prompt.wipe(),
         Overlay::ExportPrompt(prompt) => prompt.wipe(),
         Overlay::SettingPrompt(prompt) => prompt.wipe(),
+        Overlay::CloudCredentialPrompt(prompt) => prompt.wipe(),
         Overlay::Index(index) => index.wipe(),
         Overlay::SyncStatus(sync_status) => sync_status.wipe(),
         Overlay::RestorePrompt(prompt) => prompt.wipe(),
@@ -15107,6 +15505,18 @@ mod tests {
                         .items
                         .iter()
                         .any(|item| item.title == "Use Direct Dropbox API")
+                );
+                assert!(
+                    picker
+                        .items
+                        .iter()
+                        .any(|item| item.title == "Store Google Drive Credentials")
+                );
+                assert!(
+                    picker
+                        .items
+                        .iter()
+                        .any(|item| item.title == "Store Dropbox Credentials")
                 );
             }
             other => panic!("expected cloud provider picker, got {other:?}"),

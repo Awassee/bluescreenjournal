@@ -10,6 +10,7 @@ use reqwest::{
     blocking::{Client as HttpClient, RequestBuilder},
 };
 use roxmltree::Document;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -586,45 +587,141 @@ struct DavResource {
     is_collection: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct OAuthCredentialBundle {
+    pub access_token: Option<SecretString>,
+    pub refresh_token: Option<SecretString>,
+    pub client_id: Option<SecretString>,
+    pub client_secret: Option<SecretString>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OAuthCredentialPresence {
+    pub access_token: bool,
+    pub refresh_token: bool,
+    pub client_id: bool,
+    pub client_secret: bool,
+}
+
+impl OAuthCredentialPresence {
+    pub fn ready(self) -> bool {
+        self.access_token || (self.refresh_token && self.client_id && self.client_secret)
+    }
+
+    pub fn source_label(self, keychain: Self) -> &'static str {
+        let env_ready = self.ready();
+        let keychain_ready = keychain.ready();
+        match (env_ready, keychain_ready) {
+            (true, true) => "ENV+KEYCHAIN",
+            (true, false) => "ENV",
+            (false, true) => "KEYCHAIN",
+            (false, false) => "MISSING",
+        }
+    }
+}
+
+impl OAuthCredentialBundle {
+    pub fn from_env(
+        access_env: &'static str,
+        refresh_env: &'static str,
+        client_id_env: &'static str,
+        client_secret_env: &'static str,
+    ) -> Self {
+        Self {
+            access_token: env::var(access_env)
+                .ok()
+                .map(|value| SecretString::new(value.into_boxed_str())),
+            refresh_token: env::var(refresh_env)
+                .ok()
+                .map(|value| SecretString::new(value.into_boxed_str())),
+            client_id: env::var(client_id_env)
+                .ok()
+                .map(|value| SecretString::new(value.into_boxed_str())),
+            client_secret: env::var(client_secret_env)
+                .ok()
+                .map(|value| SecretString::new(value.into_boxed_str())),
+        }
+        .normalized()
+    }
+
+    pub fn normalized(mut self) -> Self {
+        self.access_token = normalize_secret_option(self.access_token);
+        self.refresh_token = normalize_secret_option(self.refresh_token);
+        self.client_id = normalize_secret_option(self.client_id);
+        self.client_secret = normalize_secret_option(self.client_secret);
+        self
+    }
+
+    pub fn fill_missing_from(mut self, fallback: Self) -> Self {
+        let fallback = fallback.normalized();
+        self = self.normalized();
+        if self.access_token.is_none() {
+            self.access_token = fallback.access_token;
+        }
+        if self.refresh_token.is_none() {
+            self.refresh_token = fallback.refresh_token;
+        }
+        if self.client_id.is_none() {
+            self.client_id = fallback.client_id;
+        }
+        if self.client_secret.is_none() {
+            self.client_secret = fallback.client_secret;
+        }
+        self
+    }
+
+    pub fn presence(&self) -> OAuthCredentialPresence {
+        OAuthCredentialPresence {
+            access_token: secret_option_is_present(self.access_token.as_ref()),
+            refresh_token: secret_option_is_present(self.refresh_token.as_ref()),
+            client_id: secret_option_is_present(self.client_id.as_ref()),
+            client_secret: secret_option_is_present(self.client_secret.as_ref()),
+        }
+    }
+
+    pub fn ready(&self) -> bool {
+        self.presence().ready()
+    }
+}
+
 #[derive(Clone, Debug)]
 struct OAuthAccessState {
-    access_token: String,
-    refresh_token: Option<String>,
-    client_id: Option<String>,
-    client_secret: Option<String>,
+    access_token: SecretString,
+    refresh_token: Option<SecretString>,
+    client_id: Option<SecretString>,
+    client_secret: Option<SecretString>,
     provider_label: &'static str,
 }
 
 impl OAuthAccessState {
-    fn from_env(
+    fn from_credentials(
         provider_label: &'static str,
+        credentials: OAuthCredentialBundle,
         access_env: &'static str,
         refresh_env: &'static str,
         client_id_env: &'static str,
         client_secret_env: &'static str,
     ) -> Result<Self, String> {
-        let access_token = env::var(access_env).unwrap_or_default();
-        let refresh_token = env::var(refresh_env).ok();
-        let client_id = env::var(client_id_env).ok();
-        let client_secret = env::var(client_secret_env).ok();
-
-        if access_token.trim().is_empty() && refresh_token.is_none() {
+        let credentials = credentials.normalized();
+        if !credentials.ready() {
             return Err(format!(
                 "missing {access_env}; set {access_env} (or configure {refresh_env}, {client_id_env}, and {client_secret_env})"
             ));
         }
 
         Ok(Self {
-            access_token,
-            refresh_token,
-            client_id,
-            client_secret,
+            access_token: credentials
+                .access_token
+                .unwrap_or_else(|| SecretString::new(String::new().into_boxed_str())),
+            refresh_token: credentials.refresh_token,
+            client_id: credentials.client_id,
+            client_secret: credentials.client_secret,
             provider_label,
         })
     }
 
     fn token(&self) -> &str {
-        self.access_token.as_str()
+        self.access_token.expose_secret()
     }
 
     fn can_refresh(&self) -> bool {
@@ -655,9 +752,9 @@ impl OAuthAccessState {
             .post(token_url)
             .form(&[
                 ("grant_type", "refresh_token"),
-                ("refresh_token", refresh_token.as_str()),
-                ("client_id", client_id.as_str()),
-                ("client_secret", client_secret.as_str()),
+                ("refresh_token", refresh_token.expose_secret()),
+                ("client_id", client_id.expose_secret()),
+                ("client_secret", client_secret.expose_secret()),
             ])
             .send()
             .map_err(|error| {
@@ -681,7 +778,7 @@ impl OAuthAccessState {
                 self.provider_label
             ))
         })?;
-        self.access_token = payload.access_token;
+        self.access_token = SecretString::new(payload.access_token.into_boxed_str());
         Ok(())
     }
 }
@@ -731,12 +828,27 @@ pub struct GoogleDriveBackend {
 }
 
 impl GoogleDriveBackend {
+    #[allow(dead_code)]
     pub fn from_remote(remote: Option<&str>) -> Result<Self, String> {
+        let credentials = OAuthCredentialBundle::from_env(
+            "BSJ_GDRIVE_ACCESS_TOKEN",
+            "BSJ_GDRIVE_REFRESH_TOKEN",
+            "BSJ_GDRIVE_CLIENT_ID",
+            "BSJ_GDRIVE_CLIENT_SECRET",
+        );
+        Self::from_remote_with_credentials(remote, credentials)
+    }
+
+    pub fn from_remote_with_credentials(
+        remote: Option<&str>,
+        credentials: OAuthCredentialBundle,
+    ) -> Result<Self, String> {
         let client = HttpClient::builder()
             .build()
             .map_err(|error| format!("failed to create Google Drive client: {error}"))?;
-        let mut auth = OAuthAccessState::from_env(
+        let mut auth = OAuthAccessState::from_credentials(
             "Google Drive",
+            credentials,
             "BSJ_GDRIVE_ACCESS_TOKEN",
             "BSJ_GDRIVE_REFRESH_TOKEN",
             "BSJ_GDRIVE_CLIENT_ID",
@@ -989,12 +1101,27 @@ pub struct DropboxBackend {
 }
 
 impl DropboxBackend {
+    #[allow(dead_code)]
     pub fn from_remote(remote: Option<&str>) -> Result<Self, String> {
+        let credentials = OAuthCredentialBundle::from_env(
+            "BSJ_DROPBOX_ACCESS_TOKEN",
+            "BSJ_DROPBOX_REFRESH_TOKEN",
+            "BSJ_DROPBOX_APP_KEY",
+            "BSJ_DROPBOX_APP_SECRET",
+        );
+        Self::from_remote_with_credentials(remote, credentials)
+    }
+
+    pub fn from_remote_with_credentials(
+        remote: Option<&str>,
+        credentials: OAuthCredentialBundle,
+    ) -> Result<Self, String> {
         let client = HttpClient::builder()
             .build()
             .map_err(|error| format!("failed to create Dropbox client: {error}"))?;
-        let mut auth = OAuthAccessState::from_env(
+        let mut auth = OAuthAccessState::from_credentials(
             "Dropbox",
+            credentials,
             "BSJ_DROPBOX_ACCESS_TOKEN",
             "BSJ_DROPBOX_REFRESH_TOKEN",
             "BSJ_DROPBOX_APP_KEY",
@@ -1355,6 +1482,16 @@ fn dropbox_object_path(root: &str, key: &str) -> String {
     } else {
         format!("{root}/{key}")
     }
+}
+
+fn normalize_secret_option(value: Option<SecretString>) -> Option<SecretString> {
+    value.filter(|secret| !secret.expose_secret().trim().is_empty())
+}
+
+fn secret_option_is_present(value: Option<&SecretString>) -> bool {
+    value
+        .map(|secret| !secret.expose_secret().trim().is_empty())
+        .unwrap_or(false)
 }
 
 pub fn sync_root<B: SyncBackend>(
@@ -2091,5 +2228,49 @@ mod tests {
 
         assert_eq!(attempts, 1);
         assert!(error.to_string().contains("bad"));
+    }
+
+    #[test]
+    fn oauth_bundle_fills_missing_env_fields_from_keychain_bundle() {
+        let env_bundle = OAuthCredentialBundle {
+            access_token: Some(SecretString::new("env-access".to_string().into_boxed_str())),
+            refresh_token: None,
+            client_id: None,
+            client_secret: None,
+        };
+        let keychain_bundle = OAuthCredentialBundle {
+            access_token: None,
+            refresh_token: Some(SecretString::new("refresh".to_string().into_boxed_str())),
+            client_id: Some(SecretString::new("client".to_string().into_boxed_str())),
+            client_secret: Some(SecretString::new("secret".to_string().into_boxed_str())),
+        };
+
+        let merged = env_bundle.fill_missing_from(keychain_bundle);
+        let presence = merged.presence();
+        assert!(presence.access_token);
+        assert!(presence.refresh_token);
+        assert!(presence.client_id);
+        assert!(presence.client_secret);
+        assert!(merged.ready());
+    }
+
+    #[test]
+    fn oauth_presence_source_label_reflects_env_and_keychain() {
+        let env_presence = OAuthCredentialPresence {
+            access_token: true,
+            ..OAuthCredentialPresence::default()
+        };
+        let keychain_presence = OAuthCredentialPresence {
+            refresh_token: true,
+            client_id: true,
+            client_secret: true,
+            ..OAuthCredentialPresence::default()
+        };
+
+        assert_eq!(env_presence.source_label(keychain_presence), "ENV+KEYCHAIN");
+        assert_eq!(
+            OAuthCredentialPresence::default().source_label(keychain_presence),
+            "KEYCHAIN"
+        );
     }
 }

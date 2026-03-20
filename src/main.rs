@@ -2897,14 +2897,14 @@ fn run_cli_sync(
         }
         SyncBackendArg::Gdrive => {
             let remote = configured_gdrive_remote(&config, remote_arg);
-            let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
+            let mut backend = build_google_drive_backend(&config.vault_path, remote.as_deref())?;
             vault
                 .sync_with_backend(&mut backend)
                 .map_err(|error| format!("sync failed: {error}"))?
         }
         SyncBackendArg::Dropbox => {
             let remote = configured_dropbox_remote(&config, remote_arg);
-            let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
+            let mut backend = build_dropbox_backend(&config.vault_path, remote.as_deref())?;
             vault
                 .sync_with_backend(&mut backend)
                 .map_err(|error| format!("sync failed: {error}"))?
@@ -3265,7 +3265,7 @@ fn run_cli_settings(json_output: bool, command: Option<SettingsCommand>) -> Resu
 
 fn render_settings_report(state: &LoadedConfigState, json_output: bool) -> Result<(), String> {
     let log_path = logging::log_file_path();
-    let env = help::EnvironmentSettings::capture();
+    let env = help::EnvironmentSettings::capture_for_vault(&state.config.vault_path);
     let (vault_metadata, vault_metadata_error) = load_vault_metadata_state(&state.config);
 
     if let Some(error) = state.error.as_deref()
@@ -3388,7 +3388,7 @@ fn run_cli_doctor(unlock: bool, json_output: bool) -> Result<bool, String> {
     log::info!("running CLI doctor");
     let state = load_config_state();
     let log_path = logging::log_file_path();
-    let env = help::EnvironmentSettings::capture();
+    let env = help::EnvironmentSettings::capture_for_vault(&state.config.vault_path);
     let (vault_metadata, vault_metadata_error) = load_vault_metadata_state(&state.config);
     let vault_exists = vault::vault_exists(&state.config.vault_path);
 
@@ -3464,7 +3464,7 @@ fn run_cli_doctor(unlock: bool, json_output: bool) -> Result<bool, String> {
 fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
     log::info!("running CLI sysop");
     let state = load_config_state();
-    let env = help::EnvironmentSettings::capture();
+    let env = help::EnvironmentSettings::capture_for_vault(&state.config.vault_path);
     let log_path = logging::log_file_path();
     let vault_exists = vault::vault_exists(&state.config.vault_path);
 
@@ -3731,11 +3731,19 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
                 "BSJ_GDRIVE_CLIENT_ID": env.gdrive_client_id_set,
                 "BSJ_GDRIVE_CLIENT_SECRET": env.gdrive_client_secret_set,
                 "BSJ_GDRIVE_FOLDER_ID": env.gdrive_folder_id_set,
+                "BSJ_GDRIVE_ACCESS_TOKEN_KEYCHAIN": env.gdrive_access_token_keychain,
+                "BSJ_GDRIVE_REFRESH_TOKEN_KEYCHAIN": env.gdrive_refresh_token_keychain,
+                "BSJ_GDRIVE_CLIENT_ID_KEYCHAIN": env.gdrive_client_id_keychain,
+                "BSJ_GDRIVE_CLIENT_SECRET_KEYCHAIN": env.gdrive_client_secret_keychain,
                 "BSJ_DROPBOX_ACCESS_TOKEN": env.dropbox_access_token_set,
                 "BSJ_DROPBOX_REFRESH_TOKEN": env.dropbox_refresh_token_set,
                 "BSJ_DROPBOX_APP_KEY": env.dropbox_app_key_set,
                 "BSJ_DROPBOX_APP_SECRET": env.dropbox_app_secret_set,
                 "BSJ_DROPBOX_ROOT": env.dropbox_root_set,
+                "BSJ_DROPBOX_ACCESS_TOKEN_KEYCHAIN": env.dropbox_access_token_keychain,
+                "BSJ_DROPBOX_REFRESH_TOKEN_KEYCHAIN": env.dropbox_refresh_token_keychain,
+                "BSJ_DROPBOX_APP_KEY_KEYCHAIN": env.dropbox_app_key_keychain,
+                "BSJ_DROPBOX_APP_SECRET_KEYCHAIN": env.dropbox_app_secret_keychain,
             });
             if json {
                 println!(
@@ -3758,30 +3766,54 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
                 println!("BSJ_WEBDAV_PASSWORD {}", on_off(env.webdav_password_set));
                 println!(
                     "BSJ_GDRIVE_ACCESS_TOKEN {}",
-                    on_off(env.gdrive_access_token_set)
+                    secret_source_label(
+                        env.gdrive_access_token_set,
+                        env.gdrive_access_token_keychain
+                    )
                 );
                 println!(
                     "BSJ_GDRIVE_REFRESH_TOKEN {}",
-                    on_off(env.gdrive_refresh_token_set)
+                    secret_source_label(
+                        env.gdrive_refresh_token_set,
+                        env.gdrive_refresh_token_keychain
+                    )
                 );
-                println!("BSJ_GDRIVE_CLIENT_ID {}", on_off(env.gdrive_client_id_set));
+                println!(
+                    "BSJ_GDRIVE_CLIENT_ID {}",
+                    secret_source_label(env.gdrive_client_id_set, env.gdrive_client_id_keychain)
+                );
                 println!(
                     "BSJ_GDRIVE_CLIENT_SECRET {}",
-                    on_off(env.gdrive_client_secret_set)
+                    secret_source_label(
+                        env.gdrive_client_secret_set,
+                        env.gdrive_client_secret_keychain
+                    )
                 );
                 println!("BSJ_GDRIVE_FOLDER_ID {}", on_off(env.gdrive_folder_id_set));
                 println!(
                     "BSJ_DROPBOX_ACCESS_TOKEN {}",
-                    on_off(env.dropbox_access_token_set)
+                    secret_source_label(
+                        env.dropbox_access_token_set,
+                        env.dropbox_access_token_keychain
+                    )
                 );
                 println!(
                     "BSJ_DROPBOX_REFRESH_TOKEN {}",
-                    on_off(env.dropbox_refresh_token_set)
+                    secret_source_label(
+                        env.dropbox_refresh_token_set,
+                        env.dropbox_refresh_token_keychain
+                    )
                 );
-                println!("BSJ_DROPBOX_APP_KEY {}", on_off(env.dropbox_app_key_set));
+                println!(
+                    "BSJ_DROPBOX_APP_KEY {}",
+                    secret_source_label(env.dropbox_app_key_set, env.dropbox_app_key_keychain)
+                );
                 println!(
                     "BSJ_DROPBOX_APP_SECRET {}",
-                    on_off(env.dropbox_app_secret_set)
+                    secret_source_label(
+                        env.dropbox_app_secret_set,
+                        env.dropbox_app_secret_keychain
+                    )
                 );
                 println!("BSJ_DROPBOX_ROOT {}", on_off(env.dropbox_root_set));
             }
@@ -4215,13 +4247,14 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
                 }
                 SyncBackendArg::Gdrive => {
                     let remote = configured_gdrive_remote(&config, remote.as_deref());
-                    let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
+                    let mut backend =
+                        build_google_drive_backend(&config.vault_path, remote.as_deref())?;
                     sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                         .map_err(|error| format!("sync preview failed: {error}"))?
                 }
                 SyncBackendArg::Dropbox => {
                     let remote = configured_dropbox_remote(&config, remote.as_deref());
-                    let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
+                    let mut backend = build_dropbox_backend(&config.vault_path, remote.as_deref())?;
                     sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                         .map_err(|error| format!("sync preview failed: {error}"))?
                 }
@@ -4256,6 +4289,15 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
 
 fn on_off(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
+}
+
+fn secret_source_label(env_set: bool, keychain_set: bool) -> &'static str {
+    match (env_set, keychain_set) {
+        (true, true) => "env+keychain",
+        (true, false) => "env",
+        (false, true) => "keychain",
+        (false, false) => "no",
+    }
 }
 
 fn run_cli_completions(shell: CompletionShellArg) -> Result<(), String> {
@@ -4457,7 +4499,7 @@ fn preview_with_backend(
         SyncBackendArg::Gdrive => {
             let remote = configured_gdrive_remote(config, remote_arg);
             let target = sync_target_label_gdrive(config, remote_arg);
-            let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
+            let mut backend = build_google_drive_backend(&config.vault_path, remote.as_deref())?;
             let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                 .map_err(|error| format!("cloud status preview failed: {error}"))?;
             Ok((target, preview))
@@ -4465,7 +4507,7 @@ fn preview_with_backend(
         SyncBackendArg::Dropbox => {
             let remote = configured_dropbox_remote(config, remote_arg);
             let target = sync_target_label_dropbox(config, remote_arg);
-            let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
+            let mut backend = build_dropbox_backend(&config.vault_path, remote.as_deref())?;
             let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                 .map_err(|error| format!("cloud status preview failed: {error}"))?;
             Ok((target, preview))
@@ -4520,7 +4562,7 @@ fn recover_with_backend(
         SyncBackendArg::Gdrive => {
             let remote = configured_gdrive_remote(config, remote_arg);
             let target = sync_target_label_gdrive(config, remote_arg);
-            let mut backend = sync::GoogleDriveBackend::from_remote(remote.as_deref())?;
+            let mut backend = build_google_drive_backend(&config.vault_path, remote.as_deref())?;
             let report = sync::recover_root(&config.vault_path, &mut backend)
                 .map_err(|error| format!("cloud recovery failed: {error}"))?;
             Ok((target, report))
@@ -4528,12 +4570,42 @@ fn recover_with_backend(
         SyncBackendArg::Dropbox => {
             let remote = configured_dropbox_remote(config, remote_arg);
             let target = sync_target_label_dropbox(config, remote_arg);
-            let mut backend = sync::DropboxBackend::from_remote(remote.as_deref())?;
+            let mut backend = build_dropbox_backend(&config.vault_path, remote.as_deref())?;
             let report = sync::recover_root(&config.vault_path, &mut backend)
                 .map_err(|error| format!("cloud recovery failed: {error}"))?;
             Ok((target, report))
         }
     }
+}
+
+fn build_google_drive_backend(
+    vault_path: &Path,
+    remote: Option<&str>,
+) -> Result<sync::GoogleDriveBackend, String> {
+    let credentials = sync::OAuthCredentialBundle::from_env(
+        "BSJ_GDRIVE_ACCESS_TOKEN",
+        "BSJ_GDRIVE_REFRESH_TOKEN",
+        "BSJ_GDRIVE_CLIENT_ID",
+        "BSJ_GDRIVE_CLIENT_SECRET",
+    )
+    .fill_missing_from(platform::load_google_drive_keychain_credentials(
+        vault_path,
+    )?);
+    sync::GoogleDriveBackend::from_remote_with_credentials(remote, credentials)
+}
+
+fn build_dropbox_backend(
+    vault_path: &Path,
+    remote: Option<&str>,
+) -> Result<sync::DropboxBackend, String> {
+    let credentials = sync::OAuthCredentialBundle::from_env(
+        "BSJ_DROPBOX_ACCESS_TOKEN",
+        "BSJ_DROPBOX_REFRESH_TOKEN",
+        "BSJ_DROPBOX_APP_KEY",
+        "BSJ_DROPBOX_APP_SECRET",
+    )
+    .fill_missing_from(platform::load_dropbox_keychain_credentials(vault_path)?);
+    sync::DropboxBackend::from_remote_with_credentials(remote, credentials)
 }
 
 fn configured_gdrive_remote(

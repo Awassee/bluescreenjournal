@@ -1,5 +1,6 @@
 use crate::{
     config::{self, AppConfig, MacroActionConfig, MacroCommandConfig},
+    platform,
     vault::VaultMetadata,
 };
 use serde_json::json;
@@ -39,15 +40,26 @@ pub struct EnvironmentSettings {
     pub gdrive_client_id_set: bool,
     pub gdrive_client_secret_set: bool,
     pub gdrive_folder_id_set: bool,
+    pub gdrive_access_token_keychain: bool,
+    pub gdrive_refresh_token_keychain: bool,
+    pub gdrive_client_id_keychain: bool,
+    pub gdrive_client_secret_keychain: bool,
     pub dropbox_access_token_set: bool,
     pub dropbox_refresh_token_set: bool,
     pub dropbox_app_key_set: bool,
     pub dropbox_app_secret_set: bool,
     pub dropbox_root_set: bool,
+    pub dropbox_access_token_keychain: bool,
+    pub dropbox_refresh_token_keychain: bool,
+    pub dropbox_app_key_keychain: bool,
+    pub dropbox_app_secret_keychain: bool,
 }
 
 impl EnvironmentSettings {
-    pub fn capture() -> Self {
+    pub fn capture_for_vault(vault_path: &Path) -> Self {
+        let gdrive_keychain =
+            platform::google_drive_keychain_presence(vault_path).unwrap_or_default();
+        let dropbox_keychain = platform::dropbox_keychain_presence(vault_path).unwrap_or_default();
         Self {
             passphrase_set: std::env::var_os("BSJ_PASSPHRASE").is_some(),
             sync_backend: std::env::var("BSJ_SYNC_BACKEND").ok(),
@@ -62,12 +74,36 @@ impl EnvironmentSettings {
             gdrive_client_id_set: std::env::var_os("BSJ_GDRIVE_CLIENT_ID").is_some(),
             gdrive_client_secret_set: std::env::var_os("BSJ_GDRIVE_CLIENT_SECRET").is_some(),
             gdrive_folder_id_set: std::env::var_os("BSJ_GDRIVE_FOLDER_ID").is_some(),
+            gdrive_access_token_keychain: gdrive_keychain.access_token,
+            gdrive_refresh_token_keychain: gdrive_keychain.refresh_token,
+            gdrive_client_id_keychain: gdrive_keychain.client_id,
+            gdrive_client_secret_keychain: gdrive_keychain.client_secret,
             dropbox_access_token_set: std::env::var_os("BSJ_DROPBOX_ACCESS_TOKEN").is_some(),
             dropbox_refresh_token_set: std::env::var_os("BSJ_DROPBOX_REFRESH_TOKEN").is_some(),
             dropbox_app_key_set: std::env::var_os("BSJ_DROPBOX_APP_KEY").is_some(),
             dropbox_app_secret_set: std::env::var_os("BSJ_DROPBOX_APP_SECRET").is_some(),
             dropbox_root_set: std::env::var_os("BSJ_DROPBOX_ROOT").is_some(),
+            dropbox_access_token_keychain: dropbox_keychain.access_token,
+            dropbox_refresh_token_keychain: dropbox_keychain.refresh_token,
+            dropbox_app_key_keychain: dropbox_keychain.client_id,
+            dropbox_app_secret_keychain: dropbox_keychain.client_secret,
         }
+    }
+
+    pub fn gdrive_auth_ready(&self) -> bool {
+        self.gdrive_access_token_set
+            || self.gdrive_access_token_keychain
+            || ((self.gdrive_refresh_token_set || self.gdrive_refresh_token_keychain)
+                && (self.gdrive_client_id_set || self.gdrive_client_id_keychain)
+                && (self.gdrive_client_secret_set || self.gdrive_client_secret_keychain))
+    }
+
+    pub fn dropbox_auth_ready(&self) -> bool {
+        self.dropbox_access_token_set
+            || self.dropbox_access_token_keychain
+            || ((self.dropbox_refresh_token_set || self.dropbox_refresh_token_keychain)
+                && (self.dropbox_app_key_set || self.dropbox_app_key_keychain)
+                && (self.dropbox_app_secret_set || self.dropbox_app_secret_keychain))
     }
 }
 
@@ -419,22 +455,31 @@ pub fn render_settings_report(
     push_row(
         &mut output,
         "BSJ_GDRIVE_ACCESS_TOKEN",
-        set_status(env.gdrive_access_token_set),
+        secret_status(
+            env.gdrive_access_token_set,
+            env.gdrive_access_token_keychain,
+        ),
     );
     push_row(
         &mut output,
         "BSJ_GDRIVE_REFRESH_TOKEN",
-        set_status(env.gdrive_refresh_token_set),
+        secret_status(
+            env.gdrive_refresh_token_set,
+            env.gdrive_refresh_token_keychain,
+        ),
     );
     push_row(
         &mut output,
         "BSJ_GDRIVE_CLIENT_ID",
-        set_status(env.gdrive_client_id_set),
+        secret_status(env.gdrive_client_id_set, env.gdrive_client_id_keychain),
     );
     push_row(
         &mut output,
         "BSJ_GDRIVE_CLIENT_SECRET",
-        set_status(env.gdrive_client_secret_set),
+        secret_status(
+            env.gdrive_client_secret_set,
+            env.gdrive_client_secret_keychain,
+        ),
     );
     push_row(
         &mut output,
@@ -444,22 +489,28 @@ pub fn render_settings_report(
     push_row(
         &mut output,
         "BSJ_DROPBOX_ACCESS_TOKEN",
-        set_status(env.dropbox_access_token_set),
+        secret_status(
+            env.dropbox_access_token_set,
+            env.dropbox_access_token_keychain,
+        ),
     );
     push_row(
         &mut output,
         "BSJ_DROPBOX_REFRESH_TOKEN",
-        set_status(env.dropbox_refresh_token_set),
+        secret_status(
+            env.dropbox_refresh_token_set,
+            env.dropbox_refresh_token_keychain,
+        ),
     );
     push_row(
         &mut output,
         "BSJ_DROPBOX_APP_KEY",
-        set_status(env.dropbox_app_key_set),
+        secret_status(env.dropbox_app_key_set, env.dropbox_app_key_keychain),
     );
     push_row(
         &mut output,
         "BSJ_DROPBOX_APP_SECRET",
-        set_status(env.dropbox_app_secret_set),
+        secret_status(env.dropbox_app_secret_set, env.dropbox_app_secret_keychain),
     );
     push_row(
         &mut output,
@@ -566,15 +617,15 @@ pub fn render_settings_json(
             "BSJ_WEBDAV_URL": { "set": env.webdav_url_set },
             "BSJ_WEBDAV_USERNAME": { "set": env.webdav_username_set },
             "BSJ_WEBDAV_PASSWORD": { "set": env.webdav_password_set },
-            "BSJ_GDRIVE_ACCESS_TOKEN": { "set": env.gdrive_access_token_set },
-            "BSJ_GDRIVE_REFRESH_TOKEN": { "set": env.gdrive_refresh_token_set },
-            "BSJ_GDRIVE_CLIENT_ID": { "set": env.gdrive_client_id_set },
-            "BSJ_GDRIVE_CLIENT_SECRET": { "set": env.gdrive_client_secret_set },
+            "BSJ_GDRIVE_ACCESS_TOKEN": secret_json_status(env.gdrive_access_token_set, env.gdrive_access_token_keychain),
+            "BSJ_GDRIVE_REFRESH_TOKEN": secret_json_status(env.gdrive_refresh_token_set, env.gdrive_refresh_token_keychain),
+            "BSJ_GDRIVE_CLIENT_ID": secret_json_status(env.gdrive_client_id_set, env.gdrive_client_id_keychain),
+            "BSJ_GDRIVE_CLIENT_SECRET": secret_json_status(env.gdrive_client_secret_set, env.gdrive_client_secret_keychain),
             "BSJ_GDRIVE_FOLDER_ID": { "set": env.gdrive_folder_id_set },
-            "BSJ_DROPBOX_ACCESS_TOKEN": { "set": env.dropbox_access_token_set },
-            "BSJ_DROPBOX_REFRESH_TOKEN": { "set": env.dropbox_refresh_token_set },
-            "BSJ_DROPBOX_APP_KEY": { "set": env.dropbox_app_key_set },
-            "BSJ_DROPBOX_APP_SECRET": { "set": env.dropbox_app_secret_set },
+            "BSJ_DROPBOX_ACCESS_TOKEN": secret_json_status(env.dropbox_access_token_set, env.dropbox_access_token_keychain),
+            "BSJ_DROPBOX_REFRESH_TOKEN": secret_json_status(env.dropbox_refresh_token_set, env.dropbox_refresh_token_keychain),
+            "BSJ_DROPBOX_APP_KEY": secret_json_status(env.dropbox_app_key_set, env.dropbox_app_key_keychain),
+            "BSJ_DROPBOX_APP_SECRET": secret_json_status(env.dropbox_app_secret_set, env.dropbox_app_secret_keychain),
             "BSJ_DROPBOX_ROOT": { "set": env.dropbox_root_set },
         }
     })
@@ -600,6 +651,23 @@ fn set_status(set: bool) -> String {
     } else {
         "unset".to_string()
     }
+}
+
+fn secret_status(env_set: bool, keychain_set: bool) -> String {
+    match (env_set, keychain_set) {
+        (true, true) => "set (env+keychain)".to_string(),
+        (true, false) => "set (env)".to_string(),
+        (false, true) => "set (keychain)".to_string(),
+        (false, false) => "unset".to_string(),
+    }
+}
+
+fn secret_json_status(env_set: bool, keychain_set: bool) -> serde_json::Value {
+    json!({
+        "set": env_set || keychain_set,
+        "env": env_set,
+        "keychain": keychain_set,
+    })
 }
 
 fn path_to_string(path: &Path) -> String {
@@ -814,11 +882,19 @@ mod tests {
             gdrive_client_id_set: false,
             gdrive_client_secret_set: false,
             gdrive_folder_id_set: false,
+            gdrive_access_token_keychain: false,
+            gdrive_refresh_token_keychain: false,
+            gdrive_client_id_keychain: false,
+            gdrive_client_secret_keychain: false,
             dropbox_access_token_set: false,
             dropbox_refresh_token_set: false,
             dropbox_app_key_set: false,
             dropbox_app_secret_set: false,
             dropbox_root_set: false,
+            dropbox_access_token_keychain: false,
+            dropbox_refresh_token_keychain: false,
+            dropbox_app_key_keychain: false,
+            dropbox_app_secret_keychain: false,
         };
 
         let report = render_settings_report(
