@@ -1,7 +1,7 @@
 
 
-                                             BLUESCREEN JOURNAL  ENTRY DATE TODAY FRI <DATE> [D+0]  ENTRY NO. 000001  PAG
-                                              FILE   EDIT   SEARCH   GO   TOOLS   SETUP   HELP  ESC MENUS  F1 HELP  F2 SAVE
+                                             BLUESCREEN JOURNAL  TODAY FRI <DATE> [D+0]  ENTRY NO. 000001  PAGE NEXT ENTR
+                                              FILE   EDIT   SEARCH   GO   TOOLS   SETUP   HELP    ESC MENUS  F1 HELP  F2 SAVE
                                              ....+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8
                                              JOURNAL ENTRY <DATE>
 
@@ -24,6 +24,6 @@
 
 
                                              CLOSING THOUGHT: [none - press F9 to add] (closing thought)               F9 ADD
-                                             MODE EDITING | SAVE READY | Ln 2, Col 1 | Words 3 | VER v1.3.2 | NEXT: TYPE | **
+                                             STATE WRITE | SAVE READY | LINE 2 COL 1 | WORDS 3 | VER v2.2.0 | NEXT ENTRY: TYP
 
 

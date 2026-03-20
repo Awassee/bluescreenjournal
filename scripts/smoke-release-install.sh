@@ -149,8 +149,9 @@ HOME="$MENU_HOME" SHELL=/bin/zsh \
   script -q "$MENU_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_PREFIX" >/dev/null
 "$MENU_PREFIX/bin/bsj" --help >/dev/null
 grep -Fq "BlueScreen Journal installer menu" "$MENU_LOG"
-grep -Fq "Print quickstart + key cheat sheet" "$MENU_LOG"
-grep -Fq "BlueScreen Journal Quickstart" "$MENU_LOG"
+grep -Fq "Print first-two-minutes cheat sheet" "$MENU_LOG"
+grep -Fq "BlueScreen Journal Cheat Sheet" "$MENU_LOG"
+grep -Fq "If you only remember three things" "$MENU_LOG"
 grep -Fq "Installer auto-select: 4" "$MENU_LOG"
 grep -Fq "Installer auto-select: 6" "$MENU_LOG"
 grep -Fq "Installer auto-select: 5" "$MENU_LOG"

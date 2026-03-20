@@ -7,6 +7,7 @@ ARTIFACT_DIR="${BSJ_TUI_SNAPSHOT_ARTIFACT_DIR:-$ROOT_DIR/artifacts/tui-snapshots
 ACTUAL_DIR="$ARTIFACT_DIR/actual"
 DIFF_DIR="$ARTIFACT_DIR/diff"
 HTML_INDEX="$ARTIFACT_DIR/index.html"
+SUMMARY_MD="$ARTIFACT_DIR/SUMMARY.md"
 ACCEPT=0
 
 usage() {
@@ -98,6 +99,28 @@ Diffs:              $DIFF_DIR
 Preview:            $HTML_INDEX
 
 Files are plain-text terminal screen captures for core nostalgic UI states.
+EOF
+
+total_snapshots="$(find "$EXPECTED_DIR" -maxdepth 1 -type f -name '*.txt' | wc -l | tr -d ' ')"
+diff_count="$(find "$DIFF_DIR" -maxdepth 1 -type f -name '*.diff' | wc -l | tr -d ' ')"
+if [[ "$diff_count" -eq 0 ]]; then
+  snapshot_result="PASS"
+  snapshot_note="All committed nostalgia screens matched the generated output."
+else
+  snapshot_result="FAIL"
+  snapshot_note="One or more nostalgia screens changed. Open the artifact preview before merging or releasing."
+fi
+
+cat > "$SUMMARY_MD" <<EOF
+## Nostalgia Snapshot Review
+
+- Result: **$snapshot_result**
+- Screens checked: **$total_snapshots**
+- Diffs found: **$diff_count**
+- Preview file: \`artifacts/tui-snapshots/index.html\`
+- Artifact bundle: \`bsj-qa-artifacts\`
+
+$snapshot_note
 EOF
 
 {

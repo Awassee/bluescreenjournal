@@ -155,7 +155,7 @@ Environment overrides:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
-  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.1
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.0
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --doctor
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --repair-path
@@ -973,7 +973,7 @@ run_doctor() {
   fi
 
   printf "\nTroubleshooting hints\n"
-  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v2.1.1\n"
+  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v2.2.0\n"
   printf "  - Latest main build: ./install.sh --source\n"
   printf "  - PATH repair:       ./install.sh --repair-path\n"
   printf "  - About:             ./install.sh --about\n"
@@ -1331,7 +1331,7 @@ BlueScreen Journal installer menu
   1) Launch BlueScreen Journal here now (recommended)
   2) Open BlueScreen Journal in a new Terminal window
   3) Print first-run guide (menu-first flow)
-  4) Print quickstart + key cheat sheet
+  4) Print first-two-minutes cheat sheet
   5) Run health check (doctor) + PATH repair
   6) Show command help
   7) Exit installer
@@ -1359,7 +1359,7 @@ EOF
         "$installed_bin" guide setup || "$installed_bin" guide quickstart || true
         ;;
       4)
-        "$installed_bin" guide quickstart | sed -n '1,120p'
+        "$installed_bin" guide cheatsheet
         ;;
       5)
         "$installed_bin" doctor || true

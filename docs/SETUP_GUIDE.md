@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Install a specific tagged release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.1
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.0
 ```
 
 Install from source instead:
@@ -157,8 +157,10 @@ Menu-first sync setup:
 ## More Reference
 
 - `docs/START_HERE.md`
+- `docs/CHEAT_SHEET.md`
 - `docs/QUICKSTART.md`
 - `bsj guide docs`
+- `bsj guide cheatsheet`
 - `bsj guide quickstart`
 - `bsj guide troubleshooting`
 - `bsj guide sync`

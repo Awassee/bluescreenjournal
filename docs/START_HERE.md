@@ -7,18 +7,19 @@ Use this page as the docs control panel for BlueScreen Journal.
 | I want to... | Start here | Then read |
 | --- | --- | --- |
 | Install and write in under 10 minutes | [README](../README.md) | [QUICKSTART.md](QUICKSTART.md), [SETUP_GUIDE.md](SETUP_GUIDE.md) |
+| Learn the keys fast | [CHEAT_SHEET.md](CHEAT_SHEET.md) | [QUICKSTART.md](QUICKSTART.md), [TERMINAL_GUIDE.md](TERMINAL_GUIDE.md) |
 | Evaluate the product before installing | [PRODUCT_GUIDE.md](PRODUCT_GUIDE.md) | [DATASHEET.md](DATASHEET.md), [COMPARE.md](COMPARE.md) |
 | Understand the blue-screen UX contract | [NOSTALGIA_GUARDRAILS.md](NOSTALGIA_GUARDRAILS.md) | [TERMINAL_GUIDE.md](TERMINAL_GUIDE.md), [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Troubleshoot installer or runtime issues | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | [TERMINAL_GUIDE.md](TERMINAL_GUIDE.md), [SUPPORT.md](../SUPPORT.md) |
 | Configure settings and behavior | [SETTINGS_GUIDE.md](SETTINGS_GUIDE.md) | [config.example.json](config.example.json) |
 | Operate sync/backup safely | [SYNC_GUIDE.md](SYNC_GUIDE.md) | [BACKUP_RESTORE.md](BACKUP_RESTORE.md), [PRIVACY.md](PRIVACY.md) |
-| Package or distribute releases | [DISTRIBUTION.md](DISTRIBUTION.md) | [docs/releases/](releases/), [CHANGELOG.md](../CHANGELOG.md) |
+| Package or distribute releases | [DISTRIBUTION.md](DISTRIBUTION.md) | [RELEASE_CERTIFICATION.md](RELEASE_CERTIFICATION.md), [docs/releases/](releases/), [CHANGELOG.md](../CHANGELOG.md) |
 
 ## Latest release
 
-- current stable: [`v2.1.1`](https://github.com/Awassee/bluescreenjournal/releases/tag/v2.1.1)
-- current release notes: [docs/releases/v2.1.1.md](releases/v2.1.1.md)
-- current patch scope on `main`: [docs/V2_1_2_PLAN.md](V2_1_2_PLAN.md)
+- current stable: [`v2.2.0`](https://github.com/Awassee/bluescreenjournal/releases/tag/v2.2.0)
+- current release notes: [docs/releases/v2.2.0.md](releases/v2.2.0.md)
+- current patch scope on `main`: [docs/V2_2_1_PLAN.md](V2_2_1_PLAN.md)
 - prioritized next work: [docs/NEXT_PRIORITIES.md](NEXT_PRIORITIES.md)
 - full history: [docs/releases/](releases/)
 
@@ -42,6 +43,7 @@ These are optional CLI mirrors of the docs:
 
 - `bsj guide docs`
 - `bsj guide quickstart`
+- `bsj guide cheatsheet`
 - `bsj guide troubleshooting`
 - `bsj guide sync`
 - `bsj guide backup`
@@ -63,7 +65,7 @@ These are the primary public repo entry points to keep current:
 - [README](../README.md)
 - [Start Here](START_HERE.md)
 - [Nostalgia Guardrails](NOSTALGIA_GUARDRAILS.md)
-- [v2.1.2 Patch Plan](V2_1_2_PLAN.md)
+- [v2.2.1 Patch Plan](V2_2_1_PLAN.md)
 - [Next Priorities](NEXT_PRIORITIES.md)
 - [v1.3 Plan](V1_3_PLAN.md)
 - [Support](../SUPPORT.md)

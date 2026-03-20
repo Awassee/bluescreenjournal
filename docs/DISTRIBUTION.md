@@ -15,6 +15,7 @@ For the user-facing product story and capability summary, pair this guide with:
 
 - `docs/PRODUCT_GUIDE.md`
 - `docs/DATASHEET.md`
+- `docs/RELEASE_CERTIFICATION.md`
 
 ## Turnkey Public Install
 
@@ -34,7 +35,7 @@ That bootstrap installer:
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.1
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.0
 ```
 
 ## Release Bundle Layout
@@ -63,7 +64,7 @@ dist/
         bsj-search.png
         ...
       releases/
-        v2.1.1.md
+        v2.2.0.md
       SETUP_GUIDE.md
       PRODUCT_GUIDE.md
       DATASHEET.md
@@ -129,6 +130,12 @@ Optional output directory override:
 ./scripts/package-release.sh --output-dir /tmp/bsj-dist
 ```
 
+Recommended free disk space before a universal packaging run:
+
+- at least `3-5 GiB`
+
+That avoids false-negative failures during `lipo`, archive creation, and installer smoke temp extraction.
+
 ## Validate A Release Bundle
 
 Smoke-test the bundle install:
@@ -140,7 +147,13 @@ Smoke-test the bundle install:
 Smoke-test the public one-line installer against a pushed ref or tag:
 
 ```bash
-./scripts/smoke-public-install.sh --ref v2.1.1 --version v2.1.1
+./scripts/smoke-public-install.sh --ref v2.2.0 --version v2.2.0
+```
+
+Write a clean-account certification report for the release:
+
+```bash
+./scripts/certify-release.sh --ref v2.2.0 --version v2.2.0 --report docs/certification/v2.2.0.md
 ```
 
 Run the release privacy audit directly:
@@ -164,6 +177,24 @@ The public installer smoke verifies:
 3. the install completes in a clean temp `HOME`
 4. the installed binary reports the expected version
 5. shell profile PATH integration is written and the misleading PATH warning does not appear
+
+The release certification script adds:
+
+1. `bsj --help` guide visibility checks
+2. `bsj guide cheatsheet` rendering checks
+3. a commit-friendly Markdown report for the release line
+
+## Visual Artifact Review
+
+CI and release workflows publish a nostalgia artifact bundle.
+
+Reviewers should open:
+
+```text
+artifacts/tui-snapshots/index.html
+```
+
+That preview compares expected vs actual blue-screen snapshots for the most important nostalgic UI states.
 
 ## Install From A Release Bundle
 
@@ -282,7 +313,7 @@ Release workflow:
 Release automation flow:
 
 ```bash
-git tag v2.1.1
+git tag v2.2.0
 git push origin main --tags
 ```
 

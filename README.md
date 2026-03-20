@@ -22,12 +22,12 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with encrypted folder sync plus S3/WebDAV and direct Google Drive/Dropbox API connectors
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v2.1.1
+## New in v2.2.0
 
-- smart installer mode now tells you what it chose and what it is about to do
-- launch-now from the installer shows clearer staged handoff status before entering the TUI
-- installer menu wording is tighter and more accurate
-- release smoke coverage now checks both smart installer option `1` and same-terminal launch handoff behavior
+- a new `First 2 Minutes Cheat Sheet` now lives in the app, the CLI, the installer, and the packaged docs
+- the Help menu now exposes the cheat sheet directly instead of hiding first-run guidance behind longer guides
+- stable releases now have a clean-account certification script and report format
+- CI and release builds now point reviewers straight at the nostalgia snapshot artifact preview
 
 ## Screenshots
 
@@ -71,13 +71,13 @@ It gives you:
 
 | Goal | Read this first |
 | --- | --- |
-| Install and get writing quickly | [README install section](#turnkey-install), [Quickstart](docs/QUICKSTART.md), [Setup Guide](docs/SETUP_GUIDE.md) |
+| Install and get writing quickly | [README install section](#turnkey-install), [Cheat Sheet](docs/CHEAT_SHEET.md), [Quickstart](docs/QUICKSTART.md), [Setup Guide](docs/SETUP_GUIDE.md) |
 | Understand product capabilities | [Product Guide](docs/PRODUCT_GUIDE.md), [Datasheet](docs/DATASHEET.md), [Compare](docs/COMPARE.md) |
 | Understand the nostalgia UX contract | [Nostalgia Guardrails](docs/NOSTALGIA_GUARDRAILS.md), [Terminal Guide](docs/TERMINAL_GUIDE.md) |
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Notes](docs/releases/v2.1.1.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Certification](docs/RELEASE_CERTIFICATION.md), [Release Notes](docs/releases/v2.2.0.md) |
 
 ## Turnkey install
 
@@ -90,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.1.1
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.0
 ```
 
 Install from source instead of the prebuilt release:
@@ -359,6 +359,7 @@ bsj settings --json
 bsj doctor
 bsj doctor --unlock
 bsj guide docs
+bsj guide cheatsheet
 bsj guide quickstart
 bsj guide troubleshooting
 bsj guide sync
@@ -445,7 +446,7 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v2.1.1.md)
+- [Release Notes](docs/releases/v2.2.0.md)
 - [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
 - [v1.3 UX Checklist](docs/V1_3_UX_CHECKLIST.md)
 - [v3.0 Planning](docs/V3_0_PLAN.md)

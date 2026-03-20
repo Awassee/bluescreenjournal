@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v2.2.0
+
+- added a real `First 2 Minutes Cheat Sheet` guide and wired it into CLI help, the Help menu, installer output, and packaged docs
+- added `scripts/certify-release.sh` plus `docs/RELEASE_CERTIFICATION.md` so stable releases leave behind a clean-account certification record
+- surfaced nostalgia snapshot review directly in CI and tag-release summaries, pointing reviewers at `artifacts/tui-snapshots/index.html`
+- refreshed roadmap/docs planning to move the active release line to `v2.2.0`
+
 ## v2.1.1
 
 - improved installer `smart mode` feedback so option `1` now clearly states which install path was chosen and what the installer will do next

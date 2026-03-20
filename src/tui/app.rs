@@ -1859,6 +1859,7 @@ pub enum MenuAction {
     About,
     HelpTopics,
     ToggleKeychainMemory,
+    CheatSheet,
     FirstRunTour,
     QuickStart,
     DailyFlowCoach,
@@ -3563,6 +3564,12 @@ impl App {
                 self.setting_menu_item(SettingField::BackupMonthly),
             ],
             MenuId::Help => vec![
+                MenuItem {
+                    label: "First 2 Minutes Cheat Sheet".to_string(),
+                    detail: "FAST".to_string(),
+                    action: MenuAction::CheatSheet,
+                    enabled: true,
+                },
                 MenuItem {
                     label: "Quick Start".to_string(),
                     detail: "START".to_string(),
@@ -6336,6 +6343,7 @@ impl App {
             MenuAction::ReviewPrompts => "Open Writing Prompts".to_string(),
             MenuAction::TodayBrief => "Open Today Brief".to_string(),
             MenuAction::WeekCompass => "Open Week Compass".to_string(),
+            MenuAction::CheatSheet => "Read First 2 Minutes Cheat Sheet".to_string(),
             MenuAction::QuickStart => "Read Quick Start".to_string(),
             MenuAction::FirstRunTour => "Take First-Run Tour".to_string(),
             MenuAction::DailyFlowCoach => "Open Daily Flow Coach".to_string(),
@@ -6397,7 +6405,8 @@ impl App {
             | MenuAction::Verify
             | MenuAction::IntegrityDetails
             | MenuAction::DoctorReport => "SAFETY",
-            MenuAction::QuickStart
+            MenuAction::CheatSheet
+            | MenuAction::QuickStart
             | MenuAction::FirstRunTour
             | MenuAction::DailyFlowCoach
             | MenuAction::Help
@@ -6432,7 +6441,10 @@ impl App {
             MenuAction::SpellcheckEntry => "spellcheck spelling typo fix correct page",
             MenuAction::SpellcheckSummary => "spellcheck summary report spelling typo review",
             MenuAction::SpellcheckAutoFixTypos => "spellcheck autofix typo fix common spelling",
-            MenuAction::QuickStart | MenuAction::FirstRunTour | MenuAction::DailyFlowCoach => {
+            MenuAction::CheatSheet
+            | MenuAction::QuickStart
+            | MenuAction::FirstRunTour
+            | MenuAction::DailyFlowCoach => {
                 "help learn start onboarding how to use save next old entry"
             }
             MenuAction::Help => "help keys menus shortcuts guide learn",
@@ -6471,10 +6483,11 @@ impl App {
             MenuAction::SaveAndNextDay if dirty => 2,
             MenuAction::Find if dirty => 3,
             MenuAction::SpellcheckEntry if dirty => 4,
-            MenuAction::QuickStart if first_run => 5,
-            MenuAction::FirstRunTour if first_run => 6,
-            MenuAction::DailyFlowCoach if first_run => 7,
-            MenuAction::Help if first_run => 8,
+            MenuAction::CheatSheet if first_run => 5,
+            MenuAction::QuickStart if first_run => 6,
+            MenuAction::FirstRunTour if first_run => 7,
+            MenuAction::DailyFlowCoach if first_run => 8,
+            MenuAction::Help if first_run => 9,
             MenuAction::NewEntry => 10,
             MenuAction::Dates => 11,
             MenuAction::Index => 12,
@@ -6898,6 +6911,10 @@ impl App {
         self.open_info_overlay("Quick Start", help::render_quickstart_guide());
     }
 
+    fn open_cheat_sheet_overlay(&mut self) {
+        self.open_info_overlay("Cheat Sheet", help::render_cheat_sheet_guide());
+    }
+
     fn open_about_overlay(&mut self) {
         let soundtrack_source = if self.config.soundtrack_source.trim().is_empty() {
             "[not configured]".to_string()
@@ -6941,6 +6958,11 @@ impl App {
                     "Shortcut: Alt+M".to_string(),
                 ]
                 .join("\n"),
+            ),
+            (
+                "Cheat Sheet",
+                "Keys and first-two-minutes flow",
+                help::render_cheat_sheet_guide(),
             ),
             (
                 "Quick Start",
@@ -9542,6 +9564,7 @@ impl App {
             MenuAction::About => self.open_about_overlay(),
             MenuAction::HelpTopics => self.open_help_topics_overlay(),
             MenuAction::ToggleKeychainMemory => self.toggle_keychain_memory(),
+            MenuAction::CheatSheet => self.open_cheat_sheet_overlay(),
             MenuAction::FirstRunTour => self.open_first_run_guide_overlay(),
             MenuAction::QuickStart => self.open_quickstart_overlay(),
             MenuAction::DailyFlowCoach => self.open_daily_flow_coach_overlay(),
@@ -16170,6 +16193,7 @@ mod tests {
         assert!(titles.contains(&"Save Current Entry"));
         assert!(titles.contains(&"Quick Save and Open Next Entry"));
         assert!(titles.contains(&"Browse Old Entries"));
+        assert!(titles.contains(&"Read First 2 Minutes Cheat Sheet"));
         assert!(titles.contains(&"Read Quick Start"));
         assert!(!titles.contains(&"Command Palette"));
         assert!(!titles.contains(&"Browse All Commands"));
@@ -16192,6 +16216,7 @@ mod tests {
         };
 
         assert!(position("Save Current Entry") < position("Browse Old Entries"));
+        assert!(position("Read First 2 Minutes Cheat Sheet") < position("Show Cloud Status"));
         assert!(position("Read Quick Start") < position("Show Cloud Status"));
     }
 
@@ -16366,6 +16391,7 @@ mod tests {
             .map(|item| item.label)
             .collect::<Vec<_>>();
 
+        assert!(labels.contains(&"First 2 Minutes Cheat Sheet".to_string()));
         assert!(labels.contains(&"Quick Start".to_string()));
         assert!(labels.contains(&"About BlueScreen Journal".to_string()));
         assert!(labels.contains(&"First-Run Tour".to_string()));
@@ -16383,6 +16409,10 @@ mod tests {
             .map(|item| item.label)
             .collect::<Vec<_>>();
 
+        let cheat_sheet = labels
+            .iter()
+            .position(|label| label == "First 2 Minutes Cheat Sheet")
+            .expect("cheat sheet");
         let quick_start = labels
             .iter()
             .position(|label| label == "Quick Start")
@@ -16396,8 +16426,28 @@ mod tests {
             .position(|label| label == "About BlueScreen Journal")
             .expect("about");
 
+        assert!(cheat_sheet < quick_start);
         assert!(quick_start < check_updates);
         assert!(check_updates < about);
+    }
+
+    #[test]
+    fn cheat_sheet_menu_action_opens_info_overlay() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::CheatSheet, 20);
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "Cheat Sheet");
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("BlueScreen Journal Cheat Sheet"));
+                assert!(rendered.contains("If you only remember three things"));
+                assert!(rendered.contains("opens the top menus"));
+            }
+            other => panic!("expected cheat sheet overlay, got {other:?}"),
+        }
     }
 
     #[test]

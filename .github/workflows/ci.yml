@@ -25,6 +25,21 @@ jobs:
       - name: QA gate
         run: ./scripts/qa-gate.sh
 
+      - name: Summarize nostalgia QA artifacts
+        if: always()
+        run: |
+          {
+            echo "## QA summary"
+            if [[ -f artifacts/tui-snapshots/SUMMARY.md ]]; then
+              cat artifacts/tui-snapshots/SUMMARY.md
+            else
+              echo "- Snapshot summary not generated."
+            fi
+            echo
+            echo "- Artifact to inspect: \`bsj-qa-artifacts\`"
+            echo "- Open \`artifacts/tui-snapshots/index.html\` inside that artifact for the visual nostalgia review."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload QA artifacts
         if: always()
         uses: actions/upload-artifact@v4

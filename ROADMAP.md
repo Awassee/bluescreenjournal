@@ -8,7 +8,7 @@ This is a directional roadmap, not a contract.
 - strengthen product docs and support surfaces
 - keep the nostalgic TUI consistent across terminals, with docs and render tests acting as release gates
 - improve reliability of sync, merge, and verify workflows
-- execute the current release follow-up work tracked in [docs/V2_1_2_PLAN.md](docs/V2_1_2_PLAN.md)
+- execute the current release follow-up work tracked in [docs/V2_2_1_PLAN.md](docs/V2_2_1_PLAN.md)
 - keep the prioritized backlog explicit in [docs/NEXT_PRIORITIES.md](docs/NEXT_PRIORITIES.md)
 
 ## Medium-term priorities
@@ -27,7 +27,7 @@ This is a directional roadmap, not a contract.
 
 ## Current planning references
 
-- [docs/V2_1_2_PLAN.md](docs/V2_1_2_PLAN.md)
+- [docs/V2_2_1_PLAN.md](docs/V2_2_1_PLAN.md)
 - [docs/NEXT_PRIORITIES.md](docs/NEXT_PRIORITIES.md)
 - [docs/V3_0_PLAN.md](docs/V3_0_PLAN.md)
 
