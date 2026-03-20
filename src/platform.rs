@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
+    env,
     fs::{self, OpenOptions},
     io::Write,
     path::Path,
@@ -20,6 +21,38 @@ const INSTALLER_SCRIPT_URL: &str =
 const UPDATER_TEMP_DIR_NAME: &str = "bsj-updater";
 const UPDATE_LOG_FILE_NAME: &str = "update.log";
 const MAX_TAG_LENGTH: usize = 64;
+const PROVIDER_SYNC_FOLDER_NAME: &str = "BlueScreenJournal-Sync";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CloudProvider {
+    GoogleDrive,
+    Dropbox,
+    OneDrive,
+    Icloud,
+    Box,
+}
+
+impl CloudProvider {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::GoogleDrive => "Google Drive",
+            Self::Dropbox => "Dropbox",
+            Self::OneDrive => "OneDrive",
+            Self::Icloud => "iCloud Drive",
+            Self::Box => "Box Drive",
+        }
+    }
+
+    fn target_env_key(self) -> &'static str {
+        match self {
+            Self::GoogleDrive => "BSJ_GOOGLE_DRIVE_TARGET",
+            Self::Dropbox => "BSJ_DROPBOX_TARGET",
+            Self::OneDrive => "BSJ_ONEDRIVE_TARGET",
+            Self::Icloud => "BSJ_ICLOUD_TARGET",
+            Self::Box => "BSJ_BOX_TARGET",
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateInfo {
@@ -244,6 +277,61 @@ pub fn start_background_update(target_tag: &str) -> Result<UpdateLaunch, String>
     })
 }
 
+pub fn cloud_provider_sync_candidates(provider: CloudProvider) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(explicit_target) = env::var(provider.target_env_key())
+        && !explicit_target.trim().is_empty()
+    {
+        candidates.push(PathBuf::from(explicit_target));
+    }
+
+    let Some(home) = dirs::home_dir() else {
+        return candidates;
+    };
+
+    let mut roots = provider_root_candidates(provider, &home);
+    roots.sort();
+    roots.dedup();
+    candidates.extend(
+        roots
+            .into_iter()
+            .map(|root| cloud_provider_target_from_root(provider, &root)),
+    );
+    candidates
+}
+
+pub fn resolve_cloud_provider_sync_target(provider: CloudProvider) -> Result<PathBuf, String> {
+    let candidates = cloud_provider_sync_candidates(provider);
+    if candidates.is_empty() {
+        return Err(format!(
+            "Could not detect {}. Install the desktop sync client, set {}, or pass an explicit sync path.",
+            provider.label(),
+            provider.target_env_key()
+        ));
+    }
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+        if let Some(parent) = candidate.parent()
+            && parent.exists()
+        {
+            return Ok(candidate.clone());
+        }
+    }
+
+    Err(format!(
+        "Could not detect an active {} folder. Tried:\n  {}",
+        provider.label(),
+        candidates
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    ))
+}
+
 fn normalize_tag(version: &str) -> String {
     if version.starts_with('v') {
         version.to_string()
@@ -285,6 +373,62 @@ fn infer_install_prefix_from_exe(exe: &Path) -> Option<PathBuf> {
     bin_dir.parent().map(Path::to_path_buf)
 }
 
+fn provider_root_candidates(provider: CloudProvider, home: &Path) -> Vec<PathBuf> {
+    match provider {
+        CloudProvider::GoogleDrive => {
+            let mut roots = cloud_storage_roots_with_prefix(home, &["GoogleDrive"]);
+            roots.push(home.join("Google Drive"));
+            roots
+        }
+        CloudProvider::Dropbox => {
+            let mut roots = cloud_storage_roots_with_prefix(home, &["Dropbox"]);
+            roots.push(home.join("Dropbox"));
+            roots
+        }
+        CloudProvider::OneDrive => cloud_storage_roots_with_prefix(home, &["OneDrive"]),
+        CloudProvider::Icloud => vec![
+            home.join("Library")
+                .join("Mobile Documents")
+                .join("com~apple~CloudDocs"),
+        ],
+        CloudProvider::Box => cloud_storage_roots_with_prefix(home, &["Box"]),
+    }
+}
+
+fn cloud_storage_roots_with_prefix(home: &Path, prefixes: &[&str]) -> Vec<PathBuf> {
+    let root = home.join("Library").join("CloudStorage");
+    let mut matches = Vec::new();
+    let Ok(entries) = fs::read_dir(root) else {
+        return matches;
+    };
+
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if prefixes.iter().any(|prefix| name.starts_with(prefix)) {
+            matches.push(entry.path());
+        }
+    }
+
+    matches
+}
+
+fn cloud_provider_target_from_root(provider: CloudProvider, root: &Path) -> PathBuf {
+    if provider == CloudProvider::GoogleDrive {
+        let my_drive = root.join("My Drive");
+        if my_drive.exists() {
+            return my_drive.join(PROVIDER_SYNC_FOLDER_NAME);
+        }
+    }
+    root.join(PROVIDER_SYNC_FOLDER_NAME)
+}
+
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -309,10 +453,12 @@ fn parse_version_parts(version: &str) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ReleaseResponse, compare_versions, infer_install_prefix_from_exe, keychain_account,
-        normalized_update_tag, updater_command_preview,
+        CloudProvider, ReleaseResponse, cloud_provider_target_from_root, compare_versions,
+        infer_install_prefix_from_exe, keychain_account, normalized_update_tag,
+        updater_command_preview,
     };
-    use std::path::Path;
+    use std::{fs, path::Path};
+    use tempfile::tempdir;
 
     #[test]
     fn keychain_account_is_stable_for_vault_path() {
@@ -381,5 +527,25 @@ mod tests {
         let exe = Path::new("/tmp/test-home/.local/bin/bsj");
         let prefix = infer_install_prefix_from_exe(exe).expect("prefix");
         assert_eq!(prefix, Path::new("/tmp/test-home/.local"));
+    }
+
+    #[test]
+    fn google_drive_target_prefers_my_drive_subfolder() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("GoogleDrive-test@example.com");
+        fs::create_dir_all(root.join("My Drive")).expect("my drive");
+
+        let target = cloud_provider_target_from_root(CloudProvider::GoogleDrive, &root);
+        assert_eq!(target, root.join("My Drive").join("BlueScreenJournal-Sync"));
+    }
+
+    #[test]
+    fn dropbox_target_uses_provider_root() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("Dropbox");
+        fs::create_dir_all(&root).expect("root");
+
+        let target = cloud_provider_target_from_root(CloudProvider::Dropbox, &root);
+        assert_eq!(target, root.join("BlueScreenJournal-Sync"));
     }
 }

@@ -18,7 +18,7 @@ Without a subcommand,
 .Nm
 launches the full-screen TUI editor.
 .Sh COMMANDS
-.Bl -tag -width "sysop sync-preview"
+.Bl -tag -width "cloud recover --provider onedrive"
 .It Cm open Ar YYYY-MM-DD
 Launch the TUI directly on a specific date.
 .It Cm export Ar YYYY-MM-DD Op Fl -format Ar text|markdown Op Fl -output Ar path
@@ -33,8 +33,13 @@ Print a filtered timeline of entries or an aggregate summary.
 Launch directly on the next date without a saved revision.
 .It Cm prompts Op Ar list|pick
 List or pick deterministic journaling prompts, optionally as JSON.
-.It Cm sync Op Fl -backend Ar folder|s3|webdav Op Fl -remote Ar target
-Sync encrypted revisions to a folder, S3, or WebDAV target.
+.It Cm sync Op Fl -backend Ar folder|s3|webdav Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target
+Sync encrypted revisions to a folder, S3, or WebDAV target. Provider presets auto-detect common desktop sync folders.
+.It Cm cloud Ar status Op Fl -backend Ar folder|s3|webdav Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target Op Fl -json
+Show cloud queue/integrity status for encrypted sync targets.
+.It Cm cloud Ar recover Op Fl -backend Ar folder|s3|webdav Op Fl -provider Ar google-drive|dropbox|onedrive|icloud|box Op Fl -remote Ar target Op Fl -no-verify Op Fl -json
+Pull missing encrypted blobs from cloud and re-check integrity (or skip verify with
+.Fl -no-verify Ns ).
 .It Cm backup
 Create an encrypted snapshot under the vault backup directory.
 .It Cm "backup list"

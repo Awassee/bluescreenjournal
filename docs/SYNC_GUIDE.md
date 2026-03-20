@@ -28,6 +28,26 @@ Good folder targets:
 - Dropbox folders
 - other local sync folders that replicate files without rewriting contents
 
+Provider presets (auto-detect desktop sync folders):
+
+```bash
+bsj sync --provider google-drive
+bsj sync --provider dropbox
+bsj sync --provider onedrive
+bsj sync --provider icloud
+bsj sync --provider box
+```
+
+You can set explicit provider target overrides if detection misses your custom folder:
+
+```bash
+export BSJ_GOOGLE_DRIVE_TARGET="$HOME/Library/CloudStorage/GoogleDrive-your@email/My Drive/BlueScreenJournal-Sync"
+export BSJ_DROPBOX_TARGET="$HOME/Library/CloudStorage/Dropbox/BlueScreenJournal-Sync"
+export BSJ_ONEDRIVE_TARGET="$HOME/Library/CloudStorage/OneDrive-Work/BlueScreenJournal-Sync"
+export BSJ_ICLOUD_TARGET="$HOME/Library/Mobile Documents/com~apple~CloudDocs/BlueScreenJournal-Sync"
+export BSJ_BOX_TARGET="$HOME/Library/CloudStorage/Box-Box/BlueScreenJournal-Sync"
+```
+
 ## S3 sync
 
 Set environment variables:

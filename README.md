@@ -196,6 +196,7 @@ The app is direct by design:
 | Global search | Searches saved entries after unlock without disk plaintext index | Fast retrieval without leaving search residue on disk |
 | Search presets and cache status | Adds today/month/all scopes plus encrypted cache inspection | Makes search faster to aim and easier to trust |
 | Encrypted sync | Syncs encrypted revision blobs to folder, S3, or WebDAV targets | Lets you use cloud storage without uploading plaintext |
+| Provider presets | Auto-detects Google Drive, Dropbox, OneDrive, iCloud Drive, and Box Drive folders | Makes mainstream cloud setup one command/menu step instead of manual path hunting |
 | Cloud recovery status | Shows upload/download queues plus verify status in `TOOLS -> Cloud Status` and `bsj cloud status` | Makes recovery readiness visible before something goes wrong |
 | Pull-only cloud recovery | Pulls missing encrypted blobs from remote without uploading local-only data (`TOOLS -> Recover From Cloud`, `bsj cloud recover`) | Safely rebuilds a machine after loss while preserving remote history |
 | Integrity verify | Checks revision hashchains | Detects missing or tampered history |
@@ -262,6 +263,9 @@ The app is direct by design:
 ### Protect and move data
 
 - `F8` or `TOOLS -> Sync Vault` syncs encrypted blobs
+- `SETUP -> Cloud Provider Setup` auto-detects Google Drive, Dropbox, OneDrive, iCloud Drive, or Box and sets sync target
+- `TOOLS -> Cloud Status` shows upload/download queues and verify state
+- `TOOLS -> Recover From Cloud` runs pull-only cloud recovery without pushing local-only revisions
 - `TOOLS -> Soundtrack Source` sets the MIDI URL/path used for playback
 - soundtrack auto-starts on launch when a source is configured
 - `TOOLS -> Toggle Soundtrack` or `Alt+M` plays/stops the configured MIDI theme source
@@ -286,6 +290,7 @@ The menu bar is the primary discoverability surface.
 - `SEARCH` includes today/month/all presets, filter clearing, and encrypted cache status
 - `GO` includes recents, favorites, random entry jump, calendar, and index timeline
 - `TOOLS` includes sync, soundtrack source + toggle, integrity details, review mode, prompts, dashboard, updates, doctor output, and a `SYSOP Center` menu for operator audits/runbooks
+- `SETUP` includes `Cloud Provider Setup` plus direct sync target and other runtime settings
 - `TOOLS` also includes `AI Summary (Optional)` and `AI Coach Mode (Optional)` for guided reflection workflows
 - `TOOLS -> Check for Updates` now offers an in-app install action that runs the installer in the background
 - `SETUP` includes a live settings summary plus editable vault/sync/device/opening-line/retention/clock/display values
@@ -396,8 +401,13 @@ bsj ai coach --date 2026-03-16 --questions 5
 bsj export 2026-03-16
 bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md
 bsj sync --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj sync --provider google-drive
+bsj sync --provider dropbox
+bsj sync --provider onedrive
 bsj cloud status --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj cloud status --provider google-drive
 bsj cloud recover --backend folder --remote ~/Library/Mobile\ Documents/com~apple~CloudDocs/BlueScreenJournal
+bsj cloud recover --provider google-drive
 bsj backup
 bsj backup list
 bsj backup prune

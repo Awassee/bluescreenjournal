@@ -1289,7 +1289,9 @@ impl SettingField {
     pub fn help(self) -> &'static str {
         match self {
             SettingField::VaultPath => "Changing the path relocks into the selected vault.",
-            SettingField::SyncTargetPath => "Folder sync target for iCloud / Dropbox style sync.",
+            SettingField::SyncTargetPath => {
+                "Folder sync target for iCloud/Dropbox/Google Drive/OneDrive/Box style sync."
+            }
             SettingField::DeviceNickname => "Shown in devices/<deviceId>.json and conflicts.",
             SettingField::Clock12h => "Changes header clock formatting across the app.",
             SettingField::ShowSeconds => "Useful for tight writing sessions and save timing.",
@@ -1685,6 +1687,8 @@ pub enum MenuAction {
     QuickStart,
     DailyFlowCoach,
     EditSetting(SettingField),
+    CloudProviderSetup,
+    SetCloudProvider(platform::CloudProvider),
     Help,
 }
 
@@ -3297,6 +3301,12 @@ impl App {
                     action: MenuAction::ToggleKeychainMemory,
                     enabled: true,
                 },
+                MenuItem {
+                    label: "Cloud Provider Setup".to_string(),
+                    detail: "GDRIVE/DBX/OD/ICLOUD/BOX".to_string(),
+                    action: MenuAction::CloudProviderSetup,
+                    enabled: true,
+                },
                 self.setting_menu_item(SettingField::VaultPath),
                 self.setting_menu_item(SettingField::SyncTargetPath),
                 self.setting_menu_item(SettingField::DeviceNickname),
@@ -3357,6 +3367,82 @@ impl App {
             field,
             &self.config,
         )));
+    }
+
+    fn open_cloud_provider_setup_overlay(&mut self) {
+        let providers = [
+            platform::CloudProvider::GoogleDrive,
+            platform::CloudProvider::Dropbox,
+            platform::CloudProvider::OneDrive,
+            platform::CloudProvider::Icloud,
+            platform::CloudProvider::Box,
+        ];
+        let items = providers
+            .iter()
+            .map(|provider| {
+                let detail = match platform::resolve_cloud_provider_sync_target(*provider) {
+                    Ok(path) => truncate_for_picker(&path.display().to_string(), 44),
+                    Err(_) => "not detected".to_string(),
+                };
+                PickerItem {
+                    title: format!("Use {} Folder Sync", provider.label()),
+                    detail,
+                    keywords: format!(
+                        "sync cloud provider {} dropbox google onedrive icloud box",
+                        provider.label().to_ascii_lowercase()
+                    ),
+                    action: PickerAction::Menu(MenuAction::SetCloudProvider(*provider)),
+                }
+            })
+            .collect::<Vec<_>>();
+        self.open_picker_overlay(PickerOverlay::new(
+            "Cloud Provider Setup",
+            items,
+            "No providers available.",
+        ));
+    }
+
+    fn set_sync_target_from_provider(&mut self, provider: platform::CloudProvider) {
+        match platform::resolve_cloud_provider_sync_target(provider) {
+            Ok(path) => {
+                self.config.sync_target_path = Some(path.clone());
+                if let Err(error) = self.config.save() {
+                    self.flash_status("SETTINGS SAVE FAILED.");
+                    log::warn!("failed to persist provider sync target: {error}");
+                    return;
+                }
+                self.flash_status(&format!("SYNC TARGET {}.", provider.label().to_uppercase()));
+                self.open_info_overlay(
+                    "Cloud Provider Ready",
+                    [
+                        format!("Provider    : {}", provider.label()),
+                        format!("Sync target : {}", path.display()),
+                        String::new(),
+                        "Next steps".to_string(),
+                        "  1) TOOLS -> Sync Vault".to_string(),
+                        "  2) TOOLS -> Cloud Status".to_string(),
+                        "  3) TOOLS -> Recover From Cloud (if needed)".to_string(),
+                    ]
+                    .join("\n"),
+                );
+            }
+            Err(error) => {
+                self.open_info_overlay(
+                    "Cloud Provider Not Found",
+                    [
+                        format!("Provider: {}", provider.label()),
+                        error,
+                        String::new(),
+                        "Troubleshooting".to_string(),
+                        "  - Ensure desktop sync client is installed and signed in.".to_string(),
+                        "  - Or set sync path manually in SETUP -> Sync Target Path.".to_string(),
+                        "  - Or set provider env target (e.g. BSJ_GOOGLE_DRIVE_TARGET)."
+                            .to_string(),
+                    ]
+                    .join("\n"),
+                );
+            }
+        }
     }
 
     pub fn editor_viewport_height(&self, body_rows: usize) -> usize {
@@ -6453,7 +6539,10 @@ impl App {
             actions.push("Initialize a vault first (launch setup wizard).".to_string());
         }
         if self.config.sync_target_path.is_none() {
-            actions.push("Set default sync target in SETUP -> Sync Target Path.".to_string());
+            actions.push(
+                "Set sync target via SETUP -> Cloud Provider Setup or Sync Target Path."
+                    .to_string(),
+            );
         }
 
         match sysop::collect_permission_issues(&self.config.vault_path) {
@@ -8585,6 +8674,8 @@ impl App {
             MenuAction::QuickStart => self.open_quickstart_overlay(),
             MenuAction::DailyFlowCoach => self.open_daily_flow_coach_overlay(),
             MenuAction::EditSetting(field) => self.open_setting_prompt(field),
+            MenuAction::CloudProviderSetup => self.open_cloud_provider_setup_overlay(),
+            MenuAction::SetCloudProvider(provider) => self.set_sync_target_from_provider(provider),
             MenuAction::Help => self.overlay = Some(Overlay::Help),
         }
     }
@@ -9076,7 +9167,7 @@ impl App {
                     .config
                     .sync_target_path
                     .clone()
-                    .ok_or_else(|| "No folder sync target configured. Run `bsj sync --backend folder --remote PATH` once, or set BSJ_SYNC_BACKEND=s3|webdav and the corresponding env vars.".to_string())?;
+                    .ok_or_else(|| "No folder sync target configured. Run `bsj sync --provider google-drive` or `bsj sync --backend folder --remote PATH` once, or set BSJ_SYNC_BACKEND=s3|webdav and the corresponding env vars.".to_string())?;
                 Ok(SyncRequest::Folder {
                     target_label: remote_root.display().to_string(),
                     remote_root,
@@ -13256,6 +13347,7 @@ mod tests {
         assert!(labels.contains(&"Device Name"));
         assert!(labels.contains(&"Daily Backups"));
         assert!(labels.contains(&"Opening Line Template"));
+        assert!(labels.contains(&"Cloud Provider Setup"));
     }
 
     #[test]
@@ -14476,6 +14568,28 @@ mod tests {
 
         assert!(labels.contains(&"Daily Word Goal".to_string()));
         assert!(labels.contains(&"Soundtrack URL/Path".to_string()));
+        assert!(labels.contains(&"Cloud Provider Setup".to_string()));
+    }
+
+    #[test]
+    fn cloud_provider_setup_menu_action_opens_picker() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::CloudProviderSetup, 20);
+
+        match app.overlay() {
+            Some(Overlay::Picker(picker)) => {
+                assert_eq!(picker.title, "Cloud Provider Setup");
+                assert!(
+                    picker
+                        .items
+                        .iter()
+                        .any(|item| item.title.contains("Google Drive"))
+                );
+            }
+            other => panic!("expected cloud provider picker, got {other:?}"),
+        }
     }
 
     #[test]

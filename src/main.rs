@@ -31,7 +31,7 @@ use std::{
     version = env!("CARGO_PKG_VERSION"),
     about = "BlueScreen Journal",
     long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, a menu-driven TUI, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.",
-    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj spellcheck --date 2026-03-16\n  bsj spellcheck --range last7 --count-only\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud status --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud recover --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj spellcheck --date 2026-03-16\n  bsj spellcheck --range last7 --count-only\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj sync --provider google-drive\n  bsj sync --provider dropbox\n  bsj cloud status --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud status --provider onedrive\n  bsj cloud recover --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud recover --provider google-drive\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
 )]
 struct Cli {
     #[arg(
@@ -250,6 +250,12 @@ enum Command {
     Sync {
         #[arg(long, value_enum)]
         backend: Option<SyncBackendArg>,
+        #[arg(
+            long,
+            value_enum,
+            help = "Provider preset for folder sync targets (Google Drive, Dropbox, OneDrive, iCloud, Box)"
+        )]
+        provider: Option<CloudProviderArg>,
         #[arg(long)]
         remote: Option<String>,
     },
@@ -319,6 +325,12 @@ enum CloudCommand {
     Status {
         #[arg(long, value_enum)]
         backend: Option<SyncBackendArg>,
+        #[arg(
+            long,
+            value_enum,
+            help = "Provider preset for folder sync targets (Google Drive, Dropbox, OneDrive, iCloud, Box)"
+        )]
+        provider: Option<CloudProviderArg>,
         #[arg(long)]
         remote: Option<String>,
         #[arg(long, help = "Print cloud status report as JSON")]
@@ -328,6 +340,12 @@ enum CloudCommand {
     Recover {
         #[arg(long, value_enum)]
         backend: Option<SyncBackendArg>,
+        #[arg(
+            long,
+            value_enum,
+            help = "Provider preset for folder sync targets (Google Drive, Dropbox, OneDrive, iCloud, Box)"
+        )]
+        provider: Option<CloudProviderArg>,
         #[arg(long)]
         remote: Option<String>,
         #[arg(long, help = "Skip hashchain verification after recovery pull")]
@@ -523,11 +541,34 @@ enum SysopCommand {
     },
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 enum SyncBackendArg {
     Folder,
     S3,
     Webdav,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CloudProviderArg {
+    #[value(name = "google-drive")]
+    GoogleDrive,
+    Dropbox,
+    #[value(name = "onedrive")]
+    OneDrive,
+    Icloud,
+    Box,
+}
+
+impl CloudProviderArg {
+    fn to_platform(self) -> platform::CloudProvider {
+        match self {
+            Self::GoogleDrive => platform::CloudProvider::GoogleDrive,
+            Self::Dropbox => platform::CloudProvider::Dropbox,
+            Self::OneDrive => platform::CloudProvider::OneDrive,
+            Self::Icloud => platform::CloudProvider::Icloud,
+            Self::Box => platform::CloudProvider::Box,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, Hash)]
@@ -942,8 +983,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Command::Sync { backend, remote }) => {
-            if let Err(error) = run_cli_sync(backend, remote.as_deref()) {
+        Some(Command::Sync {
+            backend,
+            provider,
+            remote,
+        }) => {
+            if let Err(error) = run_cli_sync(backend, provider, remote.as_deref()) {
                 log::error!("sync failed: {error}");
                 eprintln!("{error}");
                 std::process::exit(1);
@@ -2819,16 +2864,18 @@ fn run_cli_export(
 
 fn run_cli_sync(
     backend_arg: Option<SyncBackendArg>,
+    provider_arg: Option<CloudProviderArg>,
     remote_arg: Option<&str>,
 ) -> Result<(), String> {
     log::info!("running CLI sync");
     let mut config = config::AppConfig::load_or_default();
     let vault = unlock_cli_vault(&config)?;
-    let backend_kind = resolve_sync_backend_kind(backend_arg, remote_arg)?;
+    let backend_kind = resolve_sync_backend_kind(backend_arg, provider_arg, remote_arg)?;
 
     let report = match backend_kind {
         SyncBackendArg::Folder => {
-            let remote_root = resolve_folder_sync_target_path(&mut config, remote_arg)?;
+            let remote_root =
+                resolve_folder_sync_target_path(&mut config, remote_arg, provider_arg)?;
             vault
                 .sync_folder(&remote_root)
                 .map_err(|error| format!("sync failed: {error}"))?
@@ -2895,20 +2942,23 @@ fn run_cli_cloud(command: CloudCommand) -> Result<(), String> {
     match command {
         CloudCommand::Status {
             backend,
+            provider,
             remote,
             json,
-        } => run_cli_cloud_status(backend, remote.as_deref(), json),
+        } => run_cli_cloud_status(backend, provider, remote.as_deref(), json),
         CloudCommand::Recover {
             backend,
+            provider,
             remote,
             no_verify,
             json,
-        } => run_cli_cloud_recover(backend, remote.as_deref(), no_verify, json),
+        } => run_cli_cloud_recover(backend, provider, remote.as_deref(), no_verify, json),
     }
 }
 
 fn run_cli_cloud_status(
     backend_arg: Option<SyncBackendArg>,
+    provider_arg: Option<CloudProviderArg>,
     remote_arg: Option<&str>,
     json_output: bool,
 ) -> Result<(), String> {
@@ -2921,8 +2971,9 @@ fn run_cli_cloud_status(
     }
 
     let vault = unlock_cli_vault(&config)?;
-    let backend_kind = resolve_sync_backend_kind(backend_arg, remote_arg)?;
-    let (target, preview) = preview_with_backend(&vault, &mut config, backend_kind, remote_arg)?;
+    let backend_kind = resolve_sync_backend_kind(backend_arg, provider_arg, remote_arg)?;
+    let (target, preview) =
+        preview_with_backend(&vault, &mut config, backend_kind, remote_arg, provider_arg)?;
     let integrity = vault
         .verify_integrity()
         .map_err(|error| format!("integrity check failed: {error}"))?;
@@ -2980,13 +3031,15 @@ fn run_cli_cloud_status(
 
 fn run_cli_cloud_recover(
     backend_arg: Option<SyncBackendArg>,
+    provider_arg: Option<CloudProviderArg>,
     remote_arg: Option<&str>,
     no_verify: bool,
     json_output: bool,
 ) -> Result<(), String> {
     let mut config = config::AppConfig::load_or_default();
-    let backend_kind = resolve_sync_backend_kind(backend_arg, remote_arg)?;
-    let (target, recover_report) = recover_with_backend(&mut config, backend_kind, remote_arg)?;
+    let backend_kind = resolve_sync_backend_kind(backend_arg, provider_arg, remote_arg)?;
+    let (target, recover_report) =
+        recover_with_backend(&mut config, backend_kind, remote_arg, provider_arg)?;
     let vault = unlock_cli_vault(&config)?;
     let conflicts = vault
         .list_conflicted_dates()
@@ -3000,7 +3053,8 @@ fn run_cli_cloud_recover(
                 .map_err(|error| format!("integrity check failed: {error}"))?,
         )
     };
-    let (_, preview) = preview_with_backend(&vault, &mut config, backend_kind, remote_arg)?;
+    let (_, preview) =
+        preview_with_backend(&vault, &mut config, backend_kind, remote_arg, provider_arg)?;
 
     let output = CloudRecoveryOutput {
         backend: sync_backend_name(backend_kind).to_string(),
@@ -4084,11 +4138,11 @@ fn run_cli_sysop(command: SysopCommand) -> Result<(), String> {
             }
             let mut config = state.config;
             let vault = unlock_cli_vault(&config)?;
-            let backend_kind = resolve_sync_backend_kind(backend, remote.as_deref())?;
+            let backend_kind = resolve_sync_backend_kind(backend, None, remote.as_deref())?;
             let preview = match backend_kind {
                 SyncBackendArg::Folder => {
                     let remote_root =
-                        resolve_folder_sync_target_path(&mut config, remote.as_deref())?;
+                        resolve_folder_sync_target_path(&mut config, remote.as_deref(), None)?;
                     let mut backend = sync::FolderBackend::new(remote_root);
                     sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
                         .map_err(|error| format!("sync preview failed: {error}"))?
@@ -4173,8 +4227,22 @@ fn read_cli_secret() -> Result<SecretString, String> {
 
 fn resolve_sync_backend_kind(
     backend_arg: Option<SyncBackendArg>,
+    provider_arg: Option<CloudProviderArg>,
     remote_arg: Option<&str>,
 ) -> Result<SyncBackendArg, String> {
+    if let Some(provider) = provider_arg {
+        if let Some(backend) = backend_arg {
+            if backend != SyncBackendArg::Folder {
+                return Err(format!(
+                    "provider preset '{}' requires --backend folder",
+                    provider_label(provider)
+                ));
+            }
+            return Ok(backend);
+        }
+        return Ok(SyncBackendArg::Folder);
+    }
+
     if let Some(backend_arg) = backend_arg {
         return Ok(backend_arg);
     }
@@ -4205,9 +4273,19 @@ fn resolve_sync_backend_kind(
 fn resolve_folder_sync_target_path(
     config: &mut config::AppConfig,
     remote_arg: Option<&str>,
+    provider_arg: Option<CloudProviderArg>,
 ) -> Result<PathBuf, String> {
     if let Some(remote_arg) = remote_arg {
         let remote_root = config::expand_path_like(remote_arg);
+        config.sync_target_path = Some(remote_root.clone());
+        config
+            .save()
+            .map_err(|error| format!("failed to save sync target: {error}"))?;
+        return Ok(remote_root);
+    }
+
+    if let Some(provider) = provider_arg {
+        let remote_root = platform::resolve_cloud_provider_sync_target(provider.to_platform())?;
         config.sync_target_path = Some(remote_root.clone());
         config
             .save()
@@ -4229,15 +4307,26 @@ fn sync_backend_name(kind: SyncBackendArg) -> &'static str {
     }
 }
 
+fn provider_label(provider: CloudProviderArg) -> &'static str {
+    match provider {
+        CloudProviderArg::GoogleDrive => "google-drive",
+        CloudProviderArg::Dropbox => "dropbox",
+        CloudProviderArg::OneDrive => "onedrive",
+        CloudProviderArg::Icloud => "icloud",
+        CloudProviderArg::Box => "box",
+    }
+}
+
 fn preview_with_backend(
     vault: &vault::UnlockedVault,
     config: &mut config::AppConfig,
     backend_kind: SyncBackendArg,
     remote_arg: Option<&str>,
+    provider_arg: Option<CloudProviderArg>,
 ) -> Result<(String, sync::SyncPreviewReport), String> {
     match backend_kind {
         SyncBackendArg::Folder => {
-            let remote_root = resolve_folder_sync_target_path(config, remote_arg)?;
+            let remote_root = resolve_folder_sync_target_path(config, remote_arg, provider_arg)?;
             let target = remote_root.display().to_string();
             let mut backend = sync::FolderBackend::new(remote_root);
             let preview = sync::preview_root(vault.metadata(), &config.vault_path, &mut backend)
@@ -4280,10 +4369,11 @@ fn recover_with_backend(
     config: &mut config::AppConfig,
     backend_kind: SyncBackendArg,
     remote_arg: Option<&str>,
+    provider_arg: Option<CloudProviderArg>,
 ) -> Result<(String, sync::BackendSyncReport), String> {
     match backend_kind {
         SyncBackendArg::Folder => {
-            let remote_root = resolve_folder_sync_target_path(config, remote_arg)?;
+            let remote_root = resolve_folder_sync_target_path(config, remote_arg, provider_arg)?;
             let target = remote_root.display().to_string();
             let mut backend = sync::FolderBackend::new(remote_root);
             let report = sync::recover_root(&config.vault_path, &mut backend)
@@ -5018,6 +5108,48 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_sync_provider_preset() {
+        let cli = Cli::parse_from(["bsj", "sync", "--provider", "google-drive"]);
+        match cli.command {
+            Some(Command::Sync {
+                backend,
+                provider,
+                remote,
+            }) => {
+                assert!(backend.is_none());
+                assert!(matches!(
+                    provider,
+                    Some(super::CloudProviderArg::GoogleDrive)
+                ));
+                assert!(remote.is_none());
+            }
+            _ => panic!("expected sync command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_cloud_status_provider_preset() {
+        let cli = Cli::parse_from(["bsj", "cloud", "status", "--provider", "dropbox"]);
+        match cli.command {
+            Some(Command::Cloud {
+                command:
+                    super::CloudCommand::Status {
+                        backend,
+                        provider,
+                        remote,
+                        json,
+                    },
+            }) => {
+                assert!(backend.is_none());
+                assert!(matches!(provider, Some(super::CloudProviderArg::Dropbox)));
+                assert!(remote.is_none());
+                assert!(!json);
+            }
+            _ => panic!("expected cloud status command"),
+        }
+    }
+
+    #[test]
     fn cli_parses_cloud_status_command() {
         let cli = Cli::parse_from([
             "bsj",
@@ -5034,11 +5166,13 @@ mod tests {
                 command:
                     super::CloudCommand::Status {
                         backend,
+                        provider,
                         remote,
                         json,
                     },
             }) => {
                 assert!(matches!(backend, Some(super::SyncBackendArg::Folder)));
+                assert!(provider.is_none());
                 assert_eq!(remote.as_deref(), Some("/tmp/bsj-sync"));
                 assert!(json);
             }
@@ -5063,12 +5197,14 @@ mod tests {
                 command:
                     super::CloudCommand::Recover {
                         backend,
+                        provider,
                         remote,
                         no_verify,
                         json,
                     },
             }) => {
                 assert!(matches!(backend, Some(super::SyncBackendArg::S3)));
+                assert!(provider.is_none());
                 assert_eq!(remote.as_deref(), Some("s3://journal/archive"));
                 assert!(no_verify);
                 assert!(!json);
