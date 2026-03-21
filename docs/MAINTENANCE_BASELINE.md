@@ -6,7 +6,7 @@ The goal is simple: future maintenance should start from a known good baseline i
 
 ## Stable line
 
-- current stable line: `v2.2.2`
+- current stable line: `v2.2.3`
 - expected public entry point: `curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash`
 - intended packaged artifact: `dist/bsj-<version>-universal-apple-darwin.tar.gz`
 
@@ -81,7 +81,7 @@ find /var/folders -path '*/T/bsj-public-smoke.*' -prune -exec rm -rf {} +
 
 - release checklist: [RELEASE_CERTIFICATION.md](RELEASE_CERTIFICATION.md)
 - distribution workflow: [DISTRIBUTION.md](DISTRIBUTION.md)
-- current release notes: [releases/v2.2.2.md](releases/v2.2.2.md)
+- current release notes: [releases/v2.2.3.md](releases/v2.2.3.md)
 - public certification records: [`docs/certification/`](certification/)
 
 ## Recommended next re-entry point
@@ -90,7 +90,7 @@ If the project has been idle, start with:
 
 1. `git pull`
 2. `./scripts/qa-gate.sh`
-3. `./scripts/smoke-public-install.sh --ref main --version v2.2.2`
+3. `./scripts/smoke-public-install.sh --ref main --version v2.2.3`
 4. read [WHATS_NEW.md](WHATS_NEW.md) and the latest release notes
 
 That sequence is enough to tell you whether the stable line is still healthy before taking on new feature work.

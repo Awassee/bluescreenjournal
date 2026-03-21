@@ -170,7 +170,7 @@ Environment overrides:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
-  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.2
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.3
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --doctor
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --repair-path
@@ -1008,7 +1008,7 @@ run_doctor() {
   fi
 
   printf "\nTroubleshooting hints\n"
-  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v2.2.2\n"
+  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v2.2.3\n"
   printf "  - Latest main build: ./install.sh --source\n"
   printf "  - PATH repair:       ./install.sh --repair-path\n"
   printf "  - About:             ./install.sh --about\n"

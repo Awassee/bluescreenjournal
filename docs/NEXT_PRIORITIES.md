@@ -1,14 +1,13 @@
 # Next Priorities
 
-This is the current prioritized backlog after `v2.2.2`.
+This is the current prioritized backlog after `v2.2.3`.
 
-## Recently shipped in v2.2.2
+## Recently shipped in v2.2.3
 
-- added clearer installer state transitions for install, update, PATH repair, verification, and post-install handoff
-- added `./install.sh --debug` for richer installer diagnostics without leaking secrets
-- expanded installer regression coverage across bundled install, public bootstrap, update, repair, uninstall, and reset paths
-- added [Maintenance Baseline](MAINTENANCE_BASELINE.md) so the project can sit idle and still be resumed safely
-- pushed the stable line forward to `v2.2.2`
+- fixed the same-terminal installer handoff for the real `curl | bash` plus menu option `1` launch path
+- added a PTY-backed TUI handoff so first-run launch no longer dies with `Failed to initialize input reader`
+- expanded installer smoke coverage to verify real TUI startup after a piped installer run
+- pushed the stable line forward to `v2.2.3`
 
 ## Current major steps
 

@@ -13252,6 +13252,16 @@ mod tests {
     fn sanitize_snapshot(mut rendered: String, app: &App) -> String {
         let short_date = app.selected_date.format("%Y-%m-%d").to_string();
         let long_date = app.selected_date.format("%A, %B %d, %Y").to_string();
+        let header_focus = app.header_entry_focus_label();
+        let weekday = app
+            .selected_date
+            .format("%a")
+            .to_string()
+            .to_ascii_uppercase();
+        let normalized_focus = header_focus
+            .replace(&weekday, "<WDAY>")
+            .replace(&short_date, "<DATE>");
+        rendered = rendered.replace(&header_focus, &normalized_focus);
         rendered = rendered.replace(&long_date, "<DATE_LONG>");
         rendered = rendered.replace(&short_date, "<DATE>");
         rendered = rendered.replace(&app.header_time_label(), "<TIME>");
@@ -16892,8 +16902,8 @@ mod tests {
                 assert_eq!(info.title, "What's New");
                 let rendered = info.lines.join("\n");
                 assert!(rendered.contains("What's New in"));
-                assert!(rendered.contains("--debug"));
-                assert!(rendered.contains("maintenance baseline"));
+                assert!(rendered.contains("curl | bash"));
+                assert!(rendered.contains("clean PTY"));
                 assert!(rendered.contains("bsj guide whatsnew"));
             }
             other => panic!("expected what's new info overlay, got {other:?}"),

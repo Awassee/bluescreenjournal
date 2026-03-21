@@ -22,12 +22,12 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with encrypted folder sync plus S3/WebDAV and direct Google Drive/Dropbox API connectors
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v2.2.2
+## New in v2.2.3
 
-- the installer now reports its state more clearly during install, update, PATH repair, and post-install handoff
-- `./install.sh --debug` adds extra installer trace output without dumping secrets
-- release QA now covers more installer combinations, including existing-install update flows and action-matrix regression checks
-- the new [Maintenance Baseline](docs/MAINTENANCE_BASELINE.md) gives a clean wake-up checklist when the project sits untouched for months
+- fixed the installer `Launch BlueScreen Journal here now` path when the installer is started with `curl | bash`
+- the post-install same-terminal handoff now allocates a clean PTY before entering the blue-screen TUI
+- installer QA now exercises the real piped-launch + option `1` path with a TUI smoke check instead of only asserting `--version`
+- the stable line stays focused on release durability and first-run trust, not feature churn
 
 ## Screenshots
 
@@ -77,7 +77,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Certification](docs/RELEASE_CERTIFICATION.md), [Maintenance Baseline](docs/MAINTENANCE_BASELINE.md), [Release Notes](docs/releases/v2.2.2.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Certification](docs/RELEASE_CERTIFICATION.md), [Maintenance Baseline](docs/MAINTENANCE_BASELINE.md), [Release Notes](docs/releases/v2.2.3.md) |
 
 ## Turnkey install
 
@@ -90,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.2
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.3
 ```
 
 Install from source instead of the prebuilt release:
@@ -447,7 +447,7 @@ Start here on GitHub:
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
 - [Maintenance Baseline](docs/MAINTENANCE_BASELINE.md)
-- [Release Notes](docs/releases/v2.2.2.md)
+- [Release Notes](docs/releases/v2.2.3.md)
 - [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
 - [v1.3 UX Checklist](docs/V1_3_UX_CHECKLIST.md)
 - [v3.0 Planning](docs/V3_0_PLAN.md)

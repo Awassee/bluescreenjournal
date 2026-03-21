@@ -1,6 +1,6 @@
 
 
-          BLUESCREEN JOURNAL  TODAY FRI <DATE> [D+0]  ENTRY NO. ------  PAGE LOCKED  T
+          BLUESCREEN JOURNAL  TODAY <WDAY> <DATE> [D+0]  ENTRY NO. ------  PAGE LOCKED  T
            FILE   EDIT   SEARCH   GO   TOOLS   SETUP   HELP    ESC MENUS  F1 HELP  F2 SAVE
           ....+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8
 

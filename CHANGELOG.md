@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v2.2.3
+
+- fixed the installer `Launch BlueScreen Journal here now` path when the installer itself was started via `curl | bash`
+- made the same-terminal handoff launch the TUI under a clean PTY so `Failed to initialize input reader` no longer strands first-run users
+- added real installer regression coverage for `option 1` after a piped installer launch, using a TUI smoke mode instead of only checking `--version`
+- kept the stable release line focused on installer reliability rather than changing the writing model
+
 ## v2.2.2
 
 - clarified installer state transitions so install/update now explicitly reports file copy, PATH integration, binary verification, and post-install menu readiness
