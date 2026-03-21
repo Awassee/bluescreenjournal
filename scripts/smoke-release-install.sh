@@ -91,6 +91,10 @@ assert_log_contains "$INSTALL_LOG" "Press F2 to save, or type **save** then Ente
 assert_log_contains "$INSTALL_LOG" "Press Esc (or Ctrl+O) to open menus"
 assert_log_contains "$INSTALL_LOG" "guide cheatsheet"
 assert_log_contains "$INSTALL_LOG" "guide whatsnew"
+assert_log_contains "$INSTALL_LOG" "State: copying bundled app files"
+assert_log_contains "$INSTALL_LOG" "State: checking PATH integration"
+assert_log_contains "$INSTALL_LOG" "State: verifying installed binary"
+assert_log_contains "$INSTALL_LOG" "State: post-install summary is ready"
 test -f "$INSTALL_PREFIX/share/doc/bsj/README.md"
 test -f "$INSTALL_PREFIX/share/doc/bsj/LICENSE"
 test -f "$INSTALL_PREFIX/share/doc/bsj/CHANGELOG.md"
@@ -241,6 +245,9 @@ assert_log_contains "$SOURCE_UPDATE_LOG" "Source update archive is ready."
 assert_log_contains "$SOURCE_UPDATE_LOG" "Continuing in this installer window to build the source tree."
 assert_log_contains "$SOURCE_UPDATE_LOG" "Next step: cargo install --path $ROOT_DIR --locked --force"
 assert_log_contains "$SOURCE_UPDATE_LOG" "Installing bsj from source into $SOURCE_UPDATE_PREFIX/bin"
+assert_log_contains "$SOURCE_UPDATE_LOG" "State: building and installing from source"
+assert_log_contains "$SOURCE_UPDATE_LOG" "State: checking PATH integration"
+assert_log_contains "$SOURCE_UPDATE_LOG" "State: verifying installed binary"
 grep -Fq "$SOURCE_UPDATE_PREFIX/bin" "$SOURCE_UPDATE_HOME/.zprofile"
 
 # Regression guard: existing install + choosing Install / Update from the top installer menu should also source-update cleanly.
@@ -258,6 +265,7 @@ assert_log_contains "$UPDATE_ACTION_LOG" "Smart mode selected source update from
 assert_log_contains "$UPDATE_ACTION_LOG" "Using provided source tree override: $ROOT_DIR"
 assert_log_contains "$UPDATE_ACTION_LOG" "Continuing in this installer window to build the source tree."
 assert_log_contains "$UPDATE_ACTION_LOG" "Installer auto-select: 7"
+assert_log_contains "$UPDATE_ACTION_LOG" "State: opening post-install options"
 grep -Fq "$UPDATE_ACTION_HOME/.cargo/bin" "$UPDATE_ACTION_HOME/.zprofile"
 
 cat <<EOF

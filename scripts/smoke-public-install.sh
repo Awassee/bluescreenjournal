@@ -122,6 +122,8 @@ INSTALLED_VERSION="$("$PREFIX_DIR/bin/bsj" --version)"
 
 assert_log_contains "$LOG_PATH" "Selected release asset:"
 assert_log_contains "$LOG_PATH" "Added $PREFIX_DIR/bin to PATH for this installer session."
+assert_log_contains "$LOG_PATH" "State: checking PATH integration"
+assert_log_contains "$LOG_PATH" "State: verifying installed binary"
 
 if grep -F "Warning: Install finished, but this shell cannot find bsj yet" "$LOG_PATH" >/dev/null; then
   echo "Unexpected PATH warning present in public install log." >&2
@@ -158,6 +160,8 @@ assert_log_contains "$UPDATE_LOG_PATH" "Using provided source tree override: $RO
 assert_log_contains "$UPDATE_LOG_PATH" "Source update archive is ready."
 assert_log_contains "$UPDATE_LOG_PATH" "Continuing in this installer window to build the source tree."
 assert_log_contains "$UPDATE_LOG_PATH" "Installing bsj from source into $PREFIX_DIR/bin"
+assert_log_contains "$UPDATE_LOG_PATH" "State: building and installing from source"
+assert_log_contains "$UPDATE_LOG_PATH" "State: verifying installed binary"
 
 echo "Public installer smoke passed:"
 echo "  Version:  $INSTALLED_VERSION"

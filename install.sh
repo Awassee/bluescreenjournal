@@ -22,6 +22,7 @@ GITHUB_REPO="${BSJ_INSTALL_REPO:-Awassee/bluescreenjournal}"
 RELEASE_VERSION="${BSJ_INSTALL_VERSION:-latest}"
 ARCHIVE_SOURCE="${BSJ_INSTALL_ARCHIVE:-}"
 SOURCE_TREE_OVERRIDE="${BSJ_INSTALL_SOURCE_DIR:-}"
+DEBUG_INSTALLER="${BSJ_INSTALL_DEBUG:-0}"
 SKIP_CHECKSUM=0
 ASSUME_YES=0
 ORIGINAL_ARG_COUNT=$#
@@ -56,6 +57,17 @@ fi
 
 info() {
   printf "%s==>%s %s\n" "$BLUE$BOLD" "$RESET" "$1"
+}
+
+debug() {
+  if [[ "$DEBUG_INSTALLER" != "1" ]]; then
+    return
+  fi
+  printf "%s[debug]%s %s\n" "$BLUE" "$RESET" "$1"
+}
+
+announce_state() {
+  info "State: $1"
 }
 
 warn() {
@@ -108,7 +120,7 @@ Usage:
   ./install.sh [--source|--prebuilt] [--prefix PATH] [--bin-dir PATH] [--doc-dir PATH] [--man-dir PATH]
                [--bash-completion-dir PATH] [--zsh-completion-dir PATH] [--fish-completion-dir PATH]
                [--repo OWNER/REPO] [--version TAG] [--archive PATH_OR_URL] [--skip-checksum]
-               [--uninstall|--factory-reset|--doctor|--repair-path|--about] [--yes]
+               [--uninstall|--factory-reset|--doctor|--repair-path|--about] [--yes] [--debug]
   ./install.sh --help
 
 Modes:
@@ -124,6 +136,7 @@ Bootstrap options:
   --archive PATH_OR_URL  Install from a specific .tar.gz bundle instead of GitHub Releases
   --skip-checksum     Skip .sha256 verification for downloaded archives
   --yes, -y           Skip interactive confirmations for uninstall/factory-reset
+  --debug             Print extra installer state/debug lines (no secrets)
 
 Reset options:
   --uninstall         Remove bsj binaries/docs/completions. Keeps journal vault data.
@@ -152,6 +165,7 @@ Environment overrides:
   BSJ_INSTALL_REPO
   BSJ_INSTALL_VERSION
   BSJ_INSTALL_ARCHIVE
+  BSJ_INSTALL_DEBUG
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
@@ -209,6 +223,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --yes|-y)
       ASSUME_YES=1
+      shift
+      ;;
+    --debug)
+      DEBUG_INSTALLER=1
       shift
       ;;
     --prefix)
@@ -355,6 +373,18 @@ announce_install_plan() {
   esac
 }
 
+debug_runtime_context() {
+  local label="$1"
+  local tty_state="no"
+  if tty_input_available; then
+    tty_state="yes"
+  fi
+  debug "$label"
+  debug "action=$ACTION mode=$MODE resolved_release=$RELEASE_VERSION home=$HOME shell=${SHELL:-unknown}"
+  debug "pwd=$(pwd) tty_input_available=$tty_state stdin_tty=$([[ -t 0 ]] && printf yes || printf no) stdout_tty=$([[ -t 1 ]] && printf yes || printf no)"
+  debug "command -v bsj => $(command -v bsj 2>/dev/null || printf '<not found>')"
+}
+
 print_launch_handoff() {
   local installed_bin="$1"
   cat <<EOF
@@ -455,6 +485,10 @@ Choose what to do:
   h) Help/options
   q) Quit
 EOF
+  debug_runtime_context "Top installer menu is visible."
+  if [[ -z "$ACTION_SELECTIONS" ]]; then
+    info "Waiting for your installer choice on this terminal. Press Return after 1-7, a, h, or q."
+  fi
 
   while true; do
     if [[ -n "$ACTION_SELECTIONS" ]]; then
@@ -1042,7 +1076,9 @@ run_path_repair() {
 
 ensure_path_hint() {
   local path_entry="$1"
+  debug "PATH contains $path_entry => $( [[ ":$PATH:" == *":$path_entry:"* ]] && printf yes || printf no )"
   if [[ ":$PATH:" == *":$path_entry:"* ]]; then
+    info "Current shell already includes $path_entry."
     return
   fi
 
@@ -1056,6 +1092,7 @@ ensure_path_hint() {
 print_install_version_summary() {
   local installed_path="$1"
   local reported_version="" active_path=""
+  debug "Verifying installed binary at $installed_path"
 
   if [[ -x "$installed_path" ]]; then
     reported_version="$("$installed_path" --version 2>/dev/null || true)"
@@ -1066,6 +1103,7 @@ print_install_version_summary() {
 
   if active_path="$(command -v bsj 2>/dev/null)"; then
     printf "%sActive bsj path:%s %s\n" "$GREEN$BOLD" "$RESET" "$active_path"
+    debug "command -v bsj after install => $active_path"
     if [[ "$active_path" != "$installed_path" ]]; then
       warn "PATH resolves bsj to a different location than the newly installed binary."
       warn "Open a new shell or run the installed path directly: $installed_path"
@@ -1132,7 +1170,8 @@ persist_path_update() {
 
   if [[ "$added" -eq 0 ]]; then
     if [[ "$existing" -eq 1 ]]; then
-      info "PATH update already present in shell config."
+      info "PATH update already present in shell config for $path_entry."
+      info "No shell startup changes were needed."
     else
       warn "Could not write PATH update automatically."
     fi
@@ -1321,11 +1360,17 @@ maybe_prompt_post_install_menu() {
   local selection normalized
 
   if ! tty_input_available; then
+    announce_state "post-install summary is ready"
     print_post_install_summary "$installed_bin" "$help_ref"
     return
   fi
 
+  announce_state "post-install summary is ready"
   print_post_install_summary "$installed_bin" "$help_ref"
+  debug_runtime_context "Post-install menu is visible."
+  if [[ -z "$POST_INSTALL_SELECTIONS" ]]; then
+    info "Waiting for your post-install choice on this terminal. Press Return after 1-7."
+  fi
 
   while true; do
     cat <<EOF
@@ -1703,6 +1748,7 @@ install_prebuilt() {
     info "Selected install prefix: $prefix"
   fi
 
+  announce_state "copying bundled app files"
   info "Installing bundled bsj into $final_bin_dir"
   mkdir -p "$final_bin_dir" "$final_doc_dir" "$final_man_dir" "$final_example_dir"
 
@@ -1733,9 +1779,12 @@ install_prebuilt() {
   printf "%sInstalled examples:%s %s\n" "$GREEN$BOLD" "$RESET" "$final_example_dir"
   printf "%sInstalled man page:%s %s\n" "$GREEN$BOLD" "$RESET" "$final_man_dir/bsj.1"
 
+  announce_state "checking PATH integration"
   persist_path_update "$final_bin_dir"
   ensure_path_hint "$final_bin_dir"
+  announce_state "verifying installed binary"
   print_install_version_summary "$final_bin_dir/bsj"
+  announce_state "opening post-install options"
   maybe_prompt_post_install_menu "$final_bin_dir/bsj" "man $final_man_dir/bsj.1"
 }
 
@@ -1777,6 +1826,7 @@ install_from_source() {
   fi
   local cargo_bin_dir="${BIN_DIR:-$cargo_root/bin}"
   local config_dir="$HOME/Library/Application Support/bsj"
+  announce_state "building and installing from source"
   info "Installing bsj from source into $cargo_bin_dir"
   cargo install --path "$ROOT_DIR" --locked --force --root "$cargo_root"
   mkdir -p "$config_dir"
@@ -1788,9 +1838,12 @@ install_from_source() {
   printf "%sConfig dir:%s %s\n" "$GREEN$BOLD" "$RESET" "$config_dir"
   install_completion_files "$ROOT_DIR" "$bsj_bin" "$cargo_root"
 
+  announce_state "checking PATH integration"
   persist_path_update "$cargo_bin_dir"
   ensure_path_hint "$cargo_bin_dir"
+  announce_state "verifying installed binary"
   print_install_version_summary "$bsj_bin"
+  announce_state "opening post-install options"
   maybe_prompt_post_install_menu "$bsj_bin" "$bsj_bin --help"
 }
 
@@ -1816,6 +1869,7 @@ case "$ACTION" in
   install)
     RESOLVED_MODE="$(pick_mode)"
     announce_install_plan "$RESOLVED_MODE"
+    debug_runtime_context "Starting installer action."
     case "$RESOLVED_MODE" in
       prebuilt)
         install_prebuilt

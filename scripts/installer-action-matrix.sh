@@ -95,12 +95,12 @@ run_with_timeout 180 "prebuilt install for repair-path checks" \
 "$REPAIR_PREFIX/bin/bsj" --help >/dev/null
 
 run_with_timeout 30 "repair-path run 1" \
-  env PATH="$SMOKE_PATH" HOME="$REPAIR_HOME" SHELL=/bin/zsh "$ROOT_DIR/install.sh" --repair-path --prefix "$REPAIR_PREFIX" \
+  env PATH="$REPAIR_PREFIX/bin:$SMOKE_PATH" HOME="$REPAIR_HOME" SHELL=/bin/zsh "$ROOT_DIR/install.sh" --repair-path --prefix "$REPAIR_PREFIX" \
   >"$REPAIR_LOG_1" 2>&1
 run_with_timeout 30 "repair-path run 2" \
-  env PATH="$SMOKE_PATH" HOME="$REPAIR_HOME" SHELL=/bin/zsh "$ROOT_DIR/install.sh" --repair-path --prefix "$REPAIR_PREFIX" \
+  env PATH="$REPAIR_PREFIX/bin:$SMOKE_PATH" HOME="$REPAIR_HOME" SHELL=/bin/zsh "$ROOT_DIR/install.sh" --repair-path --prefix "$REPAIR_PREFIX" \
   >"$REPAIR_LOG_2" 2>&1
-assert_log_contains "$REPAIR_LOG_2" "PATH update already present in shell config."
+assert_log_contains "$REPAIR_LOG_2" "PATH update already present in shell config for $REPAIR_PREFIX/bin."
 assert_path_entry_count "$REPAIR_HOME/.zprofile" "$REPAIR_PREFIX/bin" 1
 assert_path_entry_count "$REPAIR_HOME/.zshrc" "$REPAIR_PREFIX/bin" 1
 assert_path_entry_count "$REPAIR_HOME/.bash_profile" "$REPAIR_PREFIX/bin" 1
