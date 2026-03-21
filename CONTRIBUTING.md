@@ -39,6 +39,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ./scripts/package-release.sh
 ./scripts/smoke-release-install.sh
+./scripts/installer-action-matrix.sh
 ```
 
 `./scripts/check-tui-snapshots.sh` also writes a browsable nostalgia preview at
@@ -55,7 +56,7 @@ just qa
 
 - Every user-reported bug must get a dedicated regression test in the same PR.
 - UX flow bugs should be covered by `src/tui/app.rs` tests under the `tui::app::tests` module.
-- Installer/update regressions should be guarded in `scripts/smoke-release-install.sh` or `scripts/qa-gate.sh`.
+- Installer/update regressions should be guarded in `scripts/smoke-release-install.sh`, `scripts/installer-action-matrix.sh`, or `scripts/qa-gate.sh`.
 
 ## Good pull requests
 

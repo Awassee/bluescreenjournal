@@ -142,6 +142,7 @@ Smoke-test the bundle install:
 
 ```bash
 ./scripts/smoke-release-install.sh
+./scripts/installer-action-matrix.sh
 ```
 
 Smoke-test the public one-line installer against a pushed ref or tag:
@@ -324,14 +325,15 @@ git push origin main --tags
 3. Run `cargo test --all-targets`
 4. Run `./scripts/package-release.sh --universal`
 5. Run `./scripts/smoke-release-install.sh`
-6. Run `./scripts/smoke-public-install.sh --ref <tag> --version <tag>`
-6. Run `./scripts/manual-smoke-gui-terminals.sh <version>`
-7. Run `./scripts/audit-release.sh`
-8. Run `bsj guide distribution` from the built binary
-9. Update release notes in `docs/releases/vX.Y.Z.md`
-10. Update public docs surfaces (`README.md`, `docs/START_HERE.md`, issue templates) if needed
-11. Push a `v*` tag to trigger `.github/workflows/release.yml`
-12. Update the Homebrew formula URL if you publish a formula
+6. Run `./scripts/installer-action-matrix.sh`
+7. Run `./scripts/smoke-public-install.sh --ref <tag> --version <tag>`
+8. Run `./scripts/manual-smoke-gui-terminals.sh <version>`
+9. Run `./scripts/audit-release.sh`
+10. Run `bsj guide distribution` from the built binary
+11. Update release notes in `docs/releases/vX.Y.Z.md`
+12. Update public docs surfaces (`README.md`, `docs/START_HERE.md`, issue templates) if needed
+13. Push a `v*` tag to trigger `.github/workflows/release.yml`
+14. Update the Homebrew formula URL if you publish a formula
 
 ## Notes
 

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/installer-test-lib.sh"
 
 REPO="Awassee/bluescreenjournal"
 REF="main"
@@ -88,6 +89,7 @@ TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/bsj-public-smoke.XXXXXX")"
 HOME_DIR="$TMP_ROOT/home"
 PREFIX_DIR="${PREFIX:-$TMP_ROOT/prefix}"
 LOG_PATH="$TMP_ROOT/public-install.log"
+UPDATE_LOG_PATH="$TMP_ROOT/public-update.log"
 INSTALLER_URL="https://raw.githubusercontent.com/${REPO}/${REF}/install.sh"
 SMOKE_PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:${PATH:-}"
 
@@ -107,9 +109,10 @@ echo "    Version:  $VERSION"
 echo "    Prefix:   $PREFIX_DIR"
 echo "    Installer: $INSTALLER_URL"
 
-HOME="$HOME_DIR" SHELL=/bin/zsh PATH="$SMOKE_PATH" \
-  bash -lc "curl -fsSL '$INSTALLER_URL' | bash -s -- --prebuilt --version '$VERSION' --prefix '$PREFIX_DIR'" \
-  | tee "$LOG_PATH"
+run_with_timeout 300 "public installer fresh prebuilt install" \
+  env HOME="$HOME_DIR" SHELL=/bin/zsh PATH="$SMOKE_PATH" \
+    bash -lc "curl -fsSL '$INSTALLER_URL' | bash -s -- --prebuilt --version '$VERSION' --prefix '$PREFIX_DIR'" \
+    >"$LOG_PATH" 2>&1
 
 INSTALLED_VERSION="$("$PREFIX_DIR/bin/bsj" --version)"
 [[ "$INSTALLED_VERSION" == "bsj $EXPECTED_VERSION" ]] || {
@@ -117,8 +120,8 @@ INSTALLED_VERSION="$("$PREFIX_DIR/bin/bsj" --version)"
   exit 1
 }
 
-grep -F "Selected release asset:" "$LOG_PATH" >/dev/null
-grep -F "Added $PREFIX_DIR/bin to PATH for this installer session." "$LOG_PATH" >/dev/null
+assert_log_contains "$LOG_PATH" "Selected release asset:"
+assert_log_contains "$LOG_PATH" "Added $PREFIX_DIR/bin to PATH for this installer session."
 
 if grep -F "Warning: Install finished, but this shell cannot find bsj yet" "$LOG_PATH" >/dev/null; then
   echo "Unexpected PATH warning present in public install log." >&2
@@ -137,7 +140,27 @@ for target_file in \
   }
 done
 
+# Regression guard: with an existing install on PATH, a plain Install / Update rerun should stay in one source-update flow.
+run_with_timeout 900 "public installer existing-install update path" \
+  env HOME="$HOME_DIR" SHELL=/bin/zsh PATH="$PREFIX_DIR/bin:$SMOKE_PATH" \
+    BSJ_INSTALL_SOURCE_DIR="$ROOT_DIR" \
+    bash -lc "curl -fsSL '$INSTALLER_URL' | bash -s -- --prefix '$PREFIX_DIR'" \
+    >"$UPDATE_LOG_PATH" 2>&1
+
+UPDATED_VERSION="$("$PREFIX_DIR/bin/bsj" --version)"
+[[ "$UPDATED_VERSION" == bsj\ * ]] || {
+  echo "Unexpected updated version output: $UPDATED_VERSION" >&2
+  exit 1
+}
+
+assert_log_contains "$UPDATE_LOG_PATH" "Smart mode selected source update from latest main because bsj is already installed"
+assert_log_contains "$UPDATE_LOG_PATH" "Using provided source tree override: $ROOT_DIR"
+assert_log_contains "$UPDATE_LOG_PATH" "Source update archive is ready."
+assert_log_contains "$UPDATE_LOG_PATH" "Continuing in this installer window to build the source tree."
+assert_log_contains "$UPDATE_LOG_PATH" "Installing bsj from source into $PREFIX_DIR/bin"
+
 echo "Public installer smoke passed:"
 echo "  Version:  $INSTALLED_VERSION"
 echo "  Log:      $LOG_PATH"
+echo "  Update log: $UPDATE_LOG_PATH"
 echo "  Temp root: $TMP_ROOT"

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/installer-test-lib.sh"
 ARCHIVE=""
 
 usage() {
@@ -62,6 +63,8 @@ BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
 BOOTSTRAP_BASH_HOME="$TMP_DIR/bootstrap-home-bash"
 SOURCE_UPDATE_HOME="$TMP_DIR/source-update-home"
 SOURCE_UPDATE_PREFIX="$TMP_DIR/source-update-prefix"
+UPDATE_ACTION_HOME="$SOURCE_UPDATE_HOME"
+UPDATE_ACTION_PREFIX="$SOURCE_UPDATE_PREFIX"
 SMOKE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 INSTALL_LOG="$TMP_DIR/install-prebuilt.log"
 SMART_LOG="$TMP_DIR/install-smart.log"
@@ -69,22 +72,25 @@ MENU_LOG="$TMP_DIR/install-prebuilt-menu.log"
 MENU_LAUNCH_LOG="$TMP_DIR/install-prebuilt-menu-launch.log"
 HANDOFF_LOG="$TMP_DIR/install-handoff.log"
 SOURCE_UPDATE_LOG="$TMP_DIR/install-source-update.log"
+UPDATE_ACTION_LOG="$TMP_DIR/install-update-action.log"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 [[ -d "$BUNDLE_DIR" ]] || { echo "Bundle directory not found after extraction" >&2; exit 1; }
 
-HOME="$INSTALL_HOME" SHELL=/bin/zsh "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$INSTALL_PREFIX" | tee "$INSTALL_LOG"
+run_with_timeout 180 "bundled prebuilt install" \
+  env HOME="$INSTALL_HOME" SHELL=/bin/zsh "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$INSTALL_PREFIX" \
+  >"$INSTALL_LOG" 2>&1
 "$INSTALL_PREFIX/bin/bsj" --help >/dev/null
 "$INSTALL_PREFIX/bin/bsj" guide setup >/dev/null
 "$INSTALL_PREFIX/bin/bsj" guide distribution >/dev/null
 "$INSTALL_PREFIX/bin/bsj" guide whatsnew >/dev/null
 "$INSTALL_PREFIX/bin/bsj" settings >/dev/null
-grep -Fq "Quick start:" "$INSTALL_LOG"
-grep -Fq "Press F2 to save, or type **save** then Enter for quick-save + next entry" "$INSTALL_LOG"
-grep -Fq "Press Esc (or Ctrl+O) to open menus" "$INSTALL_LOG"
-grep -Fq "guide cheatsheet" "$INSTALL_LOG"
-grep -Fq "guide whatsnew" "$INSTALL_LOG"
+assert_log_contains "$INSTALL_LOG" "Quick start:"
+assert_log_contains "$INSTALL_LOG" "Press F2 to save, or type **save** then Enter for quick-save + next entry"
+assert_log_contains "$INSTALL_LOG" "Press Esc (or Ctrl+O) to open menus"
+assert_log_contains "$INSTALL_LOG" "guide cheatsheet"
+assert_log_contains "$INSTALL_LOG" "guide whatsnew"
 test -f "$INSTALL_PREFIX/share/doc/bsj/README.md"
 test -f "$INSTALL_PREFIX/share/doc/bsj/LICENSE"
 test -f "$INSTALL_PREFIX/share/doc/bsj/CHANGELOG.md"
@@ -112,62 +118,68 @@ grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.bash_profile"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.bashrc"
 grep -Fq "$INSTALL_PREFIX/bin" "$INSTALL_HOME/.config/fish/config.fish"
 
-HOME="$SMART_HOME" SHELL=/bin/zsh \
-  BSJ_INSTALL_PREFIX="$SMART_PREFIX" \
-  BSJ_INSTALLER_ACTION_SELECTION="1" \
-  BSJ_INSTALLER_POST_INSTALL_SELECTION="7" \
-  script -q "$SMART_LOG" "$BUNDLE_DIR/install.sh" >/dev/null
+run_with_timeout 180 "interactive smart bundled install" \
+  env HOME="$SMART_HOME" SHELL=/bin/zsh \
+    BSJ_INSTALL_PREFIX="$SMART_PREFIX" \
+    BSJ_INSTALLER_ACTION_SELECTION="1" \
+    BSJ_INSTALLER_POST_INSTALL_SELECTION="7" \
+    script -q "$SMART_LOG" "$BUNDLE_DIR/install.sh" >/dev/null 2>&1
 "$SMART_PREFIX/bin/bsj" --help >/dev/null
-grep -Fq "Choose what to do:" "$SMART_LOG"
-grep -Fq "Install / Update (Recommended smart mode)" "$SMART_LOG"
-grep -Fq "Installer auto-select: 1" "$SMART_LOG"
-grep -Fq "Smart mode selected bundled prebuilt install from this folder" "$SMART_LOG"
-grep -Fq "Plan: fetch or use a signed release bundle, install bsj, repair PATH, then offer a menu-first launch." "$SMART_LOG"
-grep -Fq "Installer auto-select: 7" "$SMART_LOG"
+assert_log_contains "$SMART_LOG" "Choose what to do:"
+assert_log_contains "$SMART_LOG" "Install / Update (Recommended smart mode)"
+assert_log_contains "$SMART_LOG" "Installer auto-select: 1"
+assert_log_contains "$SMART_LOG" "Smart mode selected bundled prebuilt install from this folder"
+assert_log_contains "$SMART_LOG" "Plan: fetch or use a signed release bundle, install bsj, repair PATH, then offer a menu-first launch."
+assert_log_contains "$SMART_LOG" "Installer auto-select: 7"
 grep -Fq "$SMART_PREFIX/bin" "$SMART_HOME/.zprofile"
 
-HOME="$MENU_LAUNCH_HOME" SHELL=/bin/zsh \
-  BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \
-  BSJ_INSTALLER_LAUNCH_MODE="help" \
-  script -q "$MENU_LAUNCH_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_LAUNCH_PREFIX" >/dev/null
+run_with_timeout 180 "post-install menu launch help" \
+  env HOME="$MENU_LAUNCH_HOME" SHELL=/bin/zsh \
+    BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \
+    BSJ_INSTALLER_LAUNCH_MODE="help" \
+    script -q "$MENU_LAUNCH_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_LAUNCH_PREFIX" >/dev/null 2>&1
 "$MENU_LAUNCH_PREFIX/bin/bsj" --help >/dev/null
-grep -Fq "BlueScreen Journal installer menu" "$MENU_LAUNCH_LOG"
-grep -Fq "Installer auto-select: 1" "$MENU_LAUNCH_LOG"
-grep -Fq "Launch BlueScreen Journal here now (recommended)" "$MENU_LAUNCH_LOG"
-grep -Fq "Usage: bsj" "$MENU_LAUNCH_LOG"
+assert_log_contains "$MENU_LAUNCH_LOG" "BlueScreen Journal installer menu"
+assert_log_contains "$MENU_LAUNCH_LOG" "Installer auto-select: 1"
+assert_log_contains "$MENU_LAUNCH_LOG" "Launch BlueScreen Journal here now (recommended)"
+assert_log_contains "$MENU_LAUNCH_LOG" "Usage: bsj"
 grep -Fq "$MENU_LAUNCH_PREFIX/bin" "$MENU_LAUNCH_HOME/.zprofile"
 
-HOME="$MENU_LAUNCH_HOME" SHELL=/bin/zsh \
-  BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \
-  BSJ_INSTALLER_LAUNCH_MODE="smoke-app" \
-  BSJ_INSTALLER_LAUNCH_STYLE="same-terminal" \
-  script -q "$HANDOFF_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_LAUNCH_PREFIX" >/dev/null
-grep -Fq "Preparing this terminal for the full-screen journal" "$HANDOFF_LOG"
-grep -Fq "[1/3] Resetting terminal input state" "$HANDOFF_LOG"
-grep -Fq "[2/3] Handing off to bsj" "$HANDOFF_LOG"
-grep -Fq "[3/3] Opening the blue-screen workspace" "$HANDOFF_LOG"
-grep -Fq "bsj " "$HANDOFF_LOG"
+run_with_timeout 180 "same-terminal installer handoff" \
+  env HOME="$MENU_LAUNCH_HOME" SHELL=/bin/zsh \
+    BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \
+    BSJ_INSTALLER_LAUNCH_MODE="smoke-app" \
+    BSJ_INSTALLER_LAUNCH_STYLE="same-terminal" \
+    script -q "$HANDOFF_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_LAUNCH_PREFIX" >/dev/null 2>&1
+assert_log_contains "$HANDOFF_LOG" "Preparing this terminal for the full-screen journal"
+assert_log_contains "$HANDOFF_LOG" "[1/3] Resetting terminal input state"
+assert_log_contains "$HANDOFF_LOG" "[2/3] Handing off to bsj"
+assert_log_contains "$HANDOFF_LOG" "[3/3] Opening the blue-screen workspace"
+assert_log_contains "$HANDOFF_LOG" "bsj "
 
-HOME="$MENU_HOME" SHELL=/bin/zsh \
-  BSJ_INSTALLER_POST_INSTALL_SELECTION="4,6,5,7" \
-  BSJ_INSTALLER_LAUNCH_MODE="help" \
-  script -q "$MENU_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_PREFIX" >/dev/null
+run_with_timeout 180 "installer post-install utility menu" \
+  env HOME="$MENU_HOME" SHELL=/bin/zsh \
+    BSJ_INSTALLER_POST_INSTALL_SELECTION="4,6,5,7" \
+    BSJ_INSTALLER_LAUNCH_MODE="help" \
+    script -q "$MENU_LOG" "$BUNDLE_DIR/install.sh" --prebuilt --prefix "$MENU_PREFIX" >/dev/null 2>&1
 "$MENU_PREFIX/bin/bsj" --help >/dev/null
-grep -Fq "BlueScreen Journal installer menu" "$MENU_LOG"
-grep -Fq "Print first-two-minutes cheat sheet" "$MENU_LOG"
-grep -Fq "BlueScreen Journal Cheat Sheet" "$MENU_LOG"
-grep -Fq "If you only remember three things" "$MENU_LOG"
-grep -Fq "Installer auto-select: 4" "$MENU_LOG"
-grep -Fq "Installer auto-select: 6" "$MENU_LOG"
-grep -Fq "Installer auto-select: 5" "$MENU_LOG"
-grep -Fq "Installer auto-select: 7" "$MENU_LOG"
-grep -Fq "Open BlueScreen Journal in a new Terminal window" "$MENU_LOG"
-grep -Fq "Usage: bsj" "$MENU_LOG"
-grep -Fq "BlueScreen Journal Doctor" "$MENU_LOG"
-grep -Fq "Summary: OK" "$MENU_LOG"
+assert_log_contains "$MENU_LOG" "BlueScreen Journal installer menu"
+assert_log_contains "$MENU_LOG" "Print first-two-minutes cheat sheet"
+assert_log_contains "$MENU_LOG" "BlueScreen Journal Cheat Sheet"
+assert_log_contains "$MENU_LOG" "If you only remember three things"
+assert_log_contains "$MENU_LOG" "Installer auto-select: 4"
+assert_log_contains "$MENU_LOG" "Installer auto-select: 6"
+assert_log_contains "$MENU_LOG" "Installer auto-select: 5"
+assert_log_contains "$MENU_LOG" "Installer auto-select: 7"
+assert_log_contains "$MENU_LOG" "Open BlueScreen Journal in a new Terminal window"
+assert_log_contains "$MENU_LOG" "Usage: bsj"
+assert_log_contains "$MENU_LOG" "BlueScreen Journal Doctor"
+assert_log_contains "$MENU_LOG" "Summary: OK"
 grep -Fq "$MENU_PREFIX/bin" "$MENU_HOME/.zprofile"
 
-HOME="$BOOTSTRAP_HOME" SHELL=/bin/zsh bash -s -- --prebuilt --archive "$ARCHIVE" --prefix "$BOOTSTRAP_PREFIX" < "$ROOT_DIR/install.sh"
+run_with_timeout 180 "bootstrap prebuilt install with archive" \
+  env HOME="$BOOTSTRAP_HOME" SHELL=/bin/zsh \
+    bash -lc "bash -s -- --prebuilt --archive '$ARCHIVE' --prefix '$BOOTSTRAP_PREFIX' < '$ROOT_DIR/install.sh'"
 "$BOOTSTRAP_PREFIX/bin/bsj" --help >/dev/null
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/README.md"
 test -f "$BOOTSTRAP_PREFIX/share/doc/bsj/CHANGELOG.md"
@@ -191,7 +203,9 @@ grep -Fq "$BOOTSTRAP_PREFIX/bin" "$BOOTSTRAP_HOME/.config/fish/config.fish"
 
 # Regression guard: exercise bootstrap install with no forwarded install args.
 mkdir -p "$BOOTSTRAP_NOARGS_HOME"
-PATH="$SMOKE_PATH" HOME="$BOOTSTRAP_NOARGS_HOME" SHELL=/bin/zsh bash -s -- --prebuilt --archive "$ARCHIVE" < "$ROOT_DIR/install.sh"
+run_with_timeout 180 "bootstrap prebuilt install without forwarded args" \
+  env PATH="$SMOKE_PATH" HOME="$BOOTSTRAP_NOARGS_HOME" SHELL=/bin/zsh \
+    bash -lc "bash -s -- --prebuilt --archive '$ARCHIVE' < '$ROOT_DIR/install.sh'"
 "$BOOTSTRAP_NOARGS_HOME/.local/bin/bsj" --help >/dev/null
 test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/doc/bsj/README.md"
 test -f "$BOOTSTRAP_NOARGS_HOME/.local/share/man/man1/bsj.1"
@@ -203,7 +217,9 @@ grep -Fq "$BOOTSTRAP_NOARGS_HOME/.local/bin" "$BOOTSTRAP_NOARGS_HOME/.config/fis
 
 # Bash profile fallback coverage.
 mkdir -p "$BOOTSTRAP_BASH_HOME"
-PATH="$SMOKE_PATH" HOME="$BOOTSTRAP_BASH_HOME" SHELL=/bin/bash bash -s -- --prebuilt --archive "$ARCHIVE" < "$ROOT_DIR/install.sh"
+run_with_timeout 180 "bootstrap prebuilt install with bash shell" \
+  env PATH="$SMOKE_PATH" HOME="$BOOTSTRAP_BASH_HOME" SHELL=/bin/bash \
+    bash -lc "bash -s -- --prebuilt --archive '$ARCHIVE' < '$ROOT_DIR/install.sh'"
 "$BOOTSTRAP_BASH_HOME/.local/bin/bsj" --help >/dev/null
 grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.bash_profile"
 grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.bashrc"
@@ -213,17 +229,36 @@ grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.config/fish/co
 
 # Regression guard: existing install + smart mode should stay in one installer flow while source-updating.
 mkdir -p "$SOURCE_UPDATE_HOME"
-PATH="$INSTALL_PREFIX/bin:$SMOKE_PATH" HOME="$SOURCE_UPDATE_HOME" SHELL=/bin/zsh \
-  BSJ_INSTALL_SOURCE_DIR="$ROOT_DIR" \
-  bash -s -- --prefix "$SOURCE_UPDATE_PREFIX" < "$ROOT_DIR/install.sh" | tee "$SOURCE_UPDATE_LOG"
+run_with_timeout 900 "smart mode source update with existing install" \
+  env PATH="$INSTALL_PREFIX/bin:$SMOKE_PATH" HOME="$SOURCE_UPDATE_HOME" SHELL=/bin/zsh \
+    BSJ_INSTALL_SOURCE_DIR="$ROOT_DIR" \
+    bash -lc "bash -s -- --prefix '$SOURCE_UPDATE_PREFIX' < '$ROOT_DIR/install.sh'" \
+    >"$SOURCE_UPDATE_LOG" 2>&1
 "$SOURCE_UPDATE_PREFIX/bin/bsj" --help >/dev/null
-grep -Fq "Smart mode selected source update from latest main because bsj is already installed" "$SOURCE_UPDATE_LOG"
-grep -Fq "Using provided source tree override: $ROOT_DIR" "$SOURCE_UPDATE_LOG"
-grep -Fq "Source update archive is ready." "$SOURCE_UPDATE_LOG"
-grep -Fq "Continuing in this installer window to build the source tree." "$SOURCE_UPDATE_LOG"
-grep -Fq "Next step: cargo install --path $ROOT_DIR --locked --force" "$SOURCE_UPDATE_LOG"
-grep -Fq "Installing bsj from source into $SOURCE_UPDATE_PREFIX/bin" "$SOURCE_UPDATE_LOG"
+assert_log_contains "$SOURCE_UPDATE_LOG" "Smart mode selected source update from latest main because bsj is already installed"
+assert_log_contains "$SOURCE_UPDATE_LOG" "Using provided source tree override: $ROOT_DIR"
+assert_log_contains "$SOURCE_UPDATE_LOG" "Source update archive is ready."
+assert_log_contains "$SOURCE_UPDATE_LOG" "Continuing in this installer window to build the source tree."
+assert_log_contains "$SOURCE_UPDATE_LOG" "Next step: cargo install --path $ROOT_DIR --locked --force"
+assert_log_contains "$SOURCE_UPDATE_LOG" "Installing bsj from source into $SOURCE_UPDATE_PREFIX/bin"
 grep -Fq "$SOURCE_UPDATE_PREFIX/bin" "$SOURCE_UPDATE_HOME/.zprofile"
+
+# Regression guard: existing install + choosing Install / Update from the top installer menu should also source-update cleanly.
+run_with_timeout 900 "interactive installer update action with existing install" \
+  env PATH="$INSTALL_PREFIX/bin:$SMOKE_PATH" HOME="$UPDATE_ACTION_HOME" SHELL=/bin/zsh \
+    BSJ_INSTALL_SOURCE_DIR="$ROOT_DIR" \
+    BSJ_INSTALLER_ACTION_SELECTION="1" \
+    BSJ_INSTALLER_POST_INSTALL_SELECTION="7" \
+    script -q "$UPDATE_ACTION_LOG" /bin/bash -lc "bash -s -- < '$ROOT_DIR/install.sh'" >/dev/null 2>&1
+"$UPDATE_ACTION_HOME/.cargo/bin/bsj" --help >/dev/null
+assert_log_contains "$UPDATE_ACTION_LOG" "Choose what to do:"
+assert_log_contains "$UPDATE_ACTION_LOG" "Installer auto-select: 1"
+assert_log_contains "$UPDATE_ACTION_LOG" "Install / Update (Recommended smart mode)"
+assert_log_contains "$UPDATE_ACTION_LOG" "Smart mode selected source update from latest main because bsj is already installed"
+assert_log_contains "$UPDATE_ACTION_LOG" "Using provided source tree override: $ROOT_DIR"
+assert_log_contains "$UPDATE_ACTION_LOG" "Continuing in this installer window to build the source tree."
+assert_log_contains "$UPDATE_ACTION_LOG" "Installer auto-select: 7"
+grep -Fq "$UPDATE_ACTION_HOME/.cargo/bin" "$UPDATE_ACTION_HOME/.zprofile"
 
 cat <<EOF
 Smoke test passed:
@@ -232,4 +267,5 @@ Smoke test passed:
   Prefix:  $INSTALL_PREFIX
   Bootstrap Prefix: $BOOTSTRAP_PREFIX
   Source Update Prefix: $SOURCE_UPDATE_PREFIX
+  Interactive Update Prefix: $UPDATE_ACTION_HOME/.cargo
 EOF

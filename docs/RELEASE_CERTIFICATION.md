@@ -12,8 +12,9 @@ This runbook defines the minimum certification pass for a public release.
 4. `./scripts/check-tui-snapshots.sh`
 5. `./scripts/package-release.sh --universal`
 6. `./scripts/smoke-release-install.sh --archive dist/bsj-<version>-universal-apple-darwin.tar.gz`
-7. `./scripts/smoke-public-install.sh --ref v<version> --version v<version>`
-8. `./scripts/certify-release.sh --ref v<version> --version v<version> --report docs/certification/v<version>.md`
+7. `./scripts/installer-action-matrix.sh --archive dist/bsj-<version>-universal-apple-darwin.tar.gz`
+8. `./scripts/smoke-public-install.sh --ref v<version> --version v<version>`
+9. `./scripts/certify-release.sh --ref v<version> --version v<version> --report docs/certification/v<version>.md`
 
 ## What certification means
 

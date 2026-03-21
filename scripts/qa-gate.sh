@@ -65,4 +65,7 @@ fi
 echo "==> QA gate: smoke install (${archive})"
 ./scripts/smoke-release-install.sh --archive "$archive"
 
+echo "==> QA gate: installer action matrix (${archive})"
+./scripts/installer-action-matrix.sh --archive "$archive"
+
 echo "==> QA gate passed"
