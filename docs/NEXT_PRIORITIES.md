@@ -1,14 +1,14 @@
 # Next Priorities
 
-This is the current prioritized backlog after `v2.2.1`.
+This is the current prioritized backlog after `v2.2.2`.
 
-## Recently shipped in v2.2.1
+## Recently shipped in v2.2.2
 
-- shipped a real trust dashboard drill-down from `TOOLS -> Status Dashboard`
-- added `HELP -> What's New` and `bsj guide whatsnew`
-- kept the first-save flow explicit for longer before fading to the normal footer hints
-- shortened the installer post-install summary and aligned it with the in-app guide surfaces
-- extended release certification so the new what's-new surface is part of the stable release gate
+- added clearer installer state transitions for install, update, PATH repair, verification, and post-install handoff
+- added `./install.sh --debug` for richer installer diagnostics without leaking secrets
+- expanded installer regression coverage across bundled install, public bootstrap, update, repair, uninstall, and reset paths
+- added [Maintenance Baseline](MAINTENANCE_BASELINE.md) so the project can sit idle and still be resumed safely
+- pushed the stable line forward to `v2.2.2`
 
 ## Current major steps
 

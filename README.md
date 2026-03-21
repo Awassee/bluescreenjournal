@@ -22,12 +22,12 @@ The product goal is narrow on purpose: launch, unlock once, and start writing im
 - local-first design with encrypted folder sync plus S3/WebDAV and direct Google Drive/Dropbox API connectors
 - optional AI summary and reflective coach mode (off by default)
 
-## New in v2.2.1
+## New in v2.2.2
 
-- `TOOLS -> Status Dashboard` now opens a real trust drill-down instead of a static report
-- `HELP -> What's New` and `bsj guide whatsnew` explain the latest shipped changes without sending you to GitHub first
-- first-save guidance now stays visible a little longer so same-day next entry vs next blank day remains obvious
-- the installer post-install summary is shorter and points directly at the cheat sheet and current release highlights
+- the installer now reports its state more clearly during install, update, PATH repair, and post-install handoff
+- `./install.sh --debug` adds extra installer trace output without dumping secrets
+- release QA now covers more installer combinations, including existing-install update flows and action-matrix regression checks
+- the new [Maintenance Baseline](docs/MAINTENANCE_BASELINE.md) gives a clean wake-up checklist when the project sits untouched for months
 
 ## Screenshots
 
@@ -77,7 +77,7 @@ It gives you:
 | Resolve install/runtime issues | [Troubleshooting](docs/TROUBLESHOOTING.md), [Terminal Guide](docs/TERMINAL_GUIDE.md), [Support](SUPPORT.md) |
 | Operate sync/backup safely | [Sync Guide](docs/SYNC_GUIDE.md), [Backup Restore](docs/BACKUP_RESTORE.md), [Privacy](docs/PRIVACY.md) |
 | Configure and tune behavior | [Settings Guide](docs/SETTINGS_GUIDE.md), [config.example.json](docs/config.example.json) |
-| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Certification](docs/RELEASE_CERTIFICATION.md), [Release Notes](docs/releases/v2.2.1.md) |
+| Package or distribute releases | [Distribution Guide](docs/DISTRIBUTION.md), [Release Certification](docs/RELEASE_CERTIFICATION.md), [Maintenance Baseline](docs/MAINTENANCE_BASELINE.md), [Release Notes](docs/releases/v2.2.2.md) |
 
 ## Turnkey install
 
@@ -90,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.1
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.2
 ```
 
 Install from source instead of the prebuilt release:
@@ -446,7 +446,8 @@ Start here on GitHub:
 - [Datasheet](docs/DATASHEET.md)
 - [FAQ](docs/FAQ.md)
 - [Compare bsj](docs/COMPARE.md)
-- [Release Notes](docs/releases/v2.2.1.md)
+- [Maintenance Baseline](docs/MAINTENANCE_BASELINE.md)
+- [Release Notes](docs/releases/v2.2.2.md)
 - [v1.3 Milestone Plan](docs/V1_3_PLAN.md)
 - [v1.3 UX Checklist](docs/V1_3_UX_CHECKLIST.md)
 - [v3.0 Planning](docs/V3_0_PLAN.md)

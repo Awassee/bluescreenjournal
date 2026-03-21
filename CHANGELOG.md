@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v2.2.2
+
+- clarified installer state transitions so install/update now explicitly reports file copy, PATH integration, binary verification, and post-install menu readiness
+- added installer `--debug` mode plus non-secret runtime context lines to make machine-specific installer issues much easier to diagnose remotely
+- hardened packaged and public installer regression coverage with per-scenario timeouts, real update-path checks, and a dedicated installer action matrix
+- added release-process documentation for a long-lived stable baseline, so future wake-up work starts from one place instead of scattered tribal knowledge
+
 ## v2.2.1
 
 - turned `TOOLS -> Status Dashboard` into a real trust drill-down so verify, backup, sync, cloud recovery, doctor, and the short trust snapshot are reachable from one picker

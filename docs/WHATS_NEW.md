@@ -1,38 +1,37 @@
-# What's New in v2.2.1
+# What's New in v2.2.2
 
-This patch keeps the writing surface stable and cleans up the trust-and-onboarding edges around it.
+This patch focuses on release confidence. The writing surface stays the same, while the installer and release process get easier to trust when you revisit the product later.
 
 ## Highlights
 
-- `TOOLS -> Status Dashboard` now opens the `Trust Dashboard` drill-down instead of a static report.
-  - from one place you can open verify, integrity details, backup actions, sync status, cloud recovery, doctor, and the short trust snapshot
-- `HELP -> What's New` now explains the latest shipped changes without sending you to GitHub first
-  - CLI mirror: `bsj guide whatsnew`
-  - installer guidance now points to the same short summary
-- first-save guidance now stays visible a little longer
-  - after your first save, the footer keeps the next-step language obvious:
-    - revise the saved page
-    - use `**save**` for the next same-day entry
-    - use `Alt+N` for the next blank day
-- the installer post-install summary is shorter and more direct
-  - less manual dump
-  - more “what should I do next?”
+- the installer now prints explicit state transitions
+  - install/update, PATH repair, verification, and post-install handoff all show what the script is doing
+- `./install.sh --debug` now exposes richer trace output for hard-to-reproduce install problems
+  - no secrets are printed
+- release QA now exercises more installer combinations
+  - bundled install
+  - public bootstrap install
+  - existing-install update
+  - repair-path, uninstall, and factory reset action flows
+- a new maintenance baseline lives in the docs
+  - it gives a wake-up checklist for coming back after months away
+  - it records the exact scripts and checks to rerun before the next release
 
 ## Why this matters
 
-BlueScreen Journal already had the core writing loop.
+BlueScreen Journal already had the core editor, vault, sync, backup, and recovery shape.
 
-The friction was around confidence:
+The weak point was release durability:
 
-- users could save, but not always tell what to do immediately after
-- the trust dashboard had the right information, but not the right shape
-- release highlights lived in GitHub instead of inside the product
+- installer hangs were harder to diagnose than they should have been
+- some update combinations needed stronger regression coverage
+- the “what do I do when I come back to this later?” story lived in memory instead of in the repo
 
-This release closes those gaps while preserving the nostalgic blue-screen flow.
+This release hardens those edges without changing the nostalgic writing loop.
 
 ## Find it in the product
 
-- `HELP -> What's New`
-- `HELP -> First 2 Minutes Cheat Sheet`
-- `TOOLS -> Status Dashboard`
-- installer menu option `4` for the cheat sheet, plus `bsj guide whatsnew` after install
+- installer `--debug`
+- installer menu option `4` for the cheat sheet
+- `bsj guide whatsnew`
+- `docs/MAINTENANCE_BASELINE.md`

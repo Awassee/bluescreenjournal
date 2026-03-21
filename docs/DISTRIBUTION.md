@@ -35,7 +35,7 @@ That bootstrap installer:
 Pin a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.1
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.2
 ```
 
 ## Release Bundle Layout
@@ -64,7 +64,8 @@ dist/
         bsj-search.png
         ...
       releases/
-        v2.2.1.md
+        v2.2.2.md
+      MAINTENANCE_BASELINE.md
       SETUP_GUIDE.md
       PRODUCT_GUIDE.md
       DATASHEET.md
@@ -148,13 +149,13 @@ Smoke-test the bundle install:
 Smoke-test the public one-line installer against a pushed ref or tag:
 
 ```bash
-./scripts/smoke-public-install.sh --ref v2.2.1 --version v2.2.1
+./scripts/smoke-public-install.sh --ref v2.2.2 --version v2.2.2
 ```
 
 Write a clean-account certification report for the release:
 
 ```bash
-./scripts/certify-release.sh --ref v2.2.1 --version v2.2.1 --report docs/certification/v2.2.1.md
+./scripts/certify-release.sh --ref v2.2.2 --version v2.2.2 --report docs/certification/v2.2.2.md
 ```
 
 Run the release privacy audit directly:
@@ -314,7 +315,7 @@ Release workflow:
 Release automation flow:
 
 ```bash
-git tag v2.2.1
+git tag v2.2.2
 git push origin main --tags
 ```
 

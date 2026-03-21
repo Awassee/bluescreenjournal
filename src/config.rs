@@ -116,6 +116,38 @@ pub struct AppConfig {
     pub macros: Vec<MacroConfig>,
 }
 
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            vault_path: default_vault_path(),
+            sync_target_path: None,
+            sync_backend_preference: None,
+            gdrive_folder_id: None,
+            dropbox_root: None,
+            local_device_id: None,
+            device_nickname: default_device_nickname(),
+            typewriter_mode: false,
+            clock_12h: false,
+            show_seconds: false,
+            show_ruler: default_show_ruler(),
+            show_footer_legend: default_show_footer_legend(),
+            soundtrack_source: default_soundtrack_source(),
+            opening_line_template: default_opening_line_template(),
+            daily_word_goal: None,
+            remember_passphrase_in_keychain: false,
+            first_run_coach_completed: false,
+            last_sync: None,
+            sync_history: Vec::new(),
+            favorite_dates: Vec::new(),
+            export_history: Vec::new(),
+            search_presets: Vec::new(),
+            timeline_presets: Vec::new(),
+            backup_retention: BackupRetentionConfig::default(),
+            macros: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LastSyncInfo {
     pub timestamp: String,
@@ -227,33 +259,7 @@ impl AppConfig {
                 normalize_timeline_presets(&mut config.timeline_presets);
                 config
             }
-            Ok(None) | Err(_) => Self {
-                vault_path: default_vault_path(),
-                sync_target_path: None,
-                sync_backend_preference: None,
-                gdrive_folder_id: None,
-                dropbox_root: None,
-                local_device_id: None,
-                device_nickname: default_device_nickname(),
-                typewriter_mode: false,
-                clock_12h: false,
-                show_seconds: false,
-                show_ruler: default_show_ruler(),
-                show_footer_legend: default_show_footer_legend(),
-                soundtrack_source: default_soundtrack_source(),
-                opening_line_template: default_opening_line_template(),
-                daily_word_goal: None,
-                remember_passphrase_in_keychain: false,
-                first_run_coach_completed: false,
-                last_sync: None,
-                sync_history: Vec::new(),
-                favorite_dates: Vec::new(),
-                export_history: Vec::new(),
-                search_presets: Vec::new(),
-                timeline_presets: Vec::new(),
-                backup_retention: BackupRetentionConfig::default(),
-                macros: Vec::new(),
-            },
+            Ok(None) | Err(_) => Self::default(),
         }
     }
 

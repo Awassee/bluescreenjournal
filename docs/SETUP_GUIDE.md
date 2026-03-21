@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Install a specific tagged release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.1
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.2
 ```
 
 Install from source instead:
@@ -185,4 +185,5 @@ Menu-first sync setup:
 - `docs/FAQ.md`
 - `docs/SETTINGS_GUIDE.md`
 - `docs/DISTRIBUTION.md`
+- `docs/MAINTENANCE_BASELINE.md`
 - `SUPPORT.md`

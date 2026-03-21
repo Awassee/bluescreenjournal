@@ -2199,7 +2199,7 @@ impl App {
     }
 
     pub fn with_initial_date(initial_date: Option<NaiveDate>) -> Self {
-        let config = AppConfig::load_or_default();
+        let config = startup_config();
         let initial_buffer = TextBuffer::new();
         let vault_path = if config.vault_path.as_os_str().is_empty() {
             default_vault_path()
@@ -2284,7 +2284,9 @@ impl App {
             last_save_receipt: None,
             pending_archive_confirm: None,
         };
-        app.try_keychain_auto_unlock();
+        if should_try_startup_auto_unlock() {
+            app.try_keychain_auto_unlock();
+        }
         app
     }
 
@@ -12976,6 +12978,26 @@ fn next_entry_month(entry_dates: &BTreeSet<NaiveDate>, selected: NaiveDate) -> O
         .copied()
 }
 
+#[cfg(not(test))]
+fn startup_config() -> AppConfig {
+    AppConfig::load_or_default()
+}
+
+#[cfg(test)]
+fn startup_config() -> AppConfig {
+    AppConfig::default()
+}
+
+#[cfg(not(test))]
+fn should_try_startup_auto_unlock() -> bool {
+    true
+}
+
+#[cfg(test)]
+fn should_try_startup_auto_unlock() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -16870,8 +16892,9 @@ mod tests {
                 assert_eq!(info.title, "What's New");
                 let rendered = info.lines.join("\n");
                 assert!(rendered.contains("What's New in"));
-                assert!(rendered.contains("Trust Dashboard"));
-                assert!(rendered.contains("HELP -> What's New"));
+                assert!(rendered.contains("--debug"));
+                assert!(rendered.contains("maintenance baseline"));
+                assert!(rendered.contains("bsj guide whatsnew"));
             }
             other => panic!("expected what's new info overlay, got {other:?}"),
         }

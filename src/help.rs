@@ -774,8 +774,9 @@ mod tests {
     fn whats_new_mentions_release_highlights_and_dashboard() {
         let text = render_whats_new_guide();
         assert!(text.contains("What's New in"));
-        assert!(text.contains("Trust Dashboard"));
-        assert!(text.contains("HELP -> What's New"));
+        assert!(text.contains("--debug"));
+        assert!(text.contains("maintenance baseline"));
+        assert!(text.contains("bsj guide whatsnew"));
     }
 
     #[test]
