@@ -138,8 +138,8 @@ grep -F "bsj guide whatsnew" "$HELP_LOG" >/dev/null
 grep -F "BlueScreen Journal Cheat Sheet" "$CHEAT_LOG" >/dev/null
 grep -F "If you only remember three things" "$CHEAT_LOG" >/dev/null
 grep -F "BlueScreen Journal What's New" "$WHATS_NEW_LOG" >/dev/null
-grep -F "installer now prints explicit state transitions" "$WHATS_NEW_LOG" >/dev/null
-grep -F "maintenance baseline" "$WHATS_NEW_LOG" >/dev/null
+grep -F "curl | bash" "$WHATS_NEW_LOG" >/dev/null
+grep -F "clean PTY" "$WHATS_NEW_LOG" >/dev/null
 grep -F "BlueScreen Journal Quickstart" "$QUICKSTART_LOG" >/dev/null
 
 timestamp="$(date '+%Y-%m-%d %H:%M:%S %Z')"
