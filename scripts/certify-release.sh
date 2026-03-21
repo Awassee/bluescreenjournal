@@ -98,14 +98,16 @@ fi
 REPORT_PATH="$REPORT"
 OUTPUT_DIR="$(dirname "$REPORT_PATH")"
 mkdir -p "$OUTPUT_DIR"
+ARTIFACT_DIR="$ROOT_DIR/artifacts/release-certification/${VERSION}"
+mkdir -p "$ARTIFACT_DIR"
 
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/bsj-certify.XXXXXX")"
 PREFIX_DIR="$TMP_ROOT/prefix"
-PUBLIC_LOG="$OUTPUT_DIR/public-install.log"
-HELP_LOG="$OUTPUT_DIR/bsj-help.txt"
-CHEAT_LOG="$OUTPUT_DIR/guide-cheatsheet.txt"
-WHATS_NEW_LOG="$OUTPUT_DIR/guide-whats-new.txt"
-QUICKSTART_LOG="$OUTPUT_DIR/guide-quickstart.txt"
+PUBLIC_LOG="$ARTIFACT_DIR/public-install.log"
+HELP_LOG="$ARTIFACT_DIR/bsj-help.txt"
+CHEAT_LOG="$ARTIFACT_DIR/guide-cheatsheet.txt"
+WHATS_NEW_LOG="$ARTIFACT_DIR/guide-whats-new.txt"
+QUICKSTART_LOG="$ARTIFACT_DIR/guide-quickstart.txt"
 
 cleanup() {
   if [[ "$KEEP_TEMP" -eq 0 ]]; then
@@ -136,7 +138,8 @@ grep -F "bsj guide whatsnew" "$HELP_LOG" >/dev/null
 grep -F "BlueScreen Journal Cheat Sheet" "$CHEAT_LOG" >/dev/null
 grep -F "If you only remember three things" "$CHEAT_LOG" >/dev/null
 grep -F "BlueScreen Journal What's New" "$WHATS_NEW_LOG" >/dev/null
-grep -F "Trust Dashboard" "$WHATS_NEW_LOG" >/dev/null
+grep -F "installer now prints explicit state transitions" "$WHATS_NEW_LOG" >/dev/null
+grep -F "maintenance baseline" "$WHATS_NEW_LOG" >/dev/null
 grep -F "BlueScreen Journal Quickstart" "$QUICKSTART_LOG" >/dev/null
 
 timestamp="$(date '+%Y-%m-%d %H:%M:%S %Z')"
@@ -162,11 +165,11 @@ installed_version="$("$PREFIX_DIR/bin/bsj" --version)"
   echo
   echo "## Artifacts"
   echo
-  echo "- Public installer log: \`$(basename "$PUBLIC_LOG")\`"
-  echo "- Help output: \`$(basename "$HELP_LOG")\`"
-  echo "- Cheat sheet output: \`$(basename "$CHEAT_LOG")\`"
-  echo "- What's new output: \`$(basename "$WHATS_NEW_LOG")\`"
-  echo "- Quickstart output: \`$(basename "$QUICKSTART_LOG")\`"
+  echo "- Public installer log: \`${PUBLIC_LOG#$ROOT_DIR/}\`"
+  echo "- Help output: \`${HELP_LOG#$ROOT_DIR/}\`"
+  echo "- Cheat sheet output: \`${CHEAT_LOG#$ROOT_DIR/}\`"
+  echo "- What's new output: \`${WHATS_NEW_LOG#$ROOT_DIR/}\`"
+  echo "- Quickstart output: \`${QUICKSTART_LOG#$ROOT_DIR/}\`"
   if [[ "$KEEP_TEMP" -eq 1 ]]; then
     echo "- Temp root kept for inspection: \`${TMP_ROOT}\`"
   fi

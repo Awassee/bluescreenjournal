@@ -30,6 +30,7 @@ It:
 - checks that `bsj guide whatsnew` renders the current release highlights
 - checks that `bsj guide quickstart` renders the longer walkthrough
 - writes a Markdown report that can be committed alongside release notes
+- stores supporting logs under `artifacts/release-certification/<tag>/` so generated files do not pollute `docs/certification/`
 
 This is the minimum required certification for a stable tag.
 
