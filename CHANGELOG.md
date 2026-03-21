@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v2.2.1
+
+- turned `TOOLS -> Status Dashboard` into a real trust drill-down so verify, backup, sync, cloud recovery, doctor, and the short trust snapshot are reachable from one picker
+- added an in-app `HELP -> What's New` surface plus the CLI mirror `bsj guide whatsnew`
+- kept the save/next-entry/next-day guidance visible a little longer after the first successful save so the flow stays obvious through the first confident session
+- shortened the installer post-install guide output and pointed it at the same cheat-sheet and what's-new surfaces used inside the app
+- extended release certification to check the new `bsj guide whatsnew` surface
+
 ## v2.2.0
 
 - added a real `First 2 Minutes Cheat Sheet` guide and wired it into CLI help, the Help menu, installer output, and packaged docs

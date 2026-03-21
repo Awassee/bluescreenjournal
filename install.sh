@@ -155,7 +155,7 @@ Environment overrides:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --prefix "$HOME/.local"
-  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.0
+  curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.1
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --source
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --doctor
   curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --repair-path
@@ -973,7 +973,7 @@ run_doctor() {
   fi
 
   printf "\nTroubleshooting hints\n"
-  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v2.2.0\n"
+  printf "  - Stable prebuilt:   ./install.sh --prebuilt --version v2.2.1\n"
   printf "  - Latest main build: ./install.sh --source\n"
   printf "  - PATH repair:       ./install.sh --repair-path\n"
   printf "  - About:             ./install.sh --about\n"
@@ -1161,14 +1161,16 @@ What to expect:
   - this installer already attempted PATH repair for supported shells
   - the app is menu-first: HELP, SETUP, and TOOLS cover normal setup and operations
 
-First-run flow:
-  1) Launch BlueScreen Journal (setup wizard opens automatically if needed)
-  2) Start typing your entry right away
-  3) Press F2 to save, or type **save** then Enter for quick-save + next entry
-  4) Press Esc (or Ctrl+O) to open menus: FILE/EDIT/SEARCH/GO/TOOLS/SETUP/HELP
-  5) Use SETUP -> Cloud Provider Setup for folder sync or direct cloud connectors
+Quick start:
+  - Launch BlueScreen Journal (setup wizard opens automatically if needed)
+  - Start typing right away
+  - Press F2 to save, or type **save** then Enter for quick-save + next entry
+  - Press Esc (or Ctrl+O) to open menus
+  - Press Alt+N when you want the next blank day
 
-Reference:
+Guides:
+  $launch_ref guide cheatsheet
+  $launch_ref guide whatsnew
   $help_ref
 
 Troubleshooting:

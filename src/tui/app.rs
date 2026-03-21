@@ -1860,6 +1860,7 @@ pub enum MenuAction {
     HelpTopics,
     ToggleKeychainMemory,
     CheatSheet,
+    WhatsNew,
     FirstRunTour,
     QuickStart,
     DailyFlowCoach,
@@ -2173,6 +2174,7 @@ pub struct App {
     document_stats: DocumentStats,
     menu_coach_shown: bool,
     first_run_guide_shown_this_session: bool,
+    post_save_flow_guidance_active: bool,
     soundtrack_child: Option<Child>,
     soundtrack_loop_enabled: bool,
     last_save_receipt: Option<SaveReceipt>,
@@ -2276,6 +2278,7 @@ impl App {
             }),
             menu_coach_shown: false,
             first_run_guide_shown_this_session: false,
+            post_save_flow_guidance_active: false,
             soundtrack_child: None,
             soundtrack_loop_enabled: false,
             last_save_receipt: None,
@@ -2678,6 +2681,22 @@ impl App {
                 return Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY");
             }
             return Some("START HERE: TYPE | F2 SAVE | F1 HELP | ESC MENUS");
+        }
+        if self.post_save_flow_guidance_active {
+            let today = Local::now().date_naive();
+            if self.dirty {
+                return Some("NEXT STEP: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY");
+            }
+            if self.selected_date < today {
+                return Some("OLD ENTRY: TYPE TO REVISE | **save** NEXT ENTRY | F7 INDEX");
+            }
+            if self.fresh_entry_page && self.selected_date == today {
+                return Some("NEXT ENTRY READY: TYPE | ALT+N NEXT DAY | F7 OLD ENTRIES");
+            }
+            if self.selected_date > today {
+                return Some("NEXT DAY READY: TYPE | F2 SAVE | ALT+Y TODAY");
+            }
+            return Some("SAVED PAGE: TYPE TO REVISE | **save** NEXT ENTRY | ALT+N NEXT DAY");
         }
         let today = Local::now().date_naive();
         if self.dirty {
@@ -3571,6 +3590,12 @@ impl App {
                     enabled: true,
                 },
                 MenuItem {
+                    label: format!("What's New ({})", self.app_version_label()),
+                    detail: "LATEST".to_string(),
+                    action: MenuAction::WhatsNew,
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Quick Start".to_string(),
                     detail: "START".to_string(),
                     action: MenuAction::QuickStart,
@@ -4269,6 +4294,9 @@ impl App {
             self.wrap_cursor_line();
             self.dirty = true;
             self.mark_dirty_started_now();
+            if self.post_save_flow_guidance_active {
+                self.clear_post_save_flow_guidance();
+            }
             self.refresh_document_stats();
             self.refresh_find_matches();
         }
@@ -6321,6 +6349,7 @@ impl App {
             MenuAction::Export => "Export Current Entry".to_string(),
             MenuAction::Backup => "Create Backup Snapshot".to_string(),
             MenuAction::RestoreBackup => "Restore from Backup".to_string(),
+            MenuAction::Dashboard => "Open Trust Dashboard".to_string(),
             MenuAction::Find => "Find in Current Entry".to_string(),
             MenuAction::Replace => "Replace in Current Entry".to_string(),
             MenuAction::SpellcheckEntry => "Spellcheck Current Entry".to_string(),
@@ -6344,6 +6373,7 @@ impl App {
             MenuAction::TodayBrief => "Open Today Brief".to_string(),
             MenuAction::WeekCompass => "Open Week Compass".to_string(),
             MenuAction::CheatSheet => "Read First 2 Minutes Cheat Sheet".to_string(),
+            MenuAction::WhatsNew => "Read What's New in This Release".to_string(),
             MenuAction::QuickStart => "Read Quick Start".to_string(),
             MenuAction::FirstRunTour => "Take First-Run Tour".to_string(),
             MenuAction::DailyFlowCoach => "Open Daily Flow Coach".to_string(),
@@ -6393,6 +6423,7 @@ impl App {
             | MenuAction::SpellcheckAutoFixTypos
             | MenuAction::SpellcheckIgnoreCursorWord => "REVIEW",
             MenuAction::Backup
+            | MenuAction::Dashboard
             | MenuAction::BackupHistory
             | MenuAction::BackupCleanupPreview
             | MenuAction::BackupPolicy
@@ -6406,6 +6437,7 @@ impl App {
             | MenuAction::IntegrityDetails
             | MenuAction::DoctorReport => "SAFETY",
             MenuAction::CheatSheet
+            | MenuAction::WhatsNew
             | MenuAction::QuickStart
             | MenuAction::FirstRunTour
             | MenuAction::DailyFlowCoach
@@ -6442,11 +6474,13 @@ impl App {
             MenuAction::SpellcheckSummary => "spellcheck summary report spelling typo review",
             MenuAction::SpellcheckAutoFixTypos => "spellcheck autofix typo fix common spelling",
             MenuAction::CheatSheet
+            | MenuAction::WhatsNew
             | MenuAction::QuickStart
             | MenuAction::FirstRunTour
             | MenuAction::DailyFlowCoach => {
                 "help learn start onboarding how to use save next old entry"
             }
+            MenuAction::Dashboard => "trust dashboard verify backup sync doctor safety",
             MenuAction::Help => "help keys menus shortcuts guide learn",
             MenuAction::CheckUpdates => "update upgrade install latest release version",
             MenuAction::Backup => "backup snapshot safety restore recovery archive",
@@ -6484,15 +6518,17 @@ impl App {
             MenuAction::Find if dirty => 3,
             MenuAction::SpellcheckEntry if dirty => 4,
             MenuAction::CheatSheet if first_run => 5,
-            MenuAction::QuickStart if first_run => 6,
-            MenuAction::FirstRunTour if first_run => 7,
-            MenuAction::DailyFlowCoach if first_run => 8,
-            MenuAction::Help if first_run => 9,
-            MenuAction::NewEntry => 10,
-            MenuAction::Dates => 11,
-            MenuAction::Index => 12,
-            MenuAction::GlobalSearch => 13,
-            MenuAction::Today => 14,
+            MenuAction::WhatsNew => 6,
+            MenuAction::QuickStart if first_run => 7,
+            MenuAction::FirstRunTour if first_run => 8,
+            MenuAction::DailyFlowCoach if first_run => 9,
+            MenuAction::Help if first_run => 10,
+            MenuAction::NewEntry => 11,
+            MenuAction::Dates => 12,
+            MenuAction::Index => 13,
+            MenuAction::GlobalSearch => 14,
+            MenuAction::Today => 15,
+            MenuAction::Dashboard => 19,
             MenuAction::Backup => 20,
             MenuAction::Verify => 21,
             MenuAction::Sync => 22,
@@ -6915,6 +6951,10 @@ impl App {
         self.open_info_overlay("Cheat Sheet", help::render_cheat_sheet_guide());
     }
 
+    fn open_whats_new_overlay(&mut self) {
+        self.open_info_overlay("What's New", help::render_whats_new_guide());
+    }
+
     fn open_about_overlay(&mut self) {
         let soundtrack_source = if self.config.soundtrack_source.trim().is_empty() {
             "[not configured]".to_string()
@@ -6963,6 +7003,11 @@ impl App {
                 "Cheat Sheet",
                 "Keys and first-two-minutes flow",
                 help::render_cheat_sheet_guide(),
+            ),
+            (
+                "What's New",
+                "Latest shipped changes",
+                help::render_whats_new_guide(),
             ),
             (
                 "Quick Start",
@@ -8884,7 +8929,7 @@ impl App {
         }
     }
 
-    fn open_dashboard_overlay(&mut self) {
+    fn trust_dashboard_snapshot_text(&self) -> String {
         let vault_state = if self.vault.is_some() {
             "UNLOCKED"
         } else {
@@ -8909,6 +8954,11 @@ impl App {
             self.config.soundtrack_source.clone()
         };
         let integrity = self.integrity_status_label();
+        let integrity_summary = if integrity.is_empty() {
+            "n/a".to_string()
+        } else {
+            integrity.clone()
+        };
         let dirty = if self.dirty { "modified" } else { "clean" };
         let save_state = self.save_status_label();
         let search_cache_summary = if let Some(vault) = &self.vault {
@@ -9017,19 +9067,12 @@ impl App {
             self.word_goal_status_label()
         };
 
-        let output = [
+        [
             "BlueScreen Journal Trust Dashboard".to_string(),
             String::new(),
             "TRUST NOW".to_string(),
             format!("  Vault      : {vault_state}"),
-            format!(
-                "  Verify     : {}",
-                if integrity.is_empty() {
-                    "n/a"
-                } else {
-                    &integrity
-                }
-            ),
+            format!("  Verify     : {integrity_summary}"),
             format!("  Save state : {save_state}"),
             format!("  Backups    : {backup_count} ({latest_backup_summary})"),
             format!("  Backup age : {latest_backup_countdown}"),
@@ -9071,9 +9114,180 @@ impl App {
             "  TOOLS -> Sync Center".to_string(),
             "  GO    -> Index/Calendar for archive dates".to_string(),
         ]
-        .join("\n");
+        .join("\n")
+    }
 
-        self.open_info_overlay("Dashboard", output);
+    fn open_dashboard_overlay(&mut self) {
+        let vault_state = if self.vault.is_some() {
+            "UNLOCKED"
+        } else {
+            "LOCKED"
+        };
+        let integrity = self.integrity_status_label();
+        let integrity_summary = if integrity.is_empty() {
+            "n/a".to_string()
+        } else {
+            integrity
+        };
+        let backup_count = if let Some(vault) = &self.vault {
+            vault
+                .list_backups()
+                .ok()
+                .map(|items| items.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let conflict_count = if let Some(vault) = &self.vault {
+            vault
+                .list_conflicted_dates()
+                .ok()
+                .map(|dates| dates.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let search_cache_summary = if let Some(vault) = &self.vault {
+            let cache = vault.search_cache_status();
+            if !cache.exists {
+                "missing".to_string()
+            } else if cache.valid {
+                format!("{} cached", cache.entry_count.unwrap_or_default())
+            } else {
+                "invalid".to_string()
+            }
+        } else {
+            "locked".to_string()
+        };
+        let sync_mode = configured_sync_backend(&self.config)
+            .ok()
+            .flatten()
+            .map(|backend| backend.to_ascii_uppercase())
+            .unwrap_or_else(|| "FOLDER".to_string());
+        let sync_target = match configured_sync_backend(&self.config)
+            .ok()
+            .flatten()
+            .as_deref()
+        {
+            Some("gdrive") => sync_target_label_gdrive(&self.config),
+            Some("dropbox") => sync_target_label_dropbox(&self.config),
+            _ => self
+                .config
+                .sync_target_path
+                .as_ref()
+                .map(|path| truncate_for_picker(&path.display().to_string(), 40))
+                .unwrap_or_else(|| "[unset]".to_string()),
+        };
+        let connector_status = sync_connector_summary_line(&self.config);
+        let last_sync_summary = self
+            .config
+            .last_sync
+            .as_ref()
+            .map(|entry| {
+                truncate_for_picker(
+                    &format!(
+                        "{} {} +{} / -{}",
+                        entry.timestamp, entry.backend, entry.pushed, entry.pulled
+                    ),
+                    40,
+                )
+            })
+            .unwrap_or_else(|| "never".to_string());
+        let latest_backup_detail = if let Some(vault) = &self.vault {
+            vault
+                .list_backups()
+                .ok()
+                .and_then(|items| items.into_iter().max_by_key(|entry| entry.created_at))
+                .map(|entry| {
+                    truncate_for_picker(
+                        &entry
+                            .created_at
+                            .with_timezone(&Local)
+                            .format("%Y-%m-%d %H:%M")
+                            .to_string(),
+                        40,
+                    )
+                })
+                .unwrap_or_else(|| "none yet".to_string())
+        } else {
+            "vault locked".to_string()
+        };
+        let items = vec![
+            PickerItem {
+                title: "Trust Snapshot".to_string(),
+                detail: format!("{vault_state} | {integrity_summary} | {backup_count} backups"),
+                keywords: "trust dashboard snapshot overview verify backup sync".to_string(),
+                action: PickerAction::ShowInfo {
+                    title: "Trust Snapshot".to_string(),
+                    text: self.trust_dashboard_snapshot_text(),
+                },
+            },
+            PickerItem {
+                title: "Journal Health".to_string(),
+                detail: format!("{conflict_count} conflicts | search {search_cache_summary}"),
+                keywords: "trust dashboard health conflicts search cache".to_string(),
+                action: PickerAction::Menu(MenuAction::JournalHealth),
+            },
+            PickerItem {
+                title: "Verify Integrity".to_string(),
+                detail: integrity_summary.clone(),
+                keywords: "trust dashboard verify integrity tamper hashchain".to_string(),
+                action: PickerAction::Menu(MenuAction::Verify),
+            },
+            PickerItem {
+                title: "Integrity Details".to_string(),
+                detail: integrity_summary.clone(),
+                keywords: "trust dashboard integrity details chain report".to_string(),
+                action: PickerAction::Menu(MenuAction::IntegrityDetails),
+            },
+            PickerItem {
+                title: "Backup Snapshot".to_string(),
+                detail: format!("{backup_count} saved | {latest_backup_detail}"),
+                keywords: "trust dashboard backup snapshot create encrypted archive".to_string(),
+                action: PickerAction::Menu(MenuAction::Backup),
+            },
+            PickerItem {
+                title: "Backup History".to_string(),
+                detail: latest_backup_detail,
+                keywords: "trust dashboard backup history list restore".to_string(),
+                action: PickerAction::Menu(MenuAction::BackupHistory),
+            },
+            PickerItem {
+                title: "Sync Center".to_string(),
+                detail: format!("{sync_mode} | {connector_status}"),
+                keywords: "trust dashboard sync center backend connector cloud".to_string(),
+                action: PickerAction::Menu(MenuAction::SyncCenter),
+            },
+            PickerItem {
+                title: "Cloud Status + Integrity".to_string(),
+                detail: last_sync_summary,
+                keywords: "trust dashboard cloud status integrity last sync".to_string(),
+                action: PickerAction::Menu(MenuAction::CloudStatus),
+            },
+            PickerItem {
+                title: "Recover Missing Cloud Data".to_string(),
+                detail: "pull-only restore".to_string(),
+                keywords: "trust dashboard cloud recover pull restore missing".to_string(),
+                action: PickerAction::Menu(MenuAction::CloudRecover),
+            },
+            PickerItem {
+                title: "Doctor Report".to_string(),
+                detail: format!("{vault_state} | {sync_target}"),
+                keywords: "trust dashboard doctor diagnostics status".to_string(),
+                action: PickerAction::Menu(MenuAction::DoctorReport),
+            },
+            PickerItem {
+                title: format!("What's New ({})", self.app_version_label()),
+                detail: "release highlights".to_string(),
+                keywords: "trust dashboard whats new release changes latest".to_string(),
+                action: PickerAction::Menu(MenuAction::WhatsNew),
+            },
+        ];
+        self.open_picker_overlay(PickerOverlay::new(
+            "Trust Dashboard",
+            items,
+            "No trust actions available.",
+        ));
     }
 
     fn open_journal_health_overlay(&mut self) {
@@ -9565,6 +9779,7 @@ impl App {
             MenuAction::HelpTopics => self.open_help_topics_overlay(),
             MenuAction::ToggleKeychainMemory => self.toggle_keychain_memory(),
             MenuAction::CheatSheet => self.open_cheat_sheet_overlay(),
+            MenuAction::WhatsNew => self.open_whats_new_overlay(),
             MenuAction::FirstRunTour => self.open_first_run_guide_overlay(),
             MenuAction::QuickStart => self.open_quickstart_overlay(),
             MenuAction::DailyFlowCoach => self.open_daily_flow_coach_overlay(),
@@ -10209,11 +10424,16 @@ impl App {
         self.first_run_guide_shown_this_session = true;
     }
 
+    fn clear_post_save_flow_guidance(&mut self) {
+        self.post_save_flow_guidance_active = false;
+    }
+
     fn complete_first_run_coach_after_save(&mut self) {
         if self.config.first_run_coach_completed {
             return;
         }
         self.config.first_run_coach_completed = true;
+        self.post_save_flow_guidance_active = true;
         let _ = self.config.save();
     }
 
@@ -12997,12 +13217,23 @@ mod tests {
         app
     }
 
+    fn normalize_snapshot_app(app: &mut App) {
+        app.config.sync_backend_preference = None;
+        app.config.sync_target_path = None;
+        app.config.gdrive_folder_id = None;
+        app.config.dropbox_root = None;
+        app.config.last_sync = None;
+        app.config.sync_history.clear();
+        app.config.soundtrack_source.clear();
+    }
+
     fn sanitize_snapshot(mut rendered: String, app: &App) -> String {
         let short_date = app.selected_date.format("%Y-%m-%d").to_string();
         let long_date = app.selected_date.format("%A, %B %d, %Y").to_string();
         rendered = rendered.replace(&long_date, "<DATE_LONG>");
         rendered = rendered.replace(&short_date, "<DATE>");
         rendered = rendered.replace(&app.header_time_label(), "<TIME>");
+        rendered = rendered.replace(env!("CARGO_PKG_VERSION"), "<VERSION>");
         rendered
     }
 
@@ -13017,6 +13248,7 @@ mod tests {
         let temp = tempdir().expect("tempdir");
 
         let mut editor = build_unlocked_test_app(&temp.path().join("snapshot-vault"), today);
+        normalize_snapshot_app(&mut editor);
         editor.overlay = None;
         editor.menu = None;
         editor.menu_coach_shown = false;
@@ -13035,6 +13267,7 @@ mod tests {
         );
 
         let mut dashboard = build_unlocked_test_app(&temp.path().join("dashboard-vault"), today);
+        normalize_snapshot_app(&mut dashboard);
         dashboard.open_dashboard_overlay();
         write_snapshot(
             &output_dir.join("dashboard-overlay.txt"),
@@ -15195,16 +15428,40 @@ mod tests {
         app.perform_menu_action(MenuAction::Dashboard, 20);
 
         match app.overlay() {
-            Some(Overlay::Info(info)) => {
-                assert_eq!(info.title, "Dashboard");
-                let rendered = info.lines.join("\n");
-                assert!(rendered.contains("BlueScreen Journal Trust Dashboard"));
-                assert!(rendered.contains("TRUST NOW"));
-                assert!(rendered.contains("SYNC"));
-                assert!(rendered.contains("NEXT CHECKS"));
+            Some(Overlay::Picker(picker)) => {
+                assert_eq!(picker.title, "Trust Dashboard");
+                let labels = picker
+                    .items
+                    .iter()
+                    .map(|item| item.title.as_str())
+                    .collect::<Vec<_>>();
+                assert!(labels.contains(&"Trust Snapshot"));
+                assert!(labels.contains(&"Verify Integrity"));
+                assert!(labels.contains(&"Backup Snapshot"));
+                assert!(labels.contains(&"Sync Center"));
+                assert!(labels.contains(&"Recover Missing Cloud Data"));
             }
             other => panic!("expected dashboard overlay, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn trust_dashboard_picker_drills_into_journal_health() {
+        let temp = tempdir().expect("tempdir");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 18).expect("date");
+        let mut app = build_unlocked_test_app(&temp.path().join("vault"), date);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::Dashboard, 20);
+        for ch in "health".chars() {
+            send_editor_key(&mut app, KeyCode::Char(ch), KeyModifiers::empty(), 20, 80);
+        }
+        send_editor_key(&mut app, KeyCode::Enter, KeyModifiers::empty(), 20, 80);
+
+        assert!(matches!(
+            app.overlay(),
+            Some(Overlay::Info(info)) if info.title == "Journal Health"
+        ));
     }
 
     #[test]
@@ -16392,6 +16649,11 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"First 2 Minutes Cheat Sheet".to_string()));
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.starts_with("What's New (v"))
+        );
         assert!(labels.contains(&"Quick Start".to_string()));
         assert!(labels.contains(&"About BlueScreen Journal".to_string()));
         assert!(labels.contains(&"First-Run Tour".to_string()));
@@ -16413,6 +16675,10 @@ mod tests {
             .iter()
             .position(|label| label == "First 2 Minutes Cheat Sheet")
             .expect("cheat sheet");
+        let whats_new = labels
+            .iter()
+            .position(|label| label.starts_with("What's New (v"))
+            .expect("what's new");
         let quick_start = labels
             .iter()
             .position(|label| label == "Quick Start")
@@ -16426,7 +16692,8 @@ mod tests {
             .position(|label| label == "About BlueScreen Journal")
             .expect("about");
 
-        assert!(cheat_sheet < quick_start);
+        assert!(cheat_sheet < whats_new);
+        assert!(whats_new < quick_start);
         assert!(quick_start < check_updates);
         assert!(check_updates < about);
     }
@@ -16561,7 +16828,13 @@ mod tests {
         assert!(app.config.first_run_coach_completed);
         assert_eq!(
             app.footer_next_hint(),
-            Some("NEXT: TYPE | ALT+N NEXT DAY | ALT+[ ] OPEN SAVED")
+            Some("SAVED PAGE: TYPE TO REVISE | **save** NEXT ENTRY | ALT+N NEXT DAY")
+        );
+
+        type_editor_text(&mut app, " more", 20, 80);
+        assert_eq!(
+            app.footer_next_hint(),
+            Some("SAVE NOW: F2 SAVE | **save** NEXT ENTRY | ALT+N NEXT DAY")
         );
     }
 
@@ -16582,6 +16855,25 @@ mod tests {
                 assert!(rendered.contains("older entry"));
             }
             other => panic!("expected daily flow coach overlay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn whats_new_action_opens_info_overlay() {
+        let mut app = App::with_initial_date(None);
+        app.overlay = None;
+
+        app.perform_menu_action(MenuAction::WhatsNew, 20);
+
+        match app.overlay() {
+            Some(Overlay::Info(info)) => {
+                assert_eq!(info.title, "What's New");
+                let rendered = info.lines.join("\n");
+                assert!(rendered.contains("What's New in"));
+                assert!(rendered.contains("Trust Dashboard"));
+                assert!(rendered.contains("HELP -> What's New"));
+            }
+            other => panic!("expected what's new info overlay, got {other:?}"),
         }
     }
 
@@ -17631,7 +17923,9 @@ mod tests {
         );
 
         trigger_menu_item_by_label(&mut app, MenuId::Tools, "Status Dashboard", 20, 34);
-        assert!(matches!(app.overlay(), Some(Overlay::Info(info)) if info.title == "Dashboard"));
+        assert!(
+            matches!(app.overlay(), Some(Overlay::Picker(picker)) if picker.title == "Trust Dashboard")
+        );
 
         send_editor_key(&mut app, KeyCode::Esc, KeyModifiers::empty(), 20, 34);
         type_editor_text(&mut app, " Still typing after trust check.", 20, 34);

@@ -4,7 +4,7 @@
            FILE   EDIT   SEARCH   GO   TOOLS   SETUP   HELP    ESC MENUS  F1 HELP  F2 SAVE
           ....+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8
             ┌ Help (F1) ───────────────────────────────────────────────────────────────┐
-            │ BlueScreen Journal 2.2.0  |  Classic 80x25 workspace.                    │
+            │ BlueScreen Journal <VERSION>  |  Classic 80x25 workspace.                    │
             │ (c) 2026 Awassee LLC and Sean Heiney  sean@sean.net                      │
             │ Flow: TYPE -> F2 SAVE -> **save** NEXT ENTRY -> ALT+N NEXT DAY.          │
             │ ESC opens menus. Arrows move. ENTER selects.                             │
@@ -24,6 +24,6 @@
             │ GO     Calendar, index, recents, favorites, random, today                │
             └──────────────────────────────────────────────────────────────────────────┘
           CLOSING THOUGHT: [none - press F9 to add] (closing thought)               F9 ADD
-          STATE HELP | SAVE READY | LINE 1 COL 1 | WORDS 0 | VER v2.2.0 HELP: ENTER/ESC/F1
+          STATE HELP | SAVE READY | LINE 1 COL 1 | WORDS 0 | VER v<VERSION> HELP: ENTER/ESC/F1
 
 

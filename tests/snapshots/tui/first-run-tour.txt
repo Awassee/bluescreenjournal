@@ -24,6 +24,6 @@
 
 
           CLOSING THOUGHT: [none - press F9 to add] (closing thought)               F9 ADD
-          STATE INFO | SAVE READY | LINES 1-1 | WORDS 0 | VER v2.2.0 INFO: PGUP/PGDN SCROL
+          STATE INFO | SAVE READY | LINES 1-1 | WORDS 0 | VER v<VERSION> INFO: PGUP/PGDN SCROL
 
 

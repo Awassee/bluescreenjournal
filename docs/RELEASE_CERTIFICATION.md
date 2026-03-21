@@ -26,6 +26,7 @@ It:
 - verifies the installed binary version
 - checks that `bsj --help` exposes the first-run guides
 - checks that `bsj guide cheatsheet` renders the short first-use flow
+- checks that `bsj guide whatsnew` renders the current release highlights
 - checks that `bsj guide quickstart` renders the longer walkthrough
 - writes a Markdown report that can be committed alongside release notes
 

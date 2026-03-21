@@ -1,74 +1,58 @@
 # Next Priorities
 
-This is the current prioritized backlog after `v2.2.0`.
+This is the current prioritized backlog after `v2.2.1`.
 
-## Recently shipped in v2.2.0
+## Recently shipped in v2.2.1
 
-- added a real first-run cheat sheet guide and wired it into CLI help, Help menus, installer output, and docs
-- added clean-account release certification with a reusable script and commit-friendly report format
-- surfaced nostalgia snapshot review directly in CI and release summaries, with browsable HTML artifact previews
+- shipped a real trust dashboard drill-down from `TOOLS -> Status Dashboard`
+- added `HELP -> What's New` and `bsj guide whatsnew`
+- kept the first-save flow explicit for longer before fading to the normal footer hints
+- shortened the installer post-install summary and aligned it with the in-app guide surfaces
+- extended release certification so the new what's-new surface is part of the stable release gate
 
-## 20 major steps
+## Current major steps
 
-1. Ship a trust dashboard drill-down flow.
-   - Goal: from one place, users can understand vault health, verify, backup, sync, and recovery readiness.
-
-2. Improve conflict merge ergonomics.
+1. Improve conflict merge ergonomics.
    - Goal: make competing heads understandable and resolvable without fear.
 
-3. Add importers for plaintext journal formats into encrypted vault revisions.
+2. Add importers for plaintext journal formats into encrypted vault revisions.
    - Goal: let new users migrate from old diaries, Markdown journals, and text files.
 
-4. Add a lightweight onboarding coach that disappears after first confident use.
-   - Goal: teach save, next entry, next day, menus, calendar, and old-entry access without cluttering long-term use.
-
-5. Strengthen search as a review tool.
+3. Strengthen search as a review tool.
    - Goal: saved searches, recurring prompts, and review workflows should feel instant and intentional.
 
-6. Deepen spellcheck into a real writing assistant.
+4. Deepen spellcheck into a real writing assistant.
    - Goal: personal dictionary, session dictionary UX, review-before-save signals, and better typo explanations.
 
-7. Add safer restore and recovery drills in-product.
+5. Add safer restore and recovery drills in-product.
    - Goal: backup and restore should feel tested, not theoretical.
 
-8. Build a proper release runbook with explicit gates and failure classes.
-   - Goal: distinguish product regressions from environment failures like disk pressure or CDN lag.
-
-9. Improve cloud sync observability.
+6. Improve cloud sync observability.
    - Goal: users should know which backend is active, what remote is selected, and whether recovery is possible.
 
-10. Add encrypted vault migration/versioning infrastructure.
+7. Add encrypted vault migration/versioning infrastructure.
    - Goal: future file-format and metadata evolution should be deliberate and reversible.
 
-11. Expand SYSOP into a real operator console.
+8. Expand SYSOP into a real operator console.
    - Goal: give power users better audits, previews, stale-draft scans, orphan scans, and repair guidance.
 
-12. Make exports feel finished.
+9. Make exports feel finished.
    - Goal: better filenames, richer metadata controls, and safer review before plaintext leaves the vault.
 
-13. Add real review dashboards for writing cadence and themes.
+10. Add real review dashboards for writing cadence and themes.
    - Goal: weekly/monthly reflection should be a first-class use case, not just CLI output.
 
-14. Improve soundtrack behavior into a reliable optional feature.
+11. Improve soundtrack behavior into a reliable optional feature.
    - Goal: clear controls, good fallbacks, obvious status, and no launch-time weirdness.
 
-15. Add productized backup retention setup and visibility.
+12. Add productized backup retention setup and visibility.
    - Goal: users should understand daily/weekly/monthly retention without reading raw settings.
 
-16. Improve menu discoverability for rarely used power features.
+13. Improve menu discoverability for rarely used power features.
    - Goal: AI tools, SYSOP tools, macros, and recovery paths should be findable without polluting the core journal flow.
 
-17. Prepare the `v3.0` foundation work.
+14. Prepare the `v3.0` foundation work.
    - Goal: isolate app/service logic so web mode and eventual Windows support are realistic follow-ons.
-
-18. Add an in-app `What changed in this release` surface.
-   - Goal: keep new features discoverable without forcing users to read GitHub release notes.
-
-19. Tighten the first save and next-entry confirmation flow even further.
-   - Goal: after the first successful save, users should clearly understand same-day next entry vs next blank day.
-
-20. Run and record a second-environment human certification pass for every stable release.
-   - Goal: stable tags should always have at least one clean-account or second-machine proof point recorded.
 
 ## 10 minor steps
 

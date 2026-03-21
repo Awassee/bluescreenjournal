@@ -104,6 +104,7 @@ PREFIX_DIR="$TMP_ROOT/prefix"
 PUBLIC_LOG="$OUTPUT_DIR/public-install.log"
 HELP_LOG="$OUTPUT_DIR/bsj-help.txt"
 CHEAT_LOG="$OUTPUT_DIR/guide-cheatsheet.txt"
+WHATS_NEW_LOG="$OUTPUT_DIR/guide-whats-new.txt"
 QUICKSTART_LOG="$OUTPUT_DIR/guide-quickstart.txt"
 
 cleanup() {
@@ -127,11 +128,15 @@ echo "    Report:  $REPORT_PATH"
 
 "$PREFIX_DIR/bin/bsj" --help > "$HELP_LOG"
 "$PREFIX_DIR/bin/bsj" guide cheatsheet > "$CHEAT_LOG"
+"$PREFIX_DIR/bin/bsj" guide whatsnew > "$WHATS_NEW_LOG"
 "$PREFIX_DIR/bin/bsj" guide quickstart > "$QUICKSTART_LOG"
 
 grep -F "bsj guide cheatsheet" "$HELP_LOG" >/dev/null
+grep -F "bsj guide whatsnew" "$HELP_LOG" >/dev/null
 grep -F "BlueScreen Journal Cheat Sheet" "$CHEAT_LOG" >/dev/null
 grep -F "If you only remember three things" "$CHEAT_LOG" >/dev/null
+grep -F "BlueScreen Journal What's New" "$WHATS_NEW_LOG" >/dev/null
+grep -F "Trust Dashboard" "$WHATS_NEW_LOG" >/dev/null
 grep -F "BlueScreen Journal Quickstart" "$QUICKSTART_LOG" >/dev/null
 
 timestamp="$(date '+%Y-%m-%d %H:%M:%S %Z')"
@@ -152,6 +157,7 @@ installed_version="$("$PREFIX_DIR/bin/bsj" --version)"
   echo "- Installed binary reported the expected version."
   echo "- \`bsj --help\` exposed the first-run guide surfaces, including \`bsj guide cheatsheet\`."
   echo "- \`bsj guide cheatsheet\` rendered the short first-two-minutes guidance."
+  echo "- \`bsj guide whatsnew\` rendered the current release highlights."
   echo "- \`bsj guide quickstart\` rendered the longer day-one walkthrough."
   echo
   echo "## Artifacts"
@@ -159,6 +165,7 @@ installed_version="$("$PREFIX_DIR/bin/bsj" --version)"
   echo "- Public installer log: \`$(basename "$PUBLIC_LOG")\`"
   echo "- Help output: \`$(basename "$HELP_LOG")\`"
   echo "- Cheat sheet output: \`$(basename "$CHEAT_LOG")\`"
+  echo "- What's new output: \`$(basename "$WHATS_NEW_LOG")\`"
   echo "- Quickstart output: \`$(basename "$QUICKSTART_LOG")\`"
   if [[ "$KEEP_TEMP" -eq 1 ]]; then
     echo "- Temp root kept for inspection: \`${TMP_ROOT}\`"

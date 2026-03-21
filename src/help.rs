@@ -13,6 +13,7 @@ const SETUP_GUIDE_BODY: &str = include_str!("../docs/SETUP_GUIDE.md");
 const DOCS_HUB_BODY: &str = include_str!("../docs/START_HERE.md");
 const QUICKSTART_GUIDE_BODY: &str = include_str!("../docs/QUICKSTART.md");
 const CHEAT_SHEET_BODY: &str = include_str!("../docs/CHEAT_SHEET.md");
+const WHATS_NEW_BODY: &str = include_str!("../docs/WHATS_NEW.md");
 const PRODUCT_GUIDE_BODY: &str = include_str!("../docs/PRODUCT_GUIDE.md");
 const DATASHEET_BODY: &str = include_str!("../docs/DATASHEET.md");
 const FAQ_BODY: &str = include_str!("../docs/FAQ.md");
@@ -131,7 +132,7 @@ Actual paths on this Mac\n\
 
 pub fn render_docs_hub() -> String {
     format!(
-        "BlueScreen Journal Docs Hub\n\n{}\n\nQuick links:\n- docs/CHEAT_SHEET.md\n- docs/QUICKSTART.md\n- docs/NOSTALGIA_GUARDRAILS.md\n- bsj guide cheatsheet\n",
+        "BlueScreen Journal Docs Hub\n\n{}\n\nQuick links:\n- docs/CHEAT_SHEET.md\n- docs/WHATS_NEW.md\n- docs/QUICKSTART.md\n- docs/NOSTALGIA_GUARDRAILS.md\n- bsj guide cheatsheet\n- bsj guide whatsnew\n",
         DOCS_HUB_BODY.trim_end()
     )
 }
@@ -147,6 +148,13 @@ pub fn render_cheat_sheet_guide() -> String {
     format!(
         "BlueScreen Journal Cheat Sheet\n\n{}\n",
         CHEAT_SHEET_BODY.trim_end()
+    )
+}
+
+pub fn render_whats_new_guide() -> String {
+    format!(
+        "BlueScreen Journal What's New\n\n{}\n",
+        WHATS_NEW_BODY.trim_end()
     )
 }
 
@@ -557,6 +565,11 @@ pub fn render_settings_report(
     );
     push_row(
         &mut output,
+        "guide_whatsnew",
+        "bsj guide whatsnew".to_string(),
+    );
+    push_row(
+        &mut output,
         "guide_datasheet",
         "bsj guide datasheet".to_string(),
     );
@@ -713,7 +726,7 @@ mod tests {
         render_datasheet, render_docs_hub, render_faq, render_macro_guide, render_privacy_guide,
         render_product_guide, render_quickstart_guide, render_settings_guide,
         render_settings_report, render_setup_guide, render_support, render_sync_guide,
-        render_terminal_guide, render_troubleshooting_guide,
+        render_terminal_guide, render_troubleshooting_guide, render_whats_new_guide,
     };
     use crate::config::{AppConfig, BackupRetentionConfig, MacroActionConfig, MacroConfig};
     use crate::vault::{KdfParams, VaultMetadata, VaultOptions};
@@ -735,9 +748,11 @@ mod tests {
     fn docs_hub_points_people_to_quickstart_and_guides() {
         let text = render_docs_hub();
         assert!(text.contains("docs/CHEAT_SHEET.md"));
+        assert!(text.contains("docs/WHATS_NEW.md"));
         assert!(text.contains("docs/QUICKSTART.md"));
         assert!(text.contains("docs/NOSTALGIA_GUARDRAILS.md"));
         assert!(text.contains("bsj guide cheatsheet"));
+        assert!(text.contains("bsj guide whatsnew"));
     }
 
     #[test]
@@ -753,6 +768,14 @@ mod tests {
         assert!(text.contains("F2"));
         assert!(text.contains("Esc"));
         assert!(text.contains("**save**"));
+    }
+
+    #[test]
+    fn whats_new_mentions_release_highlights_and_dashboard() {
+        let text = render_whats_new_guide();
+        assert!(text.contains("What's New in"));
+        assert!(text.contains("Trust Dashboard"));
+        assert!(text.contains("HELP -> What's New"));
     }
 
     #[test]

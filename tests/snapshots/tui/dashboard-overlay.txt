@@ -5,25 +5,25 @@
           ....+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8
           JOURNAL ENTRY <DATE>
 
-            ┌ Dashboard ───────────────────────────────────────────────────────────────┐
-            │ BlueScreen Journal Trust Dashboard                                       │
+
+            ┌ Trust Dashboard ─────────────────────────────────────────────────────────┐
+            │ Filter: [all]                                                            │
             │                                                                          │
-            │ TRUST NOW                                                                │
-            │   Vault      : UNLOCKED                                                  │
-            │   Verify     : n/a                                                       │
-            │   Save state : READY                                                     │
-            │   Backups    : 0 (none yet)                                              │
-            │   Backup age : create first backup                                       │
-            │   Conflicts  : 0                                                         │
-            │   Search     : missing                                                   │
+            │ Trust Snapshot                                UNLOCKED | n/a | 0 backups │
+            │ Journal Health                              0 conflicts | search missing │
+            │ Verify Integrity                                                     n/a │
+            │ Integrity Details                                                    n/a │
+            │ Backup Snapshot                                       0 saved | none yet │
+            │ Backup History                                                  none yet │
+            │ Sync Center                                        FOLDER | UNCONFIGURED │
             │                                                                          │
-            │ SYNC                                                                     │
-            │                                                                          │
-            │ Up/Down/PgUp/PgDn scroll  Enter/Esc close                                │
+            │ Type to filter  Up/Down move  Enter open                                 │
+            │ PgUp/PgDn page  Backspace clear  Esc close                               │
             └──────────────────────────────────────────────────────────────────────────┘
 
 
+
           CLOSING THOUGHT: [none - press F9 to add] (closing thought)               F9 ADD
-          STATE INFO | SAVE READY | LINES 1-1 | WORDS 3 | VER v2.2.0 INFO: PGUP/PGDN SCROL
+          STATE PICK | SAVE READY | CHOICE 1/11 | WORDS 3 | VER v<VERSION> PICKER: TYPE FILTER
 
 

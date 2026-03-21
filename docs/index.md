@@ -2,22 +2,24 @@
 
 BlueScreen Journal is a local-first encrypted terminal journal for macOS with a nostalgic blue-screen writing workflow.
 
-- Latest stable: [v2.2.0](https://github.com/Awassee/bluescreenjournal/releases/tag/v2.2.0)
-- Release notes: [v2.2.0](releases/v2.2.0.md)
-- Current patch scope: [v2.2.1 patch plan](V2_2_1_PLAN.md)
+- Latest stable: [v2.2.1](https://github.com/Awassee/bluescreenjournal/releases/tag/v2.2.1)
+- Release notes: [v2.2.1](releases/v2.2.1.md)
+- Current patch scope: [v2.2.2 patch plan](V2_2_2_PLAN.md)
 - Prioritized backlog: [Next Priorities](NEXT_PRIORITIES.md)
 - Full changelog: [CHANGELOG.md](../CHANGELOG.md)
 
 ## Start Here
 
 - [Start Here](START_HERE.md)
+- [What's New](WHATS_NEW.md)
 - [Quickstart](QUICKSTART.md)
 - [First 2 Minutes Cheat Sheet](CHEAT_SHEET.md)
 - [Setup Guide](SETUP_GUIDE.md)
 - [Product Guide](PRODUCT_GUIDE.md)
 - [Datasheet](DATASHEET.md)
 - [Nostalgia Guardrails](NOSTALGIA_GUARDRAILS.md)
-- [v2.2.1 Patch Plan](V2_2_1_PLAN.md)
+- [v2.2.1 Release Plan](V2_2_1_PLAN.md)
+- [v2.2.2 Patch Plan](V2_2_2_PLAN.md)
 - [Next Priorities](NEXT_PRIORITIES.md)
 - [v1.3.2 Plan](V1_3_2_PLAN.md)
 - [v3.0 Planning](V3_0_PLAN.md)
@@ -34,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/inst
 Pin this release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.0
+curl -fsSL https://raw.githubusercontent.com/Awassee/bluescreenjournal/main/install.sh | bash -s -- --version v2.2.1
 ```
 
 ## Screenshots

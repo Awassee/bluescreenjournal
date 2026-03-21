@@ -17,9 +17,9 @@ Use this page as the docs control panel for BlueScreen Journal.
 
 ## Latest release
 
-- current stable: [`v2.2.0`](https://github.com/Awassee/bluescreenjournal/releases/tag/v2.2.0)
-- current release notes: [docs/releases/v2.2.0.md](releases/v2.2.0.md)
-- current patch scope on `main`: [docs/V2_2_1_PLAN.md](V2_2_1_PLAN.md)
+- current stable: [`v2.2.1`](https://github.com/Awassee/bluescreenjournal/releases/tag/v2.2.1)
+- current release notes: [docs/releases/v2.2.1.md](releases/v2.2.1.md)
+- current patch scope on `main`: [docs/V2_2_2_PLAN.md](V2_2_2_PLAN.md)
 - prioritized next work: [docs/NEXT_PRIORITIES.md](NEXT_PRIORITIES.md)
 - full history: [docs/releases/](releases/)
 
@@ -42,6 +42,7 @@ See live product images in the root README screenshot gallery:
 These are optional CLI mirrors of the docs:
 
 - `bsj guide docs`
+- `bsj guide whatsnew`
 - `bsj guide quickstart`
 - `bsj guide cheatsheet`
 - `bsj guide troubleshooting`
@@ -65,7 +66,8 @@ These are the primary public repo entry points to keep current:
 - [README](../README.md)
 - [Start Here](START_HERE.md)
 - [Nostalgia Guardrails](NOSTALGIA_GUARDRAILS.md)
-- [v2.2.1 Patch Plan](V2_2_1_PLAN.md)
+- [v2.2.1 Release Plan](V2_2_1_PLAN.md)
+- [v2.2.2 Patch Plan](V2_2_2_PLAN.md)
 - [Next Priorities](NEXT_PRIORITIES.md)
 - [v1.3 Plan](V1_3_PLAN.md)
 - [Support](../SUPPORT.md)

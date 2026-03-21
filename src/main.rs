@@ -31,7 +31,7 @@ use std::{
     version = env!("CARGO_PKG_VERSION"),
     about = "BlueScreen Journal",
     long_about = "BlueScreen Journal is an encrypted, local-first macOS terminal journal with a nostalgic blue-screen full-screen editor, a menu-driven TUI, append-only revisions, encrypted drafts, encrypted backups, and encrypted sync targets.",
-    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj spellcheck --date 2026-03-16\n  bsj spellcheck --range last7 --count-only\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj sync --provider google-drive\n  bsj sync --provider dropbox\n  bsj cloud status --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud status --provider onedrive\n  bsj cloud recover --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud recover --provider google-drive\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide quickstart\n  bsj guide cheatsheet\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
+    after_help = "Examples:\n  bsj\n  bsj open 2026-03-16\n  bsj search \"quiet morning\" --from 2026-03-01 --to 2026-03-31\n  bsj search \"focus\" --whole-word --case-sensitive --limit 20\n  bsj search \"mood:7\" --json --context 40\n  bsj search \"ship\" --match-mode any --sort relevance --hits-per-entry 5\n  bsj search \"focus\" --range last7 --summary\n  bsj search --preset \"Weekly Review\"\n  bsj search --list-presets\n  bsj search \"mood:7\" --save-preset \"Mood Seven\"\n  bsj spellcheck --date 2026-03-16\n  bsj spellcheck --range last7 --count-only\n  bsj timeline --query ship --tag work --person Riley --project Phoenix --metadata\n  bsj timeline --range last30 --group-by week\n  bsj timeline --save-preset \"Recent Work\" --query ship --tag work\n  bsj timeline --list-presets\n  bsj review --range last30 --goal 750\n  bsj ai summary --date 2026-03-16\n  bsj ai summary --range last7 --remote\n  bsj ai coach --date 2026-03-16 --questions 5\n  bsj export 2026-03-16 --format markdown --output ~/Desktop/entry.md\n  bsj sync --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj sync --provider google-drive\n  bsj sync --provider dropbox\n  bsj cloud status --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud status --provider onedrive\n  bsj cloud recover --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj cloud recover --provider google-drive\n  bsj backup\n  bsj backup list\n  bsj backup prune --apply\n  bsj settings init\n  bsj settings get vault_path\n  bsj settings set sync_target_path ~/Documents/BlueScreenJournal-Sync\n  bsj doctor --unlock\n  bsj sysop dashboard\n  bsj sysop runbook\n  bsj sysop sync-preview --backend folder --remote ~/Documents/BlueScreenJournal-Sync\n  bsj completions zsh\n\nGuides:\n  bsj guide docs\n  bsj guide whatsnew\n  bsj guide quickstart\n  bsj guide cheatsheet\n  bsj guide troubleshooting\n  bsj guide sync\n  bsj guide backup\n  bsj guide macros\n  bsj guide terminal\n  bsj guide privacy\n  bsj guide product\n  bsj guide datasheet\n  bsj guide faq\n  bsj guide support\n  bsj guide setup\n  bsj guide settings\n  bsj guide distribution\n\nPackaging:\n  ./install.sh --prebuilt\n  ./scripts/package-release.sh\n\nDebug logging:\n  Use --debug to enable verbose file logging at ~/Library/Logs/bsj/bsj.log"
 )]
 struct Cli {
     #[arg(
@@ -284,7 +284,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<SettingsCommand>,
     },
-    /// Print the docs hub, quickstart, troubleshooting, sync, backup, macros, terminal, privacy, product, datasheet, FAQ, support, settings, or distribution guide
+    /// Print the docs hub, what's-new, quickstart, troubleshooting, sync, backup, macros, terminal, privacy, product, datasheet, FAQ, support, settings, or distribution guide
     Guide {
         #[arg(value_enum, default_value_t = GuideTopicArg::Setup)]
         topic: GuideTopicArg,
@@ -586,6 +586,7 @@ enum PromptCategoryArg {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum GuideTopicArg {
     Docs,
+    Whatsnew,
     Quickstart,
     Cheatsheet,
     Troubleshooting,
@@ -3361,6 +3362,7 @@ fn run_cli_guide(topic: GuideTopicArg) -> Result<(), String> {
 
     let output = match topic {
         GuideTopicArg::Docs => help::render_docs_hub(),
+        GuideTopicArg::Whatsnew => help::render_whats_new_guide(),
         GuideTopicArg::Quickstart => help::render_quickstart_guide(),
         GuideTopicArg::Cheatsheet => help::render_cheat_sheet_guide(),
         GuideTopicArg::Troubleshooting => help::render_troubleshooting_guide(),

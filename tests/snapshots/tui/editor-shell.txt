@@ -24,6 +24,6 @@
 
 
                                              CLOSING THOUGHT: [none - press F9 to add] (closing thought)               F9 ADD
-                                             STATE WRITE | SAVE READY | LINE 2 COL 1 | WORDS 3 | VER v2.2.0 | NEXT ENTRY: TYP
+                                             STATE WRITE | SAVE READY | LINE 2 COL 1 | WORDS 3 | VER v<VERSION> | NEXT ENTRY: TYP
 
 
