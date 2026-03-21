@@ -21,6 +21,7 @@ FISH_COMPLETION_DIR="${BSJ_INSTALL_FISH_COMPLETION_DIR:-}"
 GITHUB_REPO="${BSJ_INSTALL_REPO:-Awassee/bluescreenjournal}"
 RELEASE_VERSION="${BSJ_INSTALL_VERSION:-latest}"
 ARCHIVE_SOURCE="${BSJ_INSTALL_ARCHIVE:-}"
+SOURCE_TREE_OVERRIDE="${BSJ_INSTALL_SOURCE_DIR:-}"
 SKIP_CHECKSUM=0
 ASSUME_YES=0
 ORIGINAL_ARG_COUNT=$#
@@ -1650,6 +1651,11 @@ bootstrap_source_install() {
   require_command tar
 
   local tmp_dir source_archive_url source_archive_path source_dir ref_label
+  if [[ -n "$SOURCE_TREE_OVERRIDE" ]]; then
+    source_dir="$(expand_home_path "$SOURCE_TREE_OVERRIDE")"
+    [[ -d "$source_dir" && -f "$source_dir/Cargo.toml" && -d "$source_dir/src" ]] || die "BSJ_INSTALL_SOURCE_DIR is not a valid source tree: $source_dir"
+    info "Using provided source tree override: $source_dir"
+  else
   tmp_dir="$(make_temp_dir bsj-source-install)"
   source_archive_path="$tmp_dir/source.tar.gz"
   if [[ "$RELEASE_VERSION" == "latest" ]]; then
@@ -1665,17 +1671,19 @@ bootstrap_source_install() {
   tar -C "$tmp_dir" -xzf "$source_archive_path"
   source_dir="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
   [[ -n "$source_dir" && -f "$source_dir/install.sh" ]] || die "Downloaded source archive is missing install.sh"
-
-  info "Launching source installer"
-  local delegate_args=()
-  while IFS= read -r arg; do
-    [[ -n "$arg" ]] && delegate_args+=("$arg")
-  done < <(common_install_args)
-  if [[ "${#delegate_args[@]}" -gt 0 ]]; then
-    "$source_dir/install.sh" --source "${delegate_args[@]}"
-  else
-    "$source_dir/install.sh" --source
   fi
+
+  info "Source update archive is ready."
+  info "Continuing in this installer window to build the source tree."
+  info "Next step: cargo install --path $source_dir --locked --force"
+
+  local original_root="$ROOT_DIR"
+  ROOT_DIR="$source_dir"
+  if ! install_from_source; then
+    ROOT_DIR="$original_root"
+    return 1
+  fi
+  ROOT_DIR="$original_root"
 }
 
 install_prebuilt() {

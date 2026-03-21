@@ -60,12 +60,15 @@ MENU_LAUNCH_HOME="$TMP_DIR/install-home-menu-launch"
 BOOTSTRAP_HOME="$TMP_DIR/bootstrap-home"
 BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
 BOOTSTRAP_BASH_HOME="$TMP_DIR/bootstrap-home-bash"
+SOURCE_UPDATE_HOME="$TMP_DIR/source-update-home"
+SOURCE_UPDATE_PREFIX="$TMP_DIR/source-update-prefix"
 SMOKE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 INSTALL_LOG="$TMP_DIR/install-prebuilt.log"
 SMART_LOG="$TMP_DIR/install-smart.log"
 MENU_LOG="$TMP_DIR/install-prebuilt-menu.log"
 MENU_LAUNCH_LOG="$TMP_DIR/install-prebuilt-menu-launch.log"
 HANDOFF_LOG="$TMP_DIR/install-handoff.log"
+SOURCE_UPDATE_LOG="$TMP_DIR/install-source-update.log"
 
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 BUNDLE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -208,10 +211,25 @@ grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.zprofile"
 grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.zshrc"
 grep -Fq "$BOOTSTRAP_BASH_HOME/.local/bin" "$BOOTSTRAP_BASH_HOME/.config/fish/config.fish"
 
+# Regression guard: existing install + smart mode should stay in one installer flow while source-updating.
+mkdir -p "$SOURCE_UPDATE_HOME"
+PATH="$INSTALL_PREFIX/bin:$SMOKE_PATH" HOME="$SOURCE_UPDATE_HOME" SHELL=/bin/zsh \
+  BSJ_INSTALL_SOURCE_DIR="$ROOT_DIR" \
+  bash -s -- --prefix "$SOURCE_UPDATE_PREFIX" < "$ROOT_DIR/install.sh" | tee "$SOURCE_UPDATE_LOG"
+"$SOURCE_UPDATE_PREFIX/bin/bsj" --help >/dev/null
+grep -Fq "Smart mode selected source update from latest main because bsj is already installed" "$SOURCE_UPDATE_LOG"
+grep -Fq "Using provided source tree override: $ROOT_DIR" "$SOURCE_UPDATE_LOG"
+grep -Fq "Source update archive is ready." "$SOURCE_UPDATE_LOG"
+grep -Fq "Continuing in this installer window to build the source tree." "$SOURCE_UPDATE_LOG"
+grep -Fq "Next step: cargo install --path $ROOT_DIR --locked --force" "$SOURCE_UPDATE_LOG"
+grep -Fq "Installing bsj from source into $SOURCE_UPDATE_PREFIX/bin" "$SOURCE_UPDATE_LOG"
+grep -Fq "$SOURCE_UPDATE_PREFIX/bin" "$SOURCE_UPDATE_HOME/.zprofile"
+
 cat <<EOF
 Smoke test passed:
   Archive: $ARCHIVE
   Bundle:  $BUNDLE_DIR
   Prefix:  $INSTALL_PREFIX
   Bootstrap Prefix: $BOOTSTRAP_PREFIX
+  Source Update Prefix: $SOURCE_UPDATE_PREFIX
 EOF
