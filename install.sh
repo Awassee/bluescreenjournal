@@ -1290,10 +1290,26 @@ launch_bsj_from_installer() {
       render_app_handoff=1
       launch_cmd+=(--version)
       ;;
+    tui-smoke)
+      render_app_handoff=1
+      launch_cmd=(env BSJ_TUI_SMOKE_ONCE=1 "$installed_bin")
+      ;;
     *)
       warn "Unknown BSJ_INSTALLER_LAUNCH_MODE: $launch_mode"
       ;;
   esac
+
+  launch_bsj_on_active_tty() {
+    if tty_input_available; then
+      debug "Reattaching installer stdio to /dev/tty before launching bsj."
+      exec </dev/tty >/dev/tty 2>&1
+      if [[ "$render_app_handoff" -eq 1 ]] && command -v script >/dev/null 2>&1; then
+        debug "Launching bsj under script(1) to hand the TUI a clean PTY."
+        exec script -q /dev/null "${launch_cmd[@]}"
+      fi
+    fi
+    exec "${launch_cmd[@]}"
+  }
 
   case "$launch_style" in
     auto|"")
@@ -1304,7 +1320,7 @@ launch_bsj_from_installer() {
           stty sane < /dev/tty >/dev/null 2>&1 || true
           sleep 0.5
         fi
-        exec "${launch_cmd[@]}"
+        launch_bsj_on_active_tty
       fi
       if launch_bsj_in_new_terminal "${launch_cmd[@]}"; then
         info "Opened BlueScreen Journal in a new Terminal window."
@@ -1318,7 +1334,7 @@ launch_bsj_from_installer() {
         stty sane < /dev/tty >/dev/null 2>&1 || true
         sleep 0.5
       fi
-      exec "${launch_cmd[@]}"
+      launch_bsj_on_active_tty
       ;;
     new-window|window)
       if launch_bsj_in_new_terminal "${launch_cmd[@]}"; then

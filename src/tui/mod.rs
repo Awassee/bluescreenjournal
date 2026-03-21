@@ -35,6 +35,7 @@ const DOS_WIDTH: u16 = 80;
 const DOS_HEIGHT: u16 = 25;
 
 pub fn run(initial_date: Option<NaiveDate>) -> io::Result<()> {
+    let smoke_once = tui_smoke_requested();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
@@ -44,7 +45,7 @@ pub fn run(initial_date: Option<NaiveDate>) -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    let result = run_loop(&mut terminal, initial_date);
+    let result = run_loop(&mut terminal, initial_date, smoke_once);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), cursor::Show, LeaveAlternateScreen)?;
@@ -54,15 +55,22 @@ pub fn run(initial_date: Option<NaiveDate>) -> io::Result<()> {
     );
     terminal.show_cursor()?;
 
+    if smoke_once && result.is_ok() {
+        println!("BSJ_TUI_SMOKE_OK");
+    }
+
     result
 }
 
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     initial_date: Option<NaiveDate>,
+    smoke_once: bool,
 ) -> io::Result<()> {
     let mut app = App::with_initial_date(initial_date);
-    app.enable_soundtrack_autoplay();
+    if !smoke_once {
+        app.enable_soundtrack_autoplay();
+    }
     let poll_timeout = Duration::from_millis(80);
 
     while !app.should_quit() {
@@ -71,6 +79,11 @@ fn run_loop(
         let screen = workspace_rect(Rect::new(0, 0, area.width, area.height));
         let viewport_height = app.editor_viewport_height(screen.height.saturating_sub(3) as usize);
         let viewport_width = screen.width.max(1) as usize;
+
+        if smoke_once {
+            let _ = event::poll(Duration::from_millis(0))?;
+            return Ok(());
+        }
 
         if event::poll(poll_timeout)? {
             let ev = event::read()?;
@@ -81,6 +94,10 @@ fn run_loop(
     }
 
     Ok(())
+}
+
+fn tui_smoke_requested() -> bool {
+    env::var_os("BSJ_TUI_SMOKE_ONCE").is_some()
 }
 
 fn draw(frame: &mut Frame<'_>, app: &App) {

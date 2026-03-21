@@ -53,11 +53,13 @@ INSTALL_PREFIX="$TMP_DIR/install-root"
 SMART_PREFIX="$TMP_DIR/install-smart-root"
 MENU_PREFIX="$TMP_DIR/install-menu-root"
 MENU_LAUNCH_PREFIX="$TMP_DIR/install-menu-launch-root"
+PIPE_MENU_PREFIX="$TMP_DIR/install-pipe-menu-root"
 BOOTSTRAP_PREFIX="$TMP_DIR/bootstrap-root"
 INSTALL_HOME="$TMP_DIR/install-home"
 SMART_HOME="$TMP_DIR/install-home-smart"
 MENU_HOME="$TMP_DIR/install-home-menu"
 MENU_LAUNCH_HOME="$TMP_DIR/install-home-menu-launch"
+PIPE_MENU_HOME="$TMP_DIR/install-home-pipe-menu"
 BOOTSTRAP_HOME="$TMP_DIR/bootstrap-home"
 BOOTSTRAP_NOARGS_HOME="$TMP_DIR/bootstrap-home-noargs"
 BOOTSTRAP_BASH_HOME="$TMP_DIR/bootstrap-home-bash"
@@ -71,6 +73,7 @@ SMART_LOG="$TMP_DIR/install-smart.log"
 MENU_LOG="$TMP_DIR/install-prebuilt-menu.log"
 MENU_LAUNCH_LOG="$TMP_DIR/install-prebuilt-menu-launch.log"
 HANDOFF_LOG="$TMP_DIR/install-handoff.log"
+PIPE_HANDOFF_LOG="$TMP_DIR/install-pipe-handoff.log"
 SOURCE_UPDATE_LOG="$TMP_DIR/install-source-update.log"
 UPDATE_ACTION_LOG="$TMP_DIR/install-update-action.log"
 
@@ -160,6 +163,20 @@ assert_log_contains "$HANDOFF_LOG" "[1/3] Resetting terminal input state"
 assert_log_contains "$HANDOFF_LOG" "[2/3] Handing off to bsj"
 assert_log_contains "$HANDOFF_LOG" "[3/3] Opening the blue-screen workspace"
 assert_log_contains "$HANDOFF_LOG" "bsj "
+
+run_with_timeout 180 "piped installer same-terminal TUI handoff" \
+  env HOME="$PIPE_MENU_HOME" SHELL=/bin/zsh \
+    BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \
+    BSJ_INSTALLER_LAUNCH_MODE="tui-smoke" \
+    BSJ_INSTALLER_LAUNCH_STYLE="same-terminal" \
+    script -q "$PIPE_HANDOFF_LOG" /bin/bash -lc "cat '$BUNDLE_DIR/install.sh' | bash -s -- --prebuilt --archive '$ARCHIVE' --prefix '$PIPE_MENU_PREFIX'" >/dev/null 2>&1
+assert_log_contains "$PIPE_HANDOFF_LOG" "Installer auto-select: 1"
+assert_log_contains "$PIPE_HANDOFF_LOG" "Preparing this terminal for the full-screen journal"
+assert_log_contains "$PIPE_HANDOFF_LOG" "[1/3] Resetting terminal input state"
+assert_log_contains "$PIPE_HANDOFF_LOG" "[2/3] Handing off to bsj"
+assert_log_contains "$PIPE_HANDOFF_LOG" "[3/3] Opening the blue-screen workspace"
+assert_log_contains "$PIPE_HANDOFF_LOG" "BSJ_TUI_SMOKE_OK"
+grep -Fq "$PIPE_MENU_PREFIX/bin" "$PIPE_MENU_HOME/.zprofile"
 
 run_with_timeout 180 "installer post-install utility menu" \
   env HOME="$MENU_HOME" SHELL=/bin/zsh \

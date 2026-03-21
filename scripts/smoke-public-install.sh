@@ -87,9 +87,12 @@ fi
 EXPECTED_VERSION="${VERSION#v}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/bsj-public-smoke.XXXXXX")"
 HOME_DIR="$TMP_ROOT/home"
+TTY_HOME_DIR="$TMP_ROOT/home-tty"
 PREFIX_DIR="${PREFIX:-$TMP_ROOT/prefix}"
+TTY_PREFIX_DIR="$TMP_ROOT/prefix-tty"
 LOG_PATH="$TMP_ROOT/public-install.log"
 UPDATE_LOG_PATH="$TMP_ROOT/public-update.log"
+TTY_LOG_PATH="$TMP_ROOT/public-tty-launch.log"
 INSTALLER_URL="https://raw.githubusercontent.com/${REPO}/${REF}/install.sh"
 SMOKE_PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:${PATH:-}"
 
@@ -141,6 +144,17 @@ for target_file in \
     exit 1
   }
 done
+
+run_with_timeout 300 "public installer same-terminal TUI launch" \
+  env HOME="$TTY_HOME_DIR" SHELL=/bin/zsh PATH="$SMOKE_PATH" \
+    BSJ_INSTALLER_POST_INSTALL_SELECTION="1" \
+    BSJ_INSTALLER_LAUNCH_MODE="tui-smoke" \
+    BSJ_INSTALLER_LAUNCH_STYLE="same-terminal" \
+    script -q "$TTY_LOG_PATH" /bin/bash -lc "curl -fsSL '$INSTALLER_URL' | bash -s -- --prebuilt --version '$VERSION' --prefix '$TTY_PREFIX_DIR'" >/dev/null 2>&1
+
+assert_log_contains "$TTY_LOG_PATH" "Installer auto-select: 1"
+assert_log_contains "$TTY_LOG_PATH" "Preparing this terminal for the full-screen journal"
+assert_log_contains "$TTY_LOG_PATH" "BSJ_TUI_SMOKE_OK"
 
 # Regression guard: with an existing install on PATH, a plain Install / Update rerun should stay in one source-update flow.
 run_with_timeout 900 "public installer existing-install update path" \
